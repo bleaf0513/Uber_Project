@@ -1,0 +1,12 @@
+# Optional: real MongoDB when you do not want in-memory (npm run dev:memory).
+# Requires Docker Desktop. Then set MONGO_URI=mongodb://127.0.0.1:27017/uberdb in backend/.env
+services:
+  mongo:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    volumes:
+      - uberclone_mongo_data:/data/db
+
+volumes:
+  uberclone_mongo_data:

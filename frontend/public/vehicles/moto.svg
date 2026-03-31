@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" role="img" aria-label="Motorcycle">
+  <defs>
+    <linearGradient id="frame" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#e53e3e"/>
+      <stop offset="100%" stop-color="#9b2c2c"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="160" cy="175" rx="120" ry="12" fill="#000" opacity="0.1"/>
+  <circle cx="95" cy="135" r="38" fill="#1a202c"/>
+  <circle cx="95" cy="135" r="22" fill="#4a5568"/>
+  <circle cx="240" cy="135" r="38" fill="#1a202c"/>
+  <circle cx="240" cy="135" r="22" fill="#4a5568"/>
+  <path fill="url(#frame)" d="M240 135l-60-55H130l-25 40-10-5 25-45h95l55 50v15h-20z"/>
+  <path fill="#2d3748" d="M170 85l20-25h35l-15 30z"/>
+  <circle cx="210" cy="62" r="8" fill="#f6e05e"/>
+</svg>

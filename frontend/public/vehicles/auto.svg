@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" role="img" aria-label="Auto rickshaw">
+  <defs>
+    <linearGradient id="roof" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#ecc94b"/>
+      <stop offset="100%" stop-color="#d69e2e"/>
+    </linearGradient>
+    <linearGradient id="cab" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#48bb78"/>
+      <stop offset="100%" stop-color="#276749"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="160" cy="178" rx="130" ry="12" fill="#000" opacity="0.1"/>
+  <circle cx="90" cy="150" r="32" fill="#1a202c"/>
+  <circle cx="90" cy="150" r="18" fill="#718096"/>
+  <circle cx="245" cy="150" r="32" fill="#1a202c"/>
+  <circle cx="245" cy="150" r="18" fill="#718096"/>
+  <path fill="url(#cab)" d="M85 145l35-80h100c12 0 22 8 25 20l15 60H85z"/>
+  <path fill="url(#roof)" d="M110 70c0-22 18-40 40-40h40c22 0 40 18 40 40v25H110V70z"/>
+  <rect x="125" y="45" width="70" height="28" rx="4" fill="#2c5282" opacity="0.35"/>
+  <path fill="#2d3748" d="M155 145v-35h50v35h-50z"/>
+</svg>

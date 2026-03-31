@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 200" role="img" aria-label="Car">
+  <defs>
+    <linearGradient id="body" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#4a5568"/>
+      <stop offset="100%" stop-color="#2d3748"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#90cdf4"/>
+      <stop offset="100%" stop-color="#4299e1"/>
+    </linearGradient>
+  </defs>
+  <ellipse cx="160" cy="175" rx="140" ry="14" fill="#000" opacity="0.12"/>
+  <path fill="url(#body)" d="M40 125h240c8 0 15 5 18 12l12 28H10l12-28c3-7 10-12 18-12z"/>
+  <path fill="url(#glass)" d="M55 125l28-42h154l28 42H55z"/>
+  <circle cx="85" cy="135" r="28" fill="#1a202c"/>
+  <circle cx="85" cy="135" r="16" fill="#718096"/>
+  <circle cx="235" cy="135" r="28" fill="#1a202c"/>
+  <circle cx="235" cy="135" r="16" fill="#718096"/>
+  <rect x="125" y="95" width="70" height="18" rx="3" fill="#cbd5e0"/>
+</svg>
