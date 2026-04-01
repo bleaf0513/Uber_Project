@@ -4,43 +4,76 @@ import { getSocketBaseUrl } from "../socketConfig";
 
 export const SocketContext = createContext();
 
-// Production: WebSocket first — fewer long-held HTTP polls (Render often 502s those). Polling remains as fallback.
-const socketOptions =
-  import.meta.env.PROD
-    ? {
-        transports: ["websocket", "polling"],
-        upgrade: true,
-        rememberUpgrade: true,
-        reconnectionDelay: 1500,
-        reconnectionDelayMax: 15000,
-        reconnectionAttempts: 12,
-        timeout: 20000,
-      }
-    : {
-        transports: ["polling", "websocket"],
-        upgrade: true,
-        rememberUpgrade: true,
-        reconnectionDelay: 2000,
-        reconnectionDelayMax: 15000,
-        timeout: 20000,
-      };
+function buildSocketOptions() {
+  const base = {
+    path: "/socket.io/",
+    withCredentials: false,
+    reconnectionDelay: 2000,
+    reconnectionDelayMax: 12000,
+    // Render free tier: first handshakes often fail while the dyno wakes — keep retrying.
+    reconnectionAttempts: Infinity,
+    timeout: 25000,
+    autoConnect: true,
+  };
 
-const socket = io(getSocketBaseUrl(), socketOptions);
+  if (import.meta.env.PROD) {
+    return {
+      ...base,
+      transports: ["websocket", "polling"],
+      upgrade: true,
+      rememberUpgrade: true,
+    };
+  }
+  return {
+    ...base,
+    transports: ["polling", "websocket"],
+    upgrade: true,
+    rememberUpgrade: true,
+  };
+}
+
+const socket = io(getSocketBaseUrl(), buildSocketOptions());
 
 const SocketProvider = ({ children }) => {
   useEffect(() => {
-    let loggedConnectError = false;
+    // Cold start (Render): first auto-connect can race the wake-up; nudge once after a short delay.
+    const nudge = window.setTimeout(() => {
+      if (!socket.connected) {
+        socket.connect();
+      }
+    }, 1500);
+
+    let warned = false;
+    let warnTimer = null;
     const onConnectError = () => {
-      if (loggedConnectError) return;
-      loggedConnectError = true;
-      console.warn(
-        `[socket] Cannot connect to ${getSocketBaseUrl()}. If the API is on Render, open the service URL in a tab once (cold start), then refresh this page. Local dev: cd backend → npm run dev / dev:memory.`
-      );
+      if (warned || socket.connected) return;
+      if (warnTimer != null) window.clearTimeout(warnTimer);
+      warnTimer = window.setTimeout(() => {
+        warnTimer = null;
+        if (socket.connected || warned) return;
+        warned = true;
+        const url = getSocketBaseUrl();
+        console.warn(
+          `[socket] Still not connected to ${url}. Render free: open ${url} once to wake the API, set VITE_BASE_URL on Vercel, check CLIENT_ORIGINS on the server. Local: cd backend && npm run dev.`
+        );
+      }, 12000);
+    };
+
+    const onConnect = () => {
+      if (warnTimer != null) {
+        window.clearTimeout(warnTimer);
+        warnTimer = null;
+      }
+      warned = false;
     };
 
     socket.on("connect_error", onConnectError);
+    socket.on("connect", onConnect);
     return () => {
+      window.clearTimeout(nudge);
+      if (warnTimer != null) window.clearTimeout(warnTimer);
       socket.off("connect_error", onConnectError);
+      socket.off("connect", onConnect);
     };
   }, []);
 
