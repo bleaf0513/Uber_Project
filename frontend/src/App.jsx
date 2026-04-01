@@ -57,14 +57,7 @@ const App = () => {
         <br />
         This website is designed for mobile devices only.
       </h1>
-      <a
-        href="https://github.com/K-Daksh/UberClone"
-        target="_blank"
-        rel="noopener noreferrer"
-        className="text-base font-thin hover:underline"
-      >
-        https://github.com/K-Daksh/UberClone
-      </a>
+
     </div>
   );
 
