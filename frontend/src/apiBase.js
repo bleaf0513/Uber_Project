@@ -11,7 +11,11 @@ export function getApiBaseUrl() {
   if (import.meta.env.DEV) {
     return "";
   }
-  return "http://127.0.0.1:4000";
+  // Production safety: default to current origin instead of localhost.
+  if (typeof window !== "undefined" && window.location?.origin) {
+    return window.location.origin;
+  }
+  return "";
 }
 
 /** Human-readable API target for error toasts (backend must listen on 4000 when using the proxy). */
@@ -19,7 +23,10 @@ export function getApiHintOrigin() {
   const base = getApiBaseUrl();
   if (base) return base;
   if (typeof window !== "undefined" && window.location?.origin) {
-    return `${window.location.origin} (proxied → http://127.0.0.1:4000)`;
+    if (import.meta.env.DEV) {
+      return `${window.location.origin} (proxied → http://127.0.0.1:4000)`;
+    }
+    return window.location.origin;
   }
-  return "http://127.0.0.1:4000";
+  return import.meta.env.DEV ? "http://127.0.0.1:4000" : "(same origin)";
 }
