@@ -20,10 +20,13 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 
 /** When Google Geocoding fails from the server (API disabled, wrong key type), resolve coordinates via OpenStreetMap Nominatim. */
 async function nominatimGeocode(address) {
+    const ua =
+        process.env.NOMINATIM_USER_AGENT ||
+        'UberClone/1.0 (ride demo; contact: https://github.com)';
     const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
         params: { q: address, format: 'json', limit: 1 },
         headers: {
-            'User-Agent': 'UberCloneLocalDev/1.0 (local development; contact: dev@localhost)',
+            'User-Agent': ua,
         },
         timeout: 20000,
     });
@@ -39,12 +42,43 @@ async function nominatimGeocode(address) {
     return { ltd: lat, lng: lon };
 }
 
+/** Third fallback: works from most cloud hosts when Nominatim blocks datacenter IPs. */
+async function openMeteoGeocode(address) {
+    const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+        params: {
+            name: address,
+            count: 1,
+            language: 'en',
+            format: 'json',
+        },
+        timeout: 15000,
+    });
+
+    const r = data?.results?.[0];
+    if (!r || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) {
+        throw new Error('Unable to resolve address (Open-Meteo)');
+    }
+    return { ltd: r.latitude, lng: r.longitude };
+}
+
 async function geocodeForFallback(address) {
     try {
         return await module.exports.getAddressCoordinates(address);
     } catch (err) {
-        console.warn('[maps] Google Geocoding failed, trying Nominatim:', err.message);
+        console.warn('[maps] Google Geocoding failed:', err.message);
+    }
+    try {
         return await nominatimGeocode(address);
+    } catch (err) {
+        console.warn('[maps] Nominatim failed:', err.message);
+    }
+    try {
+        return await openMeteoGeocode(address);
+    } catch (err) {
+        console.warn('[maps] Open-Meteo failed:', err.message);
+        throw new Error(
+            `Unable to resolve "${address}". Try a more specific place (city + country), or set GOOGLE_MAPS_SERVER_API on the server.`
+        );
     }
 }
 

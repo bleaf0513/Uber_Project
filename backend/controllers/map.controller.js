@@ -31,7 +31,8 @@ module.exports.getDistance = async (req, res, next) => {
     } catch (error) {
         console.error(error);
         const msg = error?.message || 'Internal server error';
-        res.status(500).json({ message: msg });
+        const isClient = /Unable to resolve|Could not compute distance/i.test(msg);
+        res.status(isClient ? 400 : 500).json({ message: msg });
     }
 }
 
@@ -64,6 +65,10 @@ module.exports.getPrices = async (req, res, next) => {
     } catch (error) {
         console.error(error);
         const msg = error?.message || 'Internal server error';
-        res.status(500).json({ message: msg });
+        const isClient =
+            /Unable to resolve|Could not compute fare|Could not compute distance|pickup and destination/i.test(
+                msg
+            );
+        res.status(isClient ? 400 : 500).json({ message: msg });
     }
 }
