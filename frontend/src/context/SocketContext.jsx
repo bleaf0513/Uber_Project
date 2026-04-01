@@ -4,14 +4,17 @@ import { getSocketBaseUrl } from "../socketConfig";
 
 export const SocketContext = createContext();
 
-// Render (and similar) often fail WebSocket upgrade behind the proxy; long-polling is fully supported by Socket.IO.
+// Production: WebSocket first — fewer long-held HTTP polls (Render often 502s those). Polling remains as fallback.
 const socketOptions =
   import.meta.env.PROD
     ? {
-        transports: ["polling"],
-        reconnectionDelay: 2000,
-        reconnectionDelayMax: 20000,
-        timeout: 25000,
+        transports: ["websocket", "polling"],
+        upgrade: true,
+        rememberUpgrade: true,
+        reconnectionDelay: 1500,
+        reconnectionDelayMax: 15000,
+        reconnectionAttempts: 12,
+        timeout: 20000,
       }
     : {
         transports: ["polling", "websocket"],

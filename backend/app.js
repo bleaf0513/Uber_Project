@@ -6,6 +6,9 @@ const json = require('body-parser').json;
 const urlencoded = require('body-parser').urlencoded;
 const app = express();
 
+// Behind Render / other reverse proxies — needed for correct client IPs and some proxy behaviors.
+app.set('trust proxy', 1);
+
 const userRoutes = require('./routes/user.routes');
 const captainRoutes = require('./routes/captain.routes');
 const cookieParser = require('cookie-parser');
