@@ -171,20 +171,20 @@ module.exports.getSuggestions = async (address) => {
     }
 }
 
-module.exports.getCaptainsInTheRadius = async (ltd, lng, radius) => {
-
-    // radius in km
-
-
+/**
+ * Find captains within radiusKm of (ltd, lng).
+ * Uses haversine on { location.ltd, location.lng } — the old $geoWithin query required GeoJSON + 2dsphere index and matched nobody.
+ */
+module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm) => {
+    const radiusM = radiusKm * 1000;
     const captains = await captainModel.find({
-        location: {
-            $geoWithin: {
-                $centerSphere: [[ltd, lng], radius / 6371]
-            }
-        }
+        status: 'active',
+        'location.ltd': { $exists: true, $ne: null },
+        'location.lng': { $exists: true, $ne: null },
     });
 
-    return captains;
-
-
-}
+    return captains.filter((c) => {
+        const d = haversineMeters(ltd, lng, c.location.ltd, c.location.lng);
+        return d <= radiusM;
+    });
+};

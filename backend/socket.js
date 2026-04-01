@@ -55,13 +55,11 @@ function initializeSocket(server) {
 }
 
 const sendMessageToSocketId = (socketId, messageObject) => {
-
-    // //console.log({ body: messageObject, socketId: socketId });
-
+    if (!socketId) {
+        return;
+    }
     if (io) {
         io.to(socketId).emit(messageObject.event, messageObject.data);
-    } else {
-        //console.log('Socket.io not initialized.');
     }
 }
 

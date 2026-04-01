@@ -43,10 +43,14 @@ const CaptainHome = () => {
     return () => navigator.geolocation.clearWatch(watchId);
   }, [captain?._id, socket]);
 
-  socket.on("new-ride", (data) => {
-    setRide(data);
-    setRidePopup(true);
-  });
+  useEffect(() => {
+    const onNewRide = (data) => {
+      setRide(data);
+      setRidePopup(true);
+    };
+    socket.on("new-ride", onNewRide);
+    return () => socket.off("new-ride", onNewRide);
+  }, [socket]);
 
   async function confirmRide() {
     // console.log("Confirming ride");

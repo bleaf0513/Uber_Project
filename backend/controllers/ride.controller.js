@@ -16,27 +16,28 @@ module.exports.createRide = async (req, res) => {
 
     try {
         const ride = await rideService.createRide({ user: req.user._id, pickup, destination, vehicle });
-        res.status(201).json(ride);
 
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
-        // //console.log(pickupCoordinates);
 
-        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, 2);
-        // //console.log(captainsInRadius);
+        // Wider radius (km) so demo/testing finds drivers; haversine filter is in maps.service
+        const captainsInRadius = await mapService.getCaptainsInTheRadius(
+            pickupCoordinates.ltd,
+            pickupCoordinates.lng,
+            15
+        );
 
-        ride.otp = ""
+        ride.otp = '';
 
         const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
-        // //console.log(rideWithUser);
-        captainsInRadius.map(captain => {
-
+        captainsInRadius.forEach((captain) => {
+            if (!captain.socketId) return;
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
-            })
+            });
+        });
 
-        })
-
+        return res.status(201).json(ride);
     } catch (err) {
 
         //console.log(err);

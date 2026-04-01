@@ -57,11 +57,23 @@ function Home() {
     socket.emit("join", { userType: "user", userId: user._id });
   }, [user?._id, socket]);
 
-  socket.on("ride-started", (ride) => {
-    // console.log("ride started");
-    setDriverSelected(false);
-    navigate("/riding", { state: { ride } }); // Updated navigate to include ride data
-  });
+  useEffect(() => {
+    const onRideStarted = (ride) => {
+      setDriverSelected(false);
+      navigate("/riding", { state: { ride } });
+    };
+    const onRideConfirmed = (ride) => {
+      setVehicleFound(false);
+      setDriverSelected(true);
+      setRide(ride);
+    };
+    socket.on("ride-started", onRideStarted);
+    socket.on("ride-confirmed", onRideConfirmed);
+    return () => {
+      socket.off("ride-started", onRideStarted);
+      socket.off("ride-confirmed", onRideConfirmed);
+    };
+  }, [socket, navigate]);
 
   const fetchSuggestions = async (query) => {
     if (query.length < 3) {
@@ -160,13 +172,6 @@ function Home() {
       console.error("Error Logging out :", error);
     }
   };
-
-  socket.on("ride-confirmed", (ride) => {
-    // console.log("ride confirmed has been called");
-    setVehicleFound(false);
-    setDriverSelected(true);
-    setRide(ride);
-  });
 
   const handleSuggestionSelect = (suggestion) => {
     if (activeInput === "pickup") {
