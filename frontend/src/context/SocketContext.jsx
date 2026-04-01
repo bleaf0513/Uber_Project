@@ -16,12 +16,13 @@ function buildSocketOptions() {
     autoConnect: true,
   };
 
+  // Production (e.g. Render): WebSocket upgrades often fail behind the proxy — use HTTP long-polling only
+  // so the browser never opens wss:// (avoids noisy failures; Socket.IO is fully supported over polling).
   if (import.meta.env.PROD) {
     return {
       ...base,
-      transports: ["websocket", "polling"],
-      upgrade: true,
-      rememberUpgrade: true,
+      transports: ["polling"],
+      upgrade: false,
     };
   }
   return {

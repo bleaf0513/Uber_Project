@@ -1,6 +1,28 @@
 const axios = require('axios');
 const captainModel = require('../models/captain.model');
 
+/**
+ * Normalize free-text addresses (esp. Japanese) for geocoding APIs:
+ * Unicode minus/dashes, length cap, control chars.
+ */
+function normalizeAddressQuery(s) {
+    if (s == null || s === undefined) return '';
+    let t = String(s).trim();
+    if (t.length > 2000) t = t.slice(0, 2000);
+    t = t.replace(/\0/g, '');
+    t = t
+        .replace(/\u2212/g, '-')
+        .replace(/\uFF0D/g, '-')
+        .replace(/\u2010/g, '-')
+        .replace(/\u2011/g, '-')
+        .replace(/\u2013/g, '-')
+        .replace(/\u2014/g, '-')
+        .replace(/\uFE63/g, '-')
+        .replace(/\uFF70/g, '-');
+    t = t.replace(/\s+/g, ' ').trim();
+    return t;
+}
+
 /** Server-side Maps calls (Geocoding, Distance Matrix, Places) must use a key without HTTP-referrer restrictions. */
 function serverMapsKey() {
     return process.env.GOOGLE_MAPS_SERVER_API || process.env.GOOGLE_MAPS_API;
@@ -44,9 +66,10 @@ async function nominatimGeocode(address) {
 
 /** Third fallback: works from most cloud hosts when Nominatim blocks datacenter IPs. */
 async function openMeteoGeocode(address) {
+    const q = address.length > 256 ? address.slice(0, 256) : address;
     const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
         params: {
-            name: address,
+            name: q,
             count: 1,
             language: 'en',
             format: 'json',
@@ -84,7 +107,9 @@ async function geocodeForFallback(address) {
 
 /** Rough road-ish distance/duration when Distance Matrix has no driving route (e.g. separated by water). */
 function approxDistanceElement(straightLineMeters) {
-    const roadMeters = Math.round(straightLineMeters * 1.25);
+    // Same block / duplicate geocode → 0 m; still need a non-zero estimate for fares.
+    const straight = Math.max(Number(straightLineMeters) || 0, 75);
+    const roadMeters = Math.max(Math.round(straight * 1.25), 100);
     const avgSpeedKmh = 55;
     const durationSeconds = Math.round((roadMeters / 1000 / avgSpeedKmh) * 3600);
     const h = Math.floor(durationSeconds / 3600);
@@ -105,6 +130,10 @@ function approxDistanceElement(straightLineMeters) {
 }
 
 module.exports.getAddressCoordinates = async (address) => {
+    const addr = normalizeAddressQuery(address);
+    if (!addr) {
+        throw new Error('Address is required');
+    }
     try {
         const key = serverMapsKey();
         if (!key) {
@@ -112,12 +141,12 @@ module.exports.getAddressCoordinates = async (address) => {
         }
         const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
             params: {
-                address: address,
+                address: addr,
                 key,
             },
         });
 
-        if (response.data.status === 'OK') {
+        if (response.data.status === 'OK' && response.data.results?.length) {
             const location = response.data.results[0].geometry.location;
             return {
                 ltd: location.lat,
@@ -132,6 +161,11 @@ module.exports.getAddressCoordinates = async (address) => {
 };
 
 module.exports.getDistance = async (origin, destination) => {
+    const o = normalizeAddressQuery(origin);
+    const d = normalizeAddressQuery(destination);
+    if (!o || !d) {
+        throw new Error('Origin and destination are required');
+    }
     try {
         const key = serverMapsKey();
         if (key) {
@@ -140,8 +174,8 @@ module.exports.getDistance = async (origin, destination) => {
                     'https://maps.googleapis.com/maps/api/distancematrix/json',
                     {
                         params: {
-                            origins: origin,
-                            destinations: destination,
+                            origins: o,
+                            destinations: d,
                             key,
                         },
                     }
@@ -171,13 +205,13 @@ module.exports.getDistance = async (origin, destination) => {
         }
 
         // Referrer-only keys, ZERO_RESULTS, ocean gaps, etc. — estimate from coordinates
-        const from = await geocodeForFallback(origin);
-        const to = await geocodeForFallback(destination);
-        const meters = haversineMeters(from.ltd, from.lng, to.ltd, to.lng);
-        if (!Number.isFinite(meters) || meters <= 0) {
+        const from = await geocodeForFallback(o);
+        const to = await geocodeForFallback(d);
+        const metersRaw = haversineMeters(from.ltd, from.lng, to.ltd, to.lng);
+        if (!Number.isFinite(metersRaw)) {
             throw new Error('Could not compute distance between locations');
         }
-        return approxDistanceElement(meters);
+        return approxDistanceElement(metersRaw);
     } catch (error) {
         console.error(error);
         throw error;
@@ -185,10 +219,14 @@ module.exports.getDistance = async (origin, destination) => {
 };
 
 module.exports.getSuggestions = async (address) => {
+    const addr = normalizeAddressQuery(address);
+    if (!addr) {
+        return [];
+    }
     try {
         const { data } = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
             params: {
-                input: address,
+                input: addr,
                 key: serverMapsKey()
             }
         });
