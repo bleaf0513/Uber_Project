@@ -1,21 +1,21 @@
-import React, { useEffect, useState } from "react";
+import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { CaptainDataContext } from "../context/CaptainContext";
 import { useNavigate } from "react-router-dom";
 import axios from "axios";
+import { toast } from "react-toastify";
+import { getApiBaseUrl, getApiHintOrigin } from "../apiBase";
 
 const CaptainSignup = () => {
   const [firstname, setFirstName] = useState("");
   const [lastname, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [userData, setUserData] = useState({});
   const [vehicleColor, setVehicleColor] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [vehicleCapacity, setVehicleCapacity] = useState("");
   const [vehicleType, setVehicleType] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
-  const { captain, setCaptain } = React.useContext(CaptainDataContext);
 
   const submitHandler = async (e) => {
     e.preventDefault();
@@ -33,28 +33,50 @@ const CaptainSignup = () => {
         vehicleType: vehicleType,
       },
     };
-    //console.log(captainData);
 
-    const response = await axios.post(
-      `${import.meta.env.VITE_BASE_URL}/captain/register`,
-      captainData
-    );
+    setSubmitting(true);
+    try {
+      const response = await axios.post(
+        `${getApiBaseUrl()}/captain/register`,
+        captainData
+      );
 
-    if (response.status === 201) {
-      const data = response.data;
-      setUserData(data.user);
-      localStorage.setItem("token", data.token);
-      navigate("/captain-home");
+      if (response.status === 201 && response.data?.token) {
+        localStorage.setItem("token", response.data.token);
+        setEmail("");
+        setPassword("");
+        setFirstName("");
+        setLastName("");
+        setVehicleColor("");
+        setVehiclePlate("");
+        setVehicleCapacity("");
+        setVehicleType("");
+        navigate("/captain-home");
+      }
+    } catch (err) {
+      const isOffline =
+        err.code === "ERR_NETWORK" ||
+        err.message === "Network Error" ||
+        (typeof err.message === "string" &&
+          err.message.toLowerCase().includes("network"));
+
+      if (isOffline) {
+        toast.error(
+          `Cannot reach the API (${getApiHintOrigin()}). Start the backend in another terminal: cd backend → npm run dev:memory — then refresh this page.`
+        );
+      } else {
+        const msg =
+          err.response?.data?.message ||
+          err.response?.data?.error ||
+          (Array.isArray(err.response?.data?.errors) &&
+            err.response.data.errors[0]?.msg) ||
+          err.message ||
+          "Signup failed.";
+        toast.error(typeof msg === "string" ? msg : "Signup failed.");
+      }
+    } finally {
+      setSubmitting(false);
     }
-
-    setEmail("");
-    setPassword("");
-    setFirstName("");
-    setLastName("");
-    setVehicleColor("");
-    setVehiclePlate("");
-    setVehicleCapacity("");
-    setVehicleType("");
   };
   return (
     <div className="flex flex-col justify-between h-screen">
@@ -160,8 +182,12 @@ const CaptainSignup = () => {
               </select>
             </div>
 
-            <button className="bg-black text-white font-semibold mb-3 rounded-lg px-4 py-3 border w-full text-lg mt-2">
-              Create Account
+            <button
+              type="submit"
+              disabled={submitting}
+              className="bg-black text-white font-semibold mb-3 rounded-lg px-4 py-3 border w-full text-lg mt-2 disabled:opacity-60"
+            >
+              {submitting ? "Creating…" : "Create Account"}
             </button>
             <p className="text-center">
               Already a captain?{" "}

@@ -2,6 +2,7 @@ import React, { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { toast } from "react-toastify";
 import axios from "axios";
+import { getApiBaseUrl } from "../src/apiBase";
 
 const FinishRide = ({ setFinishRidePanel, ride }) => {
   const [check, setCheck] = React.useState(false);
@@ -24,7 +25,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
 
   async function endRide() {
     const response = await axios.post(
-      `${import.meta.env.VITE_BASE_URL}/rides/end-ride`,
+      `${getApiBaseUrl()}/rides/end-ride`,
       {
         rideId: ride._id,
       },

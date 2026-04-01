@@ -14,6 +14,7 @@ import { UserDataContext } from "../context/UserContext";
 import { useNavigate } from "react-router-dom";
 import LiveTracking from "../../components/LiveTracking";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
+import { getApiBaseUrl } from "../apiBase";
 
 function Home() {
   const sumbitHandler = (e) => {
@@ -120,11 +121,11 @@ function Home() {
     (async () => {
       try {
         const [pricesRes, distRes] = await Promise.all([
-          axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-prices`, {
+          axios.get(`${getApiBaseUrl()}/maps/get-prices`, {
             params: { origin: pickup, destination },
             headers: { Authorization: `Bearer ${token}` },
           }),
-          axios.get(`${import.meta.env.VITE_BASE_URL}/maps/get-distance`, {
+          axios.get(`${getApiBaseUrl()}/maps/get-distance`, {
             params: { origin: pickup, destination },
             headers: { Authorization: `Bearer ${token}` },
           }),
@@ -150,7 +151,7 @@ function Home() {
   const logoutUser = async () => {
     try {
       const token = localStorage.getItem("token");
-      await axios.get(`${import.meta.env.VITE_BASE_URL}/users/logout`, {
+      await axios.get(`${getApiBaseUrl()}/users/logout`, {
         params: { origin: pickup, destination: destination },
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -187,7 +188,7 @@ function Home() {
   async function createRide() {
     const token = localStorage.getItem("token");
     await axios.post(
-      `${import.meta.env.VITE_BASE_URL}/rides/create`,
+      `${getApiBaseUrl()}/rides/create`,
       {
         pickup,
         destination,

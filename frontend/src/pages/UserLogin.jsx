@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { UserDataContext } from "../context/UserContext";
 import { ToastContainer, toast } from "react-toastify";
 import axios from "axios";
+import { getApiBaseUrl } from "../apiBase";
 
 const UserLogin = () => {
   const [email, setEmail] = useState("");
@@ -46,7 +47,7 @@ const UserLogin = () => {
     try {
       setLoading(true);
       const response = await axios.post(
-        `${import.meta.env.VITE_BASE_URL}/users/login`,
+        `${getApiBaseUrl()}/users/login`,
         { email, password }
       );
 

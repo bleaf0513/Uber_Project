@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
+import { getApiBaseUrl } from "../apiBase";
 import { UserDataContext } from "../context/UserContext";
 import { ToastContainer, toast } from "react-toastify";
 
@@ -42,7 +43,7 @@ const UserSignup = () => {
     //console.log(newUser);
 
     const response = await axios.post(
-      `${import.meta.env.VITE_BASE_URL}/users/register`,
+      `${getApiBaseUrl()}/users/register`,
       newUser
     );
 

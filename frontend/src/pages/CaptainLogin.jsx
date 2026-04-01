@@ -4,6 +4,7 @@ import axios from "axios";
 import { useNavigate } from "react-router-dom";
 import { CaptainDataContext } from "../context/CaptainContext";
 import { ToastContainer, toast } from "react-toastify";
+import { getApiBaseUrl } from "../apiBase";
 
 const CaptainLogin = () => {
   const [email, setEmail] = useState("");
@@ -55,7 +56,7 @@ const CaptainLogin = () => {
       //console.log("Sending login request:", captain);
 
       const response = await axios.post(
-        `${import.meta.env.VITE_BASE_URL}/captain/login`,
+        `${getApiBaseUrl()}/captain/login`,
         captain
       );
 

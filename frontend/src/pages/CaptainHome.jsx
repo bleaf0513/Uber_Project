@@ -9,6 +9,7 @@ import ConfirmRidePickup from "../../components/ConfirmRidePickup";
 import { CaptainDataContext } from "../context/CaptainContext";
 import { SocketContext } from "../context/SocketContext";
 import axios from "axios";
+import { getApiBaseUrl } from "../apiBase";
 import LiveTracking from "../../components/LiveTracking";
 
 const CaptainHome = () => {
@@ -50,7 +51,7 @@ const CaptainHome = () => {
   async function confirmRide() {
     // console.log("Confirming ride");
     const response = await axios.post(
-      `${import.meta.env.VITE_BASE_URL}/rides/confirm`,
+      `${getApiBaseUrl()}/rides/confirm`,
       {
         rideId: ride._id,
         captainId: captain._id,

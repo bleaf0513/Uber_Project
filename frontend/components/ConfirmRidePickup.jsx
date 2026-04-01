@@ -4,6 +4,7 @@ import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
+import { getApiBaseUrl } from "../src/apiBase";
 const ConfirmRidePickup = (props) => {
   if (props.ride === null) {
     return <div>Loading...</div>;
@@ -14,7 +15,7 @@ const ConfirmRidePickup = (props) => {
     //console.log("Submit pressed", otp);
     e.preventDefault();
     const response = await axios.get(
-      `${import.meta.env.VITE_BASE_URL}/rides/start-ride`,
+      `${getApiBaseUrl()}/rides/start-ride`,
       {
         params: {
           rideId: props.ride._id,
