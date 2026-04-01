@@ -13,7 +13,8 @@ async function main() {
 
     initializeSocket(server);
 
-    server.listen(port, () => {
+    // Bind all interfaces — required on Render/Fly/Docker so the platform proxy can reach the app.
+    server.listen(port, '0.0.0.0', () => {
         console.log(`Server running on port ${port}`);
         if (!process.env.GOOGLE_MAPS_SERVER_API && !process.env.GOOGLE_MAPS_API) {
             console.warn(

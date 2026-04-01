@@ -12,7 +12,12 @@ const cookieParser = require('cookie-parser');
 const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 
-app.use(cors());
+app.use(
+    cors({
+        origin: true,
+        credentials: true
+    })
+);
 app.use(json());
 app.use(urlencoded({ extended: true }));
 app.use(cookieParser());

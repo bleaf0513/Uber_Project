@@ -5,11 +5,15 @@ const captainModel = require('./models/captain.model');
 let io;
 
 function initializeSocket(server) {
+    // origin: true reflects the request Origin (works with credentials + cross-site polling from Vercel/custom domains).
     io = socketIo(server, {
         cors: {
-            origin: '*',
-            methods: ['GET', 'POST']
-        }
+            origin: true,
+            methods: ['GET', 'POST', 'OPTIONS'],
+            credentials: true
+        },
+        pingTimeout: 60000,
+        pingInterval: 25000
     });
 
     io.on('connection', (socket) => {
