@@ -1,15 +1,7 @@
 const mapService = require('../services/maps.service');
 const { validationResult } = require('express-validator');
 const rideService = require('../services/ride.service');
-
-/** Maps/geocoding failures should be 400 — only true infra faults use 500. */
-function mapsErrorStatus(message) {
-    const msg = String(message || '');
-    if (/MongoServerError|mongoose|ECONNREFUSED|PrismaClient|Sequelize/i.test(msg)) {
-        return 500;
-    }
-    return 400;
-}
+const { mapsErrorStatus } = require('../utils/mapsHttpStatus');
 
 module.exports.getCoordinates = async (req, res, next) => {
     const errors = validationResult(req);

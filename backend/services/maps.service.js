@@ -89,21 +89,69 @@ async function nominatimGeocode(address) {
     return { ltd: lat, lng: lon };
 }
 
+function inferCountryCodeForOpenMeteo(addr) {
+    const s = String(addr);
+    if (/\bJapan\b|日本|東京|東京都|大阪|京都|北海道|沖縄|名古屋|福岡|Japan,/i.test(s)) return 'JP';
+    if (/\bUSA\b|\bUS\b|, [A-Z]{2}\s*\d{5}|United States/i.test(s)) return 'US';
+    if (/\bUK\b|United Kingdom|England|Scotland|Wales/i.test(s)) return 'GB';
+    return undefined;
+}
+
 /** Third fallback: works from most cloud hosts when Nominatim blocks datacenter IPs. */
 async function openMeteoGeocode(address) {
-    const q = address.length > 256 ? address.slice(0, 256) : address;
-    const language = /[\u3040-\u30ff\u3400-\u9fff]/.test(q) ? 'ja' : 'en';
-    const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
-        params: {
+    const maxLen = 512;
+    const full = address.length > maxLen ? address.slice(0, maxLen) : address;
+    const language = /[\u3040-\u30ff\u3400-\u9fff]/.test(full) ? 'ja' : 'en';
+    const countryCode = inferCountryCodeForOpenMeteo(full);
+
+    async function search(name) {
+        const q = name.length > maxLen ? name.slice(0, maxLen) : name;
+        if (q.length < 2) return { results: [] };
+        const params = {
             name: q,
-            count: 1,
+            count: 10,
             language,
             format: 'json',
-        },
-        timeout: 15000,
-    });
+        };
+        if (countryCode) params.countryCode = countryCode;
+        const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+            params,
+            timeout: 15000,
+        });
+        return data || {};
+    }
 
-    const r = data?.results?.[0];
+    let data = await search(full);
+    let results = data?.results;
+    if (!Array.isArray(results) || !results.length) {
+        const parts = full.split(',').map((p) => p.trim()).filter(Boolean);
+        const fallbacks = [];
+        if (parts.length > 1) fallbacks.push(parts.slice(1).join(', '));
+        if (parts.length > 2) fallbacks.push(parts.slice(-3).join(', '));
+        if (parts.length > 1) fallbacks.push(`${parts[parts.length - 2]}, ${parts[parts.length - 1]}`);
+        for (const fb of fallbacks) {
+            if (!fb || fb.length < 4 || fb === full) continue;
+            data = await search(fb);
+            results = data?.results;
+            if (Array.isArray(results) && results.length) break;
+        }
+    }
+
+    if (!Array.isArray(results) || !results.length) {
+        throw new Error('Unable to resolve address (Open-Meteo)');
+    }
+
+    let r = results[0];
+    const hint = full.toLowerCase();
+    if (/shinagawa|kita-shinagawa|北品川|品川|hiromachi|広町/i.test(hint)) {
+        const hit = results.find((x) =>
+            /shinagawa|品川|hiromachi|広町/i.test(
+                `${x.name || ''} ${x.admin1 || ''} ${x.admin2 || ''} ${x.admin3 || ''} ${x.admin4 || ''}`
+            )
+        );
+        if (hit) r = hit;
+    }
+
     if (!r || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) {
         throw new Error('Unable to resolve address (Open-Meteo)');
     }
@@ -116,19 +164,20 @@ async function geocodeForFallback(address) {
     } catch (err) {
         console.warn('[maps] Google Geocoding failed:', err.message);
     }
+    // Open-Meteo before Nominatim: datacenter IPs are often blocked or rate-limited on OSM Nominatim.
+    try {
+        return await openMeteoGeocode(address);
+    } catch (err) {
+        console.warn('[maps] Open-Meteo failed:', err.message);
+    }
     try {
         return await nominatimGeocode(address);
     } catch (err) {
         console.warn('[maps] Nominatim failed:', err.message);
     }
-    try {
-        return await openMeteoGeocode(address);
-    } catch (err) {
-        console.warn('[maps] Open-Meteo failed:', err.message);
-        throw new Error(
-            `Unable to resolve "${address}". Try a more specific place (city + country), or set GOOGLE_MAPS_SERVER_API on the server.`
-        );
-    }
+    throw new Error(
+        `Unable to resolve "${address}". Try a more specific place (city + country), or set GOOGLE_MAPS_SERVER_API on the server.`
+    );
 }
 
 /** Rough road-ish distance/duration when Distance Matrix has no driving route (e.g. separated by water). */
