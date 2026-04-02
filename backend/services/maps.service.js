@@ -20,7 +20,32 @@ function normalizeAddressQuery(s) {
         .replace(/\uFE63/g, '-')
         .replace(/\uFF70/g, '-');
     t = t.replace(/\s+/g, ' ').trim();
-    return t;
+    try {
+        t = t.normalize('NFKC');
+    } catch {
+        /* older Node / invalid sequence */
+    }
+    return t.trim();
+}
+
+/** POST avoids proxy URL-length limits on long Japanese addresses (Geocoding / Distance Matrix). */
+async function googleMapsFormPost(apiPath, fields) {
+    const key = serverMapsKey();
+    if (!key) {
+        throw new Error('Google Maps API key is not configured');
+    }
+    const body = new URLSearchParams({ ...fields, key });
+    const { data } = await axios.post(
+        `https://maps.googleapis.com/maps/api/${apiPath}`,
+        body.toString(),
+        {
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            timeout: 25000,
+            maxContentLength: 50 * 1024 * 1024,
+            maxBodyLength: 50 * 1024 * 1024,
+        }
+    );
+    return data;
 }
 
 /** Server-side Maps calls (Geocoding, Distance Matrix, Places) must use a key without HTTP-referrer restrictions. */
@@ -67,11 +92,12 @@ async function nominatimGeocode(address) {
 /** Third fallback: works from most cloud hosts when Nominatim blocks datacenter IPs. */
 async function openMeteoGeocode(address) {
     const q = address.length > 256 ? address.slice(0, 256) : address;
+    const language = /[\u3040-\u30ff\u3400-\u9fff]/.test(q) ? 'ja' : 'en';
     const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
         params: {
             name: q,
             count: 1,
-            language: 'en',
+            language,
             format: 'json',
         },
         timeout: 15000,
@@ -135,28 +161,26 @@ module.exports.getAddressCoordinates = async (address) => {
         throw new Error('Address is required');
     }
     try {
-        const key = serverMapsKey();
-        if (!key) {
-            throw new Error('Google Maps API key is not configured');
-        }
-        const response = await axios.get('https://maps.googleapis.com/maps/api/geocode/json', {
-            params: {
-                address: addr,
-                key,
-            },
-        });
+        const data = await googleMapsFormPost('geocode/json', { address: addr });
 
-        if (response.data.status === 'OK' && response.data.results?.length) {
-            const location = response.data.results[0].geometry.location;
+        if (data.status === 'OK' && data.results?.length) {
+            const location = data.results[0].geometry.location;
             return {
                 ltd: location.lat,
                 lng: location.lng,
             };
         }
-        throw new Error(response.data.error_message || 'Unable to fetch coordinates');
+        throw new Error(data.error_message || 'Unable to fetch coordinates');
     } catch (error) {
-        console.error(error);
-        throw error;
+        if (error instanceof Error && error.message && !error.response) {
+            throw error;
+        }
+        const msg =
+            error?.response?.data?.error_message ||
+            error?.message ||
+            'Unable to fetch coordinates';
+        console.error('[maps] geocode:', msg);
+        throw new Error(typeof msg === 'string' ? msg : 'Unable to fetch coordinates');
     }
 };
 
@@ -170,19 +194,13 @@ module.exports.getDistance = async (origin, destination) => {
         const key = serverMapsKey();
         if (key) {
             try {
-                const response = await axios.get(
-                    'https://maps.googleapis.com/maps/api/distancematrix/json',
-                    {
-                        params: {
-                            origins: o,
-                            destinations: d,
-                            key,
-                        },
-                    }
-                );
+                const data = await googleMapsFormPost('distancematrix/json', {
+                    origins: o,
+                    destinations: d,
+                });
 
-                if (response.data.status === 'OK') {
-                    const element = response.data.rows?.[0]?.elements?.[0];
+                if (data.status === 'OK') {
+                    const element = data.rows?.[0]?.elements?.[0];
                     if (
                         element?.status === 'OK' &&
                         element.distance?.value != null &&
@@ -193,12 +211,13 @@ module.exports.getDistance = async (origin, destination) => {
                 } else {
                     console.warn(
                         '[maps] Distance Matrix:',
-                        response.data.status,
-                        response.data.error_message || ''
+                        data.status,
+                        data.error_message || ''
                     );
                 }
             } catch (err) {
-                console.warn('[maps] Distance Matrix request error:', err.message);
+                const em = err?.response?.data?.error_message || err?.message;
+                console.warn('[maps] Distance Matrix request error:', em);
             }
         } else {
             console.warn('[maps] No Google server key; estimating distance via geocoding fallback');
@@ -213,8 +232,12 @@ module.exports.getDistance = async (origin, destination) => {
         }
         return approxDistanceElement(metersRaw);
     } catch (error) {
-        console.error(error);
-        throw error;
+        const msg = error?.message || String(error);
+        console.error('[maps] getDistance:', msg);
+        if (typeof msg === 'string' && msg.length > 0) {
+            throw error instanceof Error ? error : new Error(msg);
+        }
+        throw new Error('Could not compute distance between locations');
     }
 };
 
