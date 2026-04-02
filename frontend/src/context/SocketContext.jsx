@@ -10,19 +10,21 @@ function buildSocketOptions() {
     withCredentials: false,
     reconnectionDelay: 2000,
     reconnectionDelayMax: 12000,
-    // Render free tier: first handshakes often fail while the dyno wakes — keep retrying.
     reconnectionAttempts: Infinity,
-    timeout: 25000,
+    // Handshake can exceed 25s while a Render dyno cold-starts.
+    timeout: import.meta.env.PROD ? 60000 : 25000,
     autoConnect: true,
   };
 
-  // Production (e.g. Render): WebSocket upgrades often fail behind the proxy — use HTTP long-polling only
-  // so the browser never opens wss:// (avoids noisy failures; Socket.IO is fully supported over polling).
+  // Prefer WebSocket in production: repeated long-polling GET/POST with sid often hits Render 502s
+  // (proxy drops long-held polls; error pages have no CORS → "blocked by CORS policy").
+  // Socket.IO falls back to polling automatically if the upgrade fails (e.g. restrictive networks).
   if (import.meta.env.PROD) {
     return {
       ...base,
-      transports: ["polling"],
-      upgrade: false,
+      transports: ["websocket", "polling"],
+      upgrade: true,
+      rememberUpgrade: true,
     };
   }
   return {

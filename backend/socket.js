@@ -52,11 +52,14 @@ function isOriginAllowed(origin) {
 function initializeSocket(server) {
     io = socketIo(server, {
         cookie: false,
-        pingTimeout: 25000,
-        pingInterval: 12000,
+        // Slightly shorter than many edge idle timeouts; reduces stale long-polls when client uses polling fallback.
+        pingTimeout: 20000,
+        pingInterval: 10000,
         connectTimeout: 45000,
         perMessageDeflate: false,
         httpCompression: false,
+        // Let clients upgrade to WebSocket (recommended on Render; polling-only sees more 502s behind the proxy).
+        transports: ['websocket', 'polling'],
         cors: {
             origin: (origin, callback) => {
                 if (!origin) return callback(null, true);
