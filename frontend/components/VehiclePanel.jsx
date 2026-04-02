@@ -26,6 +26,21 @@ const handleVehicleSelection = (vehicle, price) => {
   props.setSelectedPrice(price);
 };
 const VehiclePanel = (props) => {
+  if (props.pricingError) {
+    return (
+      <div className="w-full min-h-[40vw] flex flex-col justify-center items-center gap-4 px-6 py-8">
+        <p className="text-center text-sm text-red-600">{props.pricingError}</p>
+        <button
+          type="button"
+          onClick={() => props.setVehiclePanel(false)}
+          className="rounded-full bg-gray-900 text-white text-sm px-5 py-2"
+        >
+          Close
+        </button>
+      </div>
+    );
+  }
+
   if (props.distance?.status != "OK") {
     return (
       <div className="w-full h-[70vw] flex flex-col justify-center items-center">

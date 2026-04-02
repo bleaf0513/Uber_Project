@@ -39,6 +39,7 @@ function Home() {
   const [activeInput, setActiveInput] = React.useState(null); // 'pickup' or 'destination'
   const [prices, setPrices] = React.useState(null);
   const [distance, setDistance] = React.useState(null);
+  const [pricingError, setPricingError] = React.useState(null);
   const [selectedVehicle, setSelectedVehicle] = React.useState(null);
   const [selectedPrice, setSelectedPrice] = React.useState(null);
   const [ride, setRide] = useState(null);
@@ -115,6 +116,7 @@ function Home() {
   useEffect(() => {
     setPrices(null);
     setDistance(null);
+    setPricingError(null);
   }, [pickup, destination]);
 
   useEffect(() => {
@@ -132,6 +134,7 @@ function Home() {
     let cancelled = false;
     (async () => {
       try {
+        setPricingError(null);
         const [pricesRes, distRes] = await Promise.all([
           axios.get(`${getApiBaseUrl()}/maps/get-prices`, {
             params: { origin: pickup, destination },
@@ -145,12 +148,19 @@ function Home() {
         if (!cancelled) {
           setPrices(pricesRes.data ?? null);
           setDistance(distRes.data ?? null);
+          setPricingError(null);
         }
       } catch (error) {
         if (!cancelled) {
-          console.error("Error fetching fare or distance:", error);
+          const apiMsg = error?.response?.data?.message;
+          const detail =
+            typeof apiMsg === "string" && apiMsg.trim()
+              ? apiMsg
+              : error?.message || "Could not load prices for this route.";
+          console.error("Error fetching fare or distance:", detail, error);
           setPrices(null);
           setDistance(null);
+          setPricingError(detail);
         }
       }
     })();
@@ -444,6 +454,7 @@ function Home() {
           setConfirmRidePanel={setConfirmRidePanel}
           prices={prices}
           distance={distance}
+          pricingError={pricingError}
           setSelectedPrice={setSelectedPrice}
           setSelectedVehicle={setSelectedVehicle}
         />

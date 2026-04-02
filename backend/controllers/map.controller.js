@@ -2,6 +2,15 @@ const mapService = require('../services/maps.service');
 const { validationResult } = require('express-validator');
 const rideService = require('../services/ride.service');
 
+/** Maps/geocoding failures should be 400 — only true infra faults use 500. */
+function mapsErrorStatus(message) {
+    const msg = String(message || '');
+    if (/MongoServerError|mongoose|ECONNREFUSED|PrismaClient|Sequelize/i.test(msg)) {
+        return 500;
+    }
+    return 400;
+}
+
 module.exports.getCoordinates = async (req, res, next) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -13,8 +22,8 @@ module.exports.getCoordinates = async (req, res, next) => {
         res.json(coordinates);
     } catch (error) {
         console.error(error);
-        const msg = error?.message || 'Internal server error';
-        res.status(500).json({ message: msg });
+        const msg = error?.message || 'Unable to fetch coordinates';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -30,12 +39,8 @@ module.exports.getDistance = async (req, res, next) => {
         res.json(distance);
     } catch (error) {
         console.error(error);
-        const msg = error?.message || 'Internal server error';
-        const isClient =
-            /Unable to resolve|Could not compute distance|Origin and destination|Address is required|No geocoding|fetch coordinates|not configured|REQUEST_DENIED|API key|referr|IP address|ZERO_RESULTS|INVALID_REQUEST|NOT_FOUND|Could not compute fare|pickup and destination|timeout|ECONN|ENOTFOUND|status code|Network Error|OpenStreetMap|Open-Meteo/i.test(
-                msg
-            );
-        res.status(isClient ? 400 : 500).json({ message: msg });
+        const msg = error?.message || 'Could not compute distance for this route';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -50,8 +55,8 @@ module.exports.getSuggestions = async (req, res, next) => {
         res.json(suggestions);
     } catch (error) {
         console.error(error);
-        const msg = error?.message || 'Internal server error';
-        res.status(500).json({ message: msg });
+        const msg = error?.message || 'Unable to load suggestions';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -67,11 +72,7 @@ module.exports.getPrices = async (req, res, next) => {
         res.json(prices);
     } catch (error) {
         console.error(error);
-        const msg = error?.message || 'Internal server error';
-        const isClient =
-            /Unable to resolve|Could not compute fare|Could not compute distance|pickup and destination|Origin and destination|Address is required|fetch coordinates|not configured|REQUEST_DENIED|API key|referr|IP address|ZERO_RESULTS|INVALID_REQUEST|NOT_FOUND|timeout|ECONN|ENOTFOUND|status code|Network Error|OpenStreetMap|Open-Meteo/i.test(
-                msg
-            );
-        res.status(isClient ? 400 : 500).json({ message: msg });
+        const msg = error?.message || 'Could not compute fare for this route';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
