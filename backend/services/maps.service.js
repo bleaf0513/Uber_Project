@@ -164,23 +164,44 @@ module.exports.getAddressCoordinates = async (address) => {
         const data = await googleMapsFormPost('geocode/json', { address: addr });
 
         if (data.status === 'OK' && data.results?.length) {
-            const location = data.results[0].geometry.location;
-            return {
-                ltd: location.lat,
-                lng: location.lng,
-            };
+            const loc = data.results[0]?.geometry?.location;
+            const lat = loc?.lat;
+            const lng = loc?.lng;
+            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                return { ltd: lat, lng };
+            }
         }
         throw new Error(data.error_message || 'Unable to fetch coordinates');
     } catch (error) {
-        if (error instanceof Error && error.message && !error.response) {
+        const resData = error?.response?.data;
+        const googleMsg =
+            typeof resData === 'object' && resData != null && typeof resData.error_message === 'string'
+                ? resData.error_message
+                : null;
+        if (googleMsg) {
+            throw new Error(googleMsg);
+        }
+
+        if (error instanceof Error && !error.response) {
+            if (error.name === 'TypeError' || error.name === 'ReferenceError') {
+                console.error('[maps] geocode unexpected:', error);
+                throw new Error('Unable to fetch coordinates');
+            }
+            const m = error.message || '';
+            const isAxiosNetwork =
+                error.code === 'ECONNABORTED' ||
+                error.code === 'ENOTFOUND' ||
+                error.code === 'ECONNRESET' ||
+                /timeout|Request failed with status code|Network Error/i.test(m);
+            if (isAxiosNetwork) {
+                console.error('[maps] geocode:', m);
+                throw new Error('Unable to fetch coordinates');
+            }
             throw error;
         }
-        const msg =
-            error?.response?.data?.error_message ||
-            error?.message ||
-            'Unable to fetch coordinates';
-        console.error('[maps] geocode:', msg);
-        throw new Error(typeof msg === 'string' ? msg : 'Unable to fetch coordinates');
+
+        console.error('[maps] geocode:', error?.message || error);
+        throw new Error('Unable to fetch coordinates');
     }
 };
 
