@@ -4,31 +4,45 @@ const captainModel = require('./models/captain.model');
 
 let io;
 
-/** Comma-separated list in CLIENT_ORIGINS, e.g. https://centralgo.mercalan.com.co,https://app.vercel.app */
+const DEFAULT_ORIGINS = [
+    'https://centralgo.mercalan.com.co',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173',
+];
+
 function parseClientOrigins() {
     const raw = process.env.CLIENT_ORIGINS;
-    if (raw && String(raw).trim()) {
-        return String(raw)
-            .split(',')
-            .map((s) => s.trim())
-            .filter(Boolean);
+    const fromEnv =
+        raw && String(raw).trim()
+            ? String(raw).split(',').map((s) => s.trim()).filter(Boolean)
+            : [];
+    return [...new Set([...fromEnv, ...DEFAULT_ORIGINS])];
+}
+
+function normalizeOrigin(origin) {
+    if (!origin) return '';
+    try {
+        const u = new URL(origin);
+        u.pathname = '';
+        u.search = '';
+        u.hash = '';
+        return u.href.replace(/\/$/, '');
+    } catch {
+        return String(origin).replace(/\/$/, '');
     }
-    return [
-        'https://centralgo.mercalan.com.co',
-        'http://localhost:5173',
-        'http://127.0.0.1:5173',
-    ];
 }
 
 function isOriginAllowed(origin) {
     if (!origin) return true;
     const list = parseClientOrigins();
     if (list.includes('*')) return true;
-    if (list.includes(origin)) return true;
+    const norm = normalizeOrigin(origin);
+    if (list.some((o) => normalizeOrigin(o) === norm)) return true;
     try {
-        const host = new URL(origin).hostname;
+        const host = new URL(origin).hostname.toLowerCase();
         if (host.endsWith('.vercel.app')) return true;
         if (host.endsWith('.onrender.com')) return true;
+        if (host === 'mercalan.com.co' || host.endsWith('.mercalan.com.co')) return true;
     } catch {
         /* ignore */
     }
@@ -37,21 +51,22 @@ function isOriginAllowed(origin) {
 
 function initializeSocket(server) {
     io = socketIo(server, {
-        // Shorter ping cycle reduces long-held polling requests (Render proxies sometimes 502 those).
-        pingTimeout: 20000,
-        pingInterval: 10000,
-        // Lighter responses through some CDNs / proxies
+        cookie: false,
+        pingTimeout: 25000,
+        pingInterval: 12000,
+        connectTimeout: 45000,
         perMessageDeflate: false,
         httpCompression: false,
         cors: {
             origin: (origin, callback) => {
                 if (!origin) return callback(null, true);
                 if (isOriginAllowed(origin)) return callback(null, origin);
+                console.warn('[socket] CORS rejected origin:', origin);
                 return callback(null, false);
             },
             methods: ['GET', 'POST', 'OPTIONS'],
             credentials: false,
-            allowedHeaders: ['Content-Type'],
+            allowedHeaders: ['Content-Type', 'Authorization'],
         },
     });
 
@@ -97,6 +112,6 @@ const sendMessageToSocketId = (socketId, messageObject) => {
     if (io) {
         io.to(socketId).emit(messageObject.event, messageObject.data);
     }
-}
+};
 
 module.exports = { initializeSocket, sendMessageToSocketId };
