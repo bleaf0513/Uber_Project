@@ -28,6 +28,21 @@ function normalizeAddressQuery(s) {
     return t.trim();
 }
 
+/**
+ * Places Autocomplete often returns "POI Name, 4 Chome-…, City, Tokyo, Japan".
+ * Geocoders fail on the long POI prefix; the street block after the first comma is usually enough.
+ */
+function stripLeadingVenueBeforeChome(s) {
+    const t = String(s).trim();
+    if (!t) return t;
+    const parts = t.split(',').map((p) => p.trim()).filter(Boolean);
+    const idx = parts.findIndex((p) => /\d+\s*Chome\b/i.test(p));
+    if (idx > 0) {
+        return parts.slice(idx).join(', ');
+    }
+    return t;
+}
+
 /** POST avoids proxy URL-length limits on long Japanese addresses (Geocoding / Distance Matrix). */
 async function googleMapsFormPost(apiPath, fields) {
     const key = serverMapsKey();
@@ -67,26 +82,31 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
 
 /** When Google Geocoding fails from the server (API disabled, wrong key type), resolve coordinates via OpenStreetMap Nominatim. */
 async function nominatimGeocode(address) {
-    const ua =
-        process.env.NOMINATIM_USER_AGENT ||
-        'UberClone/1.0 (ride demo; contact: https://github.com)';
-    const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
-        params: { q: address, format: 'json', limit: 1 },
-        headers: {
-            'User-Agent': ua,
-        },
-        timeout: 20000,
-    });
+    try {
+        const ua =
+            process.env.NOMINATIM_USER_AGENT ||
+            'UberClone/1.0 (ride demo; contact: https://github.com/K-Daksh/UberClone)';
+        const { data } = await axios.get('https://nominatim.openstreetmap.org/search', {
+            params: { q: address, format: 'json', limit: 1 },
+            headers: {
+                'User-Agent': ua,
+            },
+            timeout: 20000,
+        });
 
-    if (!Array.isArray(data) || !data.length) {
-        throw new Error('Unable to resolve address (OpenStreetMap)');
+        if (!Array.isArray(data) || !data.length) {
+            throw new Error('NOMINATIM_EMPTY');
+        }
+        const lat = parseFloat(data[0].lat);
+        const lon = parseFloat(data[0].lon);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
+            throw new Error('NOMINATIM_BAD_COORDS');
+        }
+        return { ltd: lat, lng: lon };
+    } catch (e) {
+        console.warn('[maps] Nominatim:', e?.message || e);
+        throw new Error('Nominatim geocoding did not return a match');
     }
-    const lat = parseFloat(data[0].lat);
-    const lon = parseFloat(data[0].lon);
-    if (!Number.isFinite(lat) || !Number.isFinite(lon)) {
-        throw new Error('Invalid coordinates from OpenStreetMap');
-    }
-    return { ltd: lat, lng: lon };
 }
 
 function inferCountryCodeForOpenMeteo(addr) {
@@ -100,7 +120,9 @@ function inferCountryCodeForOpenMeteo(addr) {
 /** Third fallback: works from most cloud hosts when Nominatim blocks datacenter IPs. */
 async function openMeteoGeocode(address) {
     const maxLen = 512;
-    const full = address.length > maxLen ? address.slice(0, maxLen) : address;
+    const stripped = stripLeadingVenueBeforeChome(address);
+    const base = stripped.length >= 4 ? stripped : address;
+    const full = base.length > maxLen ? base.slice(0, maxLen) : base;
     const language = /[\u3040-\u30ff\u3400-\u9fff]/.test(full) ? 'ja' : 'en';
     const countryCode = inferCountryCodeForOpenMeteo(full);
 
@@ -121,15 +143,18 @@ async function openMeteoGeocode(address) {
         return data || {};
     }
 
+    const partsAll = full.split(',').map((p) => p.trim()).filter(Boolean);
+    const fallbacksList = [];
+    if (partsAll.length > 1) fallbacksList.push(partsAll.slice(1).join(', '));
+    if (partsAll.length > 2) fallbacksList.push(partsAll.slice(-3).join(', '));
+    if (partsAll.length > 1) {
+        fallbacksList.push(`${partsAll[partsAll.length - 2]}, ${partsAll[partsAll.length - 1]}`);
+    }
+
     let data = await search(full);
     let results = data?.results;
     if (!Array.isArray(results) || !results.length) {
-        const parts = full.split(',').map((p) => p.trim()).filter(Boolean);
-        const fallbacks = [];
-        if (parts.length > 1) fallbacks.push(parts.slice(1).join(', '));
-        if (parts.length > 2) fallbacks.push(parts.slice(-3).join(', '));
-        if (parts.length > 1) fallbacks.push(`${parts[parts.length - 2]}, ${parts[parts.length - 1]}`);
-        for (const fb of fallbacks) {
+        for (const fb of fallbacksList) {
             if (!fb || fb.length < 4 || fb === full) continue;
             data = await search(fb);
             results = data?.results;
@@ -205,7 +230,7 @@ function approxDistanceElement(straightLineMeters) {
 }
 
 module.exports.getAddressCoordinates = async (address) => {
-    const addr = normalizeAddressQuery(address);
+    const addr = stripLeadingVenueBeforeChome(normalizeAddressQuery(address));
     if (!addr) {
         throw new Error('Address is required');
     }
@@ -255,8 +280,8 @@ module.exports.getAddressCoordinates = async (address) => {
 };
 
 module.exports.getDistance = async (origin, destination) => {
-    const o = normalizeAddressQuery(origin);
-    const d = normalizeAddressQuery(destination);
+    const o = stripLeadingVenueBeforeChome(normalizeAddressQuery(origin));
+    const d = stripLeadingVenueBeforeChome(normalizeAddressQuery(destination));
     if (!o || !d) {
         throw new Error('Origin and destination are required');
     }
@@ -312,7 +337,7 @@ module.exports.getDistance = async (origin, destination) => {
 };
 
 module.exports.getSuggestions = async (address) => {
-    const addr = normalizeAddressQuery(address);
+    const addr = stripLeadingVenueBeforeChome(normalizeAddressQuery(address));
     if (!addr) {
         return [];
     }
