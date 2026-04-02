@@ -126,7 +126,7 @@ async function openMeteoGeocode(address) {
     const language = /[\u3040-\u30ff\u3400-\u9fff]/.test(full) ? 'ja' : 'en';
     const countryCode = inferCountryCodeForOpenMeteo(full);
 
-    async function search(name) {
+    async function search(name, useCountryFilter) {
         const q = name.length > maxLen ? name.slice(0, maxLen) : name;
         if (q.length < 2) return { results: [] };
         const params = {
@@ -135,7 +135,7 @@ async function openMeteoGeocode(address) {
             language,
             format: 'json',
         };
-        if (countryCode) params.countryCode = countryCode;
+        if (useCountryFilter && countryCode) params.countryCode = countryCode;
         const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
             params,
             timeout: 15000,
@@ -151,24 +151,32 @@ async function openMeteoGeocode(address) {
         fallbacksList.push(`${partsAll[partsAll.length - 2]}, ${partsAll[partsAll.length - 1]}`);
     }
 
-    let data = await search(full);
-    let results = data?.results;
-    if (!Array.isArray(results) || !results.length) {
-        for (const fb of fallbacksList) {
-            if (!fb || fb.length < 4 || fb === full) continue;
-            data = await search(fb);
-            results = data?.results;
-            if (Array.isArray(results) && results.length) break;
+    async function collectResults(useCountryFilter) {
+        let data = await search(full, useCountryFilter);
+        let results = data?.results;
+        if (!Array.isArray(results) || !results.length) {
+            for (const fb of fallbacksList) {
+                if (!fb || fb.length < 4 || fb === full) continue;
+                data = await search(fb, useCountryFilter);
+                results = data?.results;
+                if (Array.isArray(results) && results.length) break;
+            }
         }
+        return Array.isArray(results) ? results : [];
     }
 
-    if (!Array.isArray(results) || !results.length) {
+    let results = await collectResults(true);
+    if (!results.length && countryCode) {
+        results = await collectResults(false);
+    }
+
+    if (!results.length) {
         throw new Error('Unable to resolve address (Open-Meteo)');
     }
 
     let r = results[0];
     const hint = full.toLowerCase();
-    if (/shinagawa|kita-shinagawa|北品川|品川|hiromachi|広町/i.test(hint)) {
+    if (/shinagawa|kita-shinagawa|minami-shinagawa|北品川|南品川|品川|hiromachi|広町/i.test(hint)) {
         const hit = results.find((x) =>
             /shinagawa|品川|hiromachi|広町/i.test(
                 `${x.name || ''} ${x.admin1 || ''} ${x.admin2 || ''} ${x.admin3 || ''} ${x.admin4 || ''}`
@@ -195,10 +203,13 @@ async function geocodeForFallback(address) {
     } catch (err) {
         console.warn('[maps] Open-Meteo failed:', err.message);
     }
-    try {
-        return await nominatimGeocode(address);
-    } catch (err) {
-        console.warn('[maps] Nominatim failed:', err.message);
+    // Nominatim is opt-in — from Render/AWS/etc. it usually returns empty or HTTP errors and confuses clients.
+    if (process.env.MAPS_ENABLE_NOMINATIM === '1') {
+        try {
+            return await nominatimGeocode(address);
+        } catch (err) {
+            console.warn('[maps] Nominatim failed:', err.message);
+        }
     }
     throw new Error(
         `Unable to resolve "${address}". Try a more specific place (city + country), or set GOOGLE_MAPS_SERVER_API on the server.`
