@@ -36,6 +36,40 @@ module.exports.authUser = async (req, res, next) => {
     }
 }
 
+/**
+ * Accepts either a passenger (user) or captain JWT — same localStorage `token` key breaks /maps routes
+ * if the client still holds the other role’s token.
+ * Map handlers do not rely on req.user vs req.captain; they only need a valid app login.
+ */
+module.exports.authUserOrCaptain = async (req, res, next) => {
+    const token = bearerToken(req);
+    if (!token) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+
+    const isBlacklisted = await blacklistTokenModel.findOne({ token: token });
+    if (isBlacklisted) {
+        return res.status(401).json({ message: 'Unauthorized, Token expired!!' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, process.env.JWT_SECRET);
+        const user = await userModel.findById(decoded._id);
+        if (user) {
+            req.user = user;
+            return next();
+        }
+        const captain = await captainModel.findById(decoded._id);
+        if (captain) {
+            req.captain = captain;
+            return next();
+        }
+        return res.status(401).json({ message: 'Unauthorized' });
+    } catch (error) {
+        return res.status(401).json({ message: 'Unauthorized' });
+    }
+};
+
 module.exports.authCaptain = async (req, res, next) => {
     const token = bearerToken(req);
     if (!token) {
