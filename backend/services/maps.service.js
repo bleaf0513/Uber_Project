@@ -205,6 +205,96 @@ async function photonGeocode(address) {
     throw lastErr instanceof Error ? lastErr : new Error('PHOTON_NO_RESULTS');
 }
 
+function photonFeatureToLabel(f) {
+    const p = f?.properties || {};
+    const coords = f?.geometry?.coordinates;
+    const lat = Array.isArray(coords) ? Number(coords[1]) : NaN;
+    const lng = Array.isArray(coords) ? Number(coords[0]) : NaN;
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return '';
+
+    const houseStreet = [p.housenumber, p.street].filter(Boolean).join(' ').trim();
+    const name = p.name ? String(p.name).trim() : '';
+    let head = houseStreet;
+    if (!head) head = name;
+    else if (
+        name &&
+        !houseStreet.toLowerCase().includes(name.toLowerCase()) &&
+        !/^unnamed/i.test(name)
+    ) {
+        head = `${name}, ${houseStreet}`;
+    }
+
+    const tail = [p.city || p.town || p.village || p.district, p.state || p.county, p.country]
+        .filter(Boolean)
+        .join(', ');
+
+    let description = [head, tail].filter(Boolean).join(', ').replace(/\s+/g, ' ').trim();
+    if (!description) description = (tail || name || '').trim();
+    if (!description) description = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+
+    const osmId = p.osm_id;
+    const osmType = p.osm_type;
+    const place_id =
+        osmId != null && osmType
+            ? `photon:${osmType}:${osmId}`
+            : `geo:${lat.toFixed(6)},${lng.toFixed(6)}`;
+    return { description, place_id };
+}
+
+/** Places-style predictions for autocomplete; no Google key required. */
+async function photonAutocompleteSuggestions(address) {
+    const raw = String(address).trim();
+    const qBase = stripCombiningMarks(raw)
+        .replace(/\+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    const ua =
+        process.env.NOMINATIM_USER_AGENT ||
+        'UberClone/1.0 (ride demo; contact: https://github.com/K-Daksh/UberClone)';
+    async function fetchQ(text) {
+        const q = text.length > 320 ? text.slice(0, 320) : text;
+        if (q.length < 3) return [];
+        const { data } = await axios.get('https://photon.komoot.io/api/', {
+            params: { q, lang: 'en', limit: 12 },
+            timeout: 15000,
+            headers: { 'User-Agent': ua },
+        });
+        return Array.isArray(data?.features) ? data.features : [];
+    }
+
+    let features = [];
+    try {
+        features = await fetchQ(qBase);
+    } catch (e1) {
+        const st = e1?.response?.status;
+        if ((st === 400 || st === 414) && qBase.length > 60) {
+            try {
+                features = await fetchQ(qBase.slice(0, 60));
+            } catch {
+                features = [];
+            }
+        } else {
+            throw e1;
+        }
+    }
+
+    const out = [];
+    const seen = new Set();
+    for (const f of features) {
+        const row = photonFeatureToLabel(f);
+        if (!row.description) continue;
+        const key = row.description.toLowerCase();
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+            description: row.description,
+            place_id: row.place_id,
+        });
+        if (out.length >= 10) break;
+    }
+    return out;
+}
+
 const LAST_SEGMENT_COUNTRY_ISO2 = new Map(
     Object.entries({
         japan: 'JP',
@@ -653,24 +743,32 @@ module.exports.getSuggestions = async (address) => {
         return [];
     }
     const key = serverMapsKey();
-    if (!key) {
-        return [];
+    if (key) {
+        try {
+            const { data } = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
+                params: {
+                    input: addr,
+                    key,
+                },
+                timeout: 15000,
+            });
+
+            if (data.status === 'OK' && data.predictions?.length) {
+                return data.predictions;
+            }
+            console.warn(
+                '[maps] Google Place Autocomplete:',
+                data?.status,
+                data?.error_message || ''
+            );
+        } catch (error) {
+            console.error('[maps] suggestions Google:', error.message);
+        }
     }
     try {
-        const { data } = await axios.get('https://maps.googleapis.com/maps/api/place/autocomplete/json', {
-            params: {
-                input: addr,
-                key,
-            },
-            timeout: 15000,
-        });
-
-        if (data.status === 'OK' && data.predictions) {
-            return data.predictions;
-        }
-        return [];
+        return await photonAutocompleteSuggestions(addr);
     } catch (error) {
-        console.error('[maps] suggestions:', error.message);
+        console.warn('[maps] Photon suggestions:', error.message);
         return [];
     }
 };

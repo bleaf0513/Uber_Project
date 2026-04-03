@@ -1,4 +1,4 @@
-import React, { useEffect, useContext, useState } from "react";
+import React, { useEffect, useContext, useState, useRef, useCallback } from "react";
 import { useGSAP } from "@gsap/react";
 import { Link } from "react-router-dom";
 import gsap from "gsap";
@@ -48,6 +48,8 @@ function Home() {
   const { user } = useContext(UserDataContext);
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const navigate = useNavigate();
+  const suggestionTimerRef = useRef(null);
+  const suggestionSeqRef = useRef(0);
 
   // const socket = io(`${import.meta.env.VITE_BASE_URL}`);
 
@@ -76,42 +78,100 @@ function Home() {
     };
   }, [socket, navigate]);
 
-  const fetchSuggestions = async (query) => {
+  const normalizeSuggestionRows = (rows) =>
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => ({
+        description:
+          row.description ||
+          row.structured_formatting?.main_text ||
+          row.formatted_address ||
+          "",
+        place_id: row.place_id || "",
+      }))
+      .filter((r) => r.description);
+
+  const runFetchSuggestions = useCallback(
+    async (query) => {
+      const seq = ++suggestionSeqRef.current;
+
+      // 1) Google Places (browser) when the Maps JS SDK loaded — best UX when key + Places work.
+      if (mapsApiLoaded && window.google?.maps) {
+        try {
+          const { AutocompleteSuggestion } = await google.maps.importLibrary(
+            "places"
+          );
+          const { suggestions: raw } =
+            await AutocompleteSuggestion.fetchAutocompleteSuggestions({
+              input: query,
+            });
+          const mapped = (raw ?? [])
+            .map((item) => item.placePrediction)
+            .filter(Boolean)
+            .map((p) => {
+              const description =
+                p.text?.text ??
+                [p.mainText?.text, p.secondaryText?.text]
+                  .filter(Boolean)
+                  .join(", ");
+              return {
+                description: description || "",
+                place_id: p.placeId,
+              };
+            })
+            .filter((row) => row.description);
+          if (seq !== suggestionSeqRef.current) return;
+          if (mapped.length > 0) {
+            setSuggestions(mapped);
+            return;
+          }
+        } catch (error) {
+          console.warn(
+            "Places autocomplete failed, using server:",
+            error?.message || error
+          );
+        }
+      }
+
+      // 2) Server: Google Autocomplete (if server key) or Photon — works without VITE_GOOGLE_MAPS_API.
+      try {
+        const { data } = await axios.get(
+          `${getApiBaseUrl()}/maps/get-suggestions`,
+          {
+            params: { address: query },
+            timeout: 18000,
+          }
+        );
+        if (seq !== suggestionSeqRef.current) return;
+        setSuggestions(normalizeSuggestionRows(data));
+      } catch (error) {
+        console.error("Error fetching suggestions:", error);
+        if (seq === suggestionSeqRef.current) setSuggestions([]);
+      }
+    },
+    [mapsApiLoaded]
+  );
+
+  const fetchSuggestions = (query) => {
     if (query.length < 3) {
+      if (suggestionTimerRef.current) {
+        clearTimeout(suggestionTimerRef.current);
+        suggestionTimerRef.current = null;
+      }
       setSuggestions([]);
       return;
     }
-    if (!mapsApiLoaded || !window.google?.maps) {
-      setSuggestions([]);
-      return;
-    }
-    try {
-      const { AutocompleteSuggestion } = await google.maps.importLibrary(
-        "places"
-      );
-      const { suggestions } =
-        await AutocompleteSuggestion.fetchAutocompleteSuggestions({
-          input: query,
-        });
-      const mapped = (suggestions ?? [])
-        .map((item) => item.placePrediction)
-        .filter(Boolean)
-        .map((p) => {
-          const description =
-            p.text?.text ??
-            [p.mainText?.text, p.secondaryText?.text].filter(Boolean).join(", ");
-          return {
-            description: description || "",
-            place_id: p.placeId,
-          };
-        })
-        .filter((row) => row.description);
-      setSuggestions(mapped);
-    } catch (error) {
-      console.error("Error fetching suggestions:", error);
-      setSuggestions([]);
-    }
+    if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+    suggestionTimerRef.current = setTimeout(() => {
+      suggestionTimerRef.current = null;
+      runFetchSuggestions(query);
+    }, 280);
   };
+
+  useEffect(() => {
+    return () => {
+      if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     setPrices(null);
