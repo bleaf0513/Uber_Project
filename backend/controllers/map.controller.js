@@ -14,7 +14,8 @@ module.exports.getCoordinates = async (req, res, next) => {
         res.json(coordinates);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        const msg = error?.message || 'Unable to fetch coordinates';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -30,7 +31,8 @@ module.exports.getDistance = async (req, res, next) => {
         res.json(distance);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        const msg = error?.message || 'Could not compute distance for this route';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -45,7 +47,8 @@ module.exports.getSuggestions = async (req, res, next) => {
         res.json(suggestions);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        const msg = error?.message || 'Unable to load suggestions';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
 
@@ -61,6 +64,7 @@ module.exports.getPrices = async (req, res, next) => {
         res.json(prices);
     } catch (error) {
         console.error(error);
-        res.status(500).json({ message: 'Internal server error' });
+        const msg = error?.message || 'Could not compute fare for this route';
+        res.status(mapsErrorStatus(msg)).json({ message: msg });
     }
 }
