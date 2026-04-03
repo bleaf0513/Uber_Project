@@ -13,6 +13,12 @@ async function main() {
 
     initializeSocket(server);
 
-server.listen(port, () => {
-    console.log(`Server running on port ${port}`);
+    server.listen(port, () => {
+        console.log(`Server running on port ${port}`);
+    });
+}
+
+main().catch((err) => {
+    console.error('Server failed to start:', err);
+    process.exit(1);
 });

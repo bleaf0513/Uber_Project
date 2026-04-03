@@ -37,29 +37,58 @@ function buildSocketOptions() {
 
 const socket = io(getSocketBaseUrl(), buildSocketOptions());
 
+/** Render free tier: HTTP GET wakes the dyno so Socket.IO is less likely to time out during cold start. */
+function wakeBackendRoot(baseUrl) {
+  if (!baseUrl || import.meta.env.DEV) return;
+  const root = String(baseUrl).replace(/\/+$/, "");
+  fetch(`${root}/`, {
+    method: "GET",
+    mode: "cors",
+    credentials: "omit",
+    cache: "no-store",
+  }).catch(() => {});
+}
+
 const SocketProvider = ({ children }) => {
   useEffect(() => {
-    // Cold start (Render): first auto-connect can race the wake-up; nudge once after a short delay.
+    if (import.meta.env.PROD) {
+      const url = getSocketBaseUrl();
+      wakeBackendRoot(url);
+      window.setTimeout(() => wakeBackendRoot(url), 3000);
+      window.setTimeout(() => wakeBackendRoot(url), 10000);
+    }
+
+    // Cold start (Render): nudge reconnect after wake requests start the dyno.
     const nudge = window.setTimeout(() => {
       if (!socket.connected) {
         socket.connect();
       }
     }, 1500);
+    const nudge2 = window.setTimeout(() => {
+      if (!socket.connected) {
+        socket.connect();
+      }
+    }, 8000);
 
     let warned = false;
     let warnTimer = null;
+    // Free Render cold starts often exceed 12s; warn only after a longer grace period.
+    const warnAfterMs = import.meta.env.PROD ? 55000 : 12000;
     const onConnectError = () => {
       if (warned || socket.connected) return;
-      if (warnTimer != null) window.clearTimeout(warnTimer);
+      // Do not reset on every reconnect attempt — otherwise the warning never fires.
+      if (warnTimer != null) return;
       warnTimer = window.setTimeout(() => {
         warnTimer = null;
         if (socket.connected || warned) return;
         warned = true;
         const url = getSocketBaseUrl();
         console.warn(
-          `[socket] Still not connected to ${url}. Render free: open ${url} once to wake the API, set VITE_BASE_URL on Vercel, check CLIENT_ORIGINS on the server. Local: cd backend && npm run dev.`
+          `[socket] Still not connected to ${url} after ${warnAfterMs / 1000}s. ` +
+            `Render free: cold start can take 60s — wait or open ${url} in a tab to wake the API. ` +
+            `Confirm VITE_BASE_URL on the frontend matches this host. Local API: cd backend && npm run dev.`
         );
-      }, 12000);
+      }, warnAfterMs);
     };
 
     const onConnect = () => {
@@ -74,6 +103,7 @@ const SocketProvider = ({ children }) => {
     socket.on("connect", onConnect);
     return () => {
       window.clearTimeout(nudge);
+      window.clearTimeout(nudge2);
       if (warnTimer != null) window.clearTimeout(warnTimer);
       socket.off("connect_error", onConnectError);
       socket.off("connect", onConnect);

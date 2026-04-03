@@ -52,9 +52,21 @@ function isOriginAllowed(origin) {
 function initializeSocket(server) {
     io = socketIo(server, {
         cors: {
-            origin: '*',
-            methods: ['GET', 'POST']
-        }
+            // Reflect / allow any origin (same as previous "*"). Optional CLIENT_ORIGINS is for logging only.
+            origin(origin, callback) {
+                if (origin && !isOriginAllowed(origin)) {
+                    console.warn('[socket] Connect from non-listed Origin (still allowed):', origin);
+                }
+                callback(null, true);
+            },
+            methods: ['GET', 'POST'],
+        },
+        // Render / free proxies: long cold-starts and idle disconnects — keep handshakes alive longer.
+        connectTimeout: 60000,
+        pingTimeout: 60000,
+        pingInterval: 25000,
+        transports: ['websocket', 'polling'],
+        allowEIO3: true,
     });
 
     io.on('connection', (socket) => {
