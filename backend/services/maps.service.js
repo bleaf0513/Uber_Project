@@ -6,6 +6,7 @@ function normalizeAddressQuery(s) {
     let t = String(s).trim();
     if (t.length > 2000) t = t.slice(0, 2000);
     t = t.replace(/\0/g, '');
+    t = t.replace(/\+/g, ' ');
     t = t
         .replace(/\u2212/g, '-')
         .replace(/\uFF0D/g, '-')
@@ -26,15 +27,28 @@ function normalizeAddressQuery(s) {
     return t.trim();
 }
 
-/** POI + "…, 4 Chome-…" — geocoders work better from the Chome segment onward. */
+/** POI + structured address — geocoders work better from the street / chome segment onward. */
 function stripLeadingVenueBeforeChome(s) {
     const t = String(s).trim();
     if (!t) return t;
     const parts = t.split(',').map((p) => p.trim()).filter(Boolean);
-    const idx = parts.findIndex(
+    if (parts.length < 2) return t;
+
+    const chomeIdx = parts.findIndex(
         (p) => /\d+\s*Chome\b/i.test(p) || (/Chome\b/i.test(p) && /\d/.test(p))
     );
-    if (idx > 0) return parts.slice(idx).join(', ');
+    if (chomeIdx > 0) return parts.slice(chomeIdx).join(', ');
+
+    // International: first part that looks like a numbered street/building line (skip venue name).
+    const streetLine = (p) =>
+        /^\d+[a-z]?\s+/i.test(p) ||
+        /^(\d+\s*-\s*)+\d+/i.test(p) ||
+        /\b(Street|St\.?|Road|Rd\.?|Avenue|Ave\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Close|Court|Ct\.?|Place|Pl\.?|Crescent|Terrace|Alley|Route|Rte\.?|Highway|Hwy\.?)\b/i.test(
+            p
+        );
+    const streetIdx = parts.findIndex(streetLine);
+    if (streetIdx > 0) return parts.slice(streetIdx).join(', ');
+
     return t;
 }
 
@@ -98,6 +112,168 @@ async function nominatimGeocode(address) {
     }
 }
 
+/** ASCII-ish form for geocoders that choke on rare Unicode normalization (e.g. ō, ligatures). */
+function stripCombiningMarks(s) {
+    try {
+        return String(s).normalize('NFD').replace(/\p{M}/gu, '');
+    } catch {
+        return String(s);
+    }
+}
+
+/** Photon (Komoot) — OSM-based forward geocoding; works worldwide for streets without an API key. */
+async function photonGeocode(address) {
+    const raw = String(address).trim();
+    const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
+    const attempts = [];
+    const push = (s) => {
+        const t = String(s).trim();
+        if (t.length < 3) return;
+        const clipped = t.length > 400 ? t.slice(0, 400).trim() : t;
+        if (clipped.length >= 3) attempts.push(clipped);
+    };
+    push(raw);
+    const asciiLoose = stripCombiningMarks(raw);
+    if (asciiLoose !== raw) push(asciiLoose);
+    if (parts.length >= 2) push(parts.slice(-4).join(', '));
+    if (parts.length >= 2) push(parts.slice(-3).join(', '));
+    if (parts.length >= 2) push(parts.slice(-2).join(', '));
+    if (parts.length >= 2) {
+        const tail3 = stripCombiningMarks(parts.slice(-3).join(', '));
+        if (tail3 !== parts.slice(-3).join(', ')) push(tail3);
+    }
+    const noCjk = stripCombiningMarks(raw)
+        .replace(/[\u3040-\u30ff\u3400-\u9fff]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    if (noCjk.length >= 8 && noCjk !== raw) push(noCjk);
+    if (parts.length >= 2) {
+        const tailNoCjk = parts
+            .slice(-3)
+            .join(', ')
+            .replace(/[\u3040-\u30ff\u3400-\u9fff]/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+        if (tailNoCjk.length >= 8) push(tailNoCjk);
+    }
+
+    // Photon only accepts default | de | en | fr (not ja); en works fine for worldwide OSM data.
+    const lang = 'en';
+    const ua =
+        process.env.NOMINATIM_USER_AGENT ||
+        'UberClone/1.0 (ride demo; contact: https://github.com/K-Daksh/UberClone)';
+    const seen = new Set();
+    let lastErr;
+    for (const q of attempts) {
+        if (seen.has(q)) continue;
+        seen.add(q);
+        try {
+            const { data } = await axios.get('https://photon.komoot.io/api/', {
+                params: { q, lang, limit: 5 },
+                timeout: 20000,
+                headers: { 'User-Agent': ua },
+                maxContentLength: 10 * 1024 * 1024,
+            });
+            const features = data?.features;
+            if (!Array.isArray(features) || !features.length) {
+                lastErr = new Error('PHOTON_NO_RESULTS');
+                continue;
+            }
+            for (const f of features) {
+                const coords = f?.geometry?.coordinates;
+                if (!Array.isArray(coords) || coords.length < 2) continue;
+                const lng = Number(coords[0]);
+                const lat = Number(coords[1]);
+                if (Number.isFinite(lat) && Number.isFinite(lng)) {
+                    return { ltd: lat, lng };
+                }
+            }
+            lastErr = new Error('PHOTON_BAD_COORDINATES');
+        } catch (e) {
+            const st = e?.response?.status;
+            lastErr = e;
+            if (st === 400 || st === 414 || st === 413) {
+                console.warn('[maps] Photon retry (bad query length?):', q.slice(0, 72));
+                continue;
+            }
+            if (st === 429) {
+                throw e;
+            }
+            throw e;
+        }
+    }
+    throw lastErr instanceof Error ? lastErr : new Error('PHOTON_NO_RESULTS');
+}
+
+const LAST_SEGMENT_COUNTRY_ISO2 = new Map(
+    Object.entries({
+        japan: 'JP',
+        '日本': 'JP',
+        china: 'CN',
+        '中国': 'CN',
+        'united states': 'US',
+        usa: 'US',
+        'united kingdom': 'GB',
+        uk: 'GB',
+        england: 'GB',
+        scotland: 'GB',
+        wales: 'GB',
+        france: 'FR',
+        germany: 'DE',
+        deutschland: 'DE',
+        spain: 'ES',
+        españa: 'ES',
+        italy: 'IT',
+        italia: 'IT',
+        brazil: 'BR',
+        brasil: 'BR',
+        mexico: 'MX',
+        méxico: 'MX',
+        canada: 'CA',
+        australia: 'AU',
+        india: 'IN',
+        'south korea': 'KR',
+        korea: 'KR',
+        netherlands: 'NL',
+        belgium: 'BE',
+        switzerland: 'CH',
+        austria: 'AT',
+        österreich: 'AT',
+        poland: 'PL',
+        polska: 'PL',
+        portugal: 'PT',
+        sweden: 'SE',
+        norway: 'NO',
+        denmark: 'DK',
+        finland: 'FI',
+        ireland: 'IE',
+        'new zealand': 'NZ',
+        singapore: 'SG',
+        thailand: 'TH',
+        vietnam: 'VN',
+        indonesia: 'ID',
+        philippines: 'PH',
+        malaysia: 'MY',
+        argentina: 'AR',
+        chile: 'CL',
+        colombia: 'CO',
+        turkey: 'TR',
+        'türkiye': 'TR',
+        russia: 'RU',
+        ukraine: 'UA',
+        israel: 'IL',
+        'south africa': 'ZA',
+        egypt: 'EG',
+        nigeria: 'NG',
+        kenya: 'KE',
+        'saudi arabia': 'SA',
+        'united arab emirates': 'AE',
+        uae: 'AE',
+        pakistan: 'PK',
+        bangladesh: 'BD',
+    }).map(([k, v]) => [k.toLowerCase(), v])
+);
+
 function inferCountryCodeForOpenMeteo(addr) {
     const s = String(addr);
     if (/\bJapan\b|\bTokyo\b|日本|東京|東京都|大阪|京都|北海道|沖縄|名古屋|福岡|Shinagawa|品川/i.test(s))
@@ -105,6 +281,12 @@ function inferCountryCodeForOpenMeteo(addr) {
     if (/\bChina\b|中国/i.test(s)) return 'CN';
     if (/\bUSA\b|\bUS\b|, [A-Z]{2}\s*\d{5}|United States/i.test(s)) return 'US';
     if (/\bUK\b|United Kingdom|England|Scotland|Wales/i.test(s)) return 'GB';
+
+    const parts = s.split(',').map((p) => p.trim()).filter(Boolean);
+    const last = (parts[parts.length - 1] || '').toLowerCase();
+    if (last && LAST_SEGMENT_COUNTRY_ISO2.has(last)) {
+        return LAST_SEGMENT_COUNTRY_ISO2.get(last);
+    }
     return undefined;
 }
 
@@ -152,11 +334,20 @@ async function openMeteoGeocode(address) {
             format: 'json',
         };
         if (useCountryFilter && countryCode) params.countryCode = countryCode;
-        const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
-            params,
-            timeout: 15000,
-        });
-        return data || {};
+        try {
+            const { data } = await axios.get('https://geocoding-api.open-meteo.com/v1/search', {
+                params,
+                timeout: 15000,
+            });
+            return data || {};
+        } catch (e) {
+            const st = e?.response?.status;
+            if (st === 400 || st === 404 || st === 422) {
+                console.warn('[maps] Open-Meteo query skipped:', q.slice(0, 90), st);
+                return {};
+            }
+            throw e;
+        }
     }
 
     const partsAll = full.split(',').map((p) => p.trim()).filter(Boolean);
@@ -248,18 +439,35 @@ function roughCoordsForDenseAreaHints(addr) {
     const s = String(addr);
     const lower = s.toLowerCase();
     const jpHint =
-        /tokyo|東京|shinagawa|品川|kita-shinagawa|minami-shinagawa|kitashinagawa|hiromachi|大井|大崎|戸越|140-0001|140-0002|140-0003|140-0004/i.test(
+        /tokyo|東京|japan|日本|shinagawa|品川|setagaya|世田谷|kasuya|粕谷|kita-shinagawa|minami-shinagawa|kitashinagawa|hiromachi|大井|大崎|戸越|chome|丁目|140-0001|140-0002|140-0003|140-0004|154-?00/i.test(
             s
         );
     if (!jpHint) return null;
-    // ~ Shinagawa ward centroid (better than Ehime “Shinagawa” hits from global search)
-    if (/shinagawa|品川|kita-shinagawa|minami-shinagawa|kitashinagawa|140-0001|140-0002|140-0003|140-0004|hiromachi|大井|大崎/i.test(s)) {
-        return { ltd: 35.6284, lng: 139.7388 };
+    if (/setagaya|世田谷|kasuya|粕谷/i.test(s)) {
+        return { ltd: 35.6464, lng: 139.6532 };
     }
-    if (/tokyo|東京/.test(lower)) {
+    if (/shinagawa|品川|kita-shinagawa|minami-shinagawa|kitashinagawa|140-0001|140-0002|140-0003|140-0004|hiromachi|大井|大崎|nishi|西大井|ōi|doi[0-9]/i.test(s)) {
+        return { ltd: 35.6057, lng: 139.7276 };
+    }
+    if (/tokyo|東京|chome|丁目|\bjapan\b|日本/.test(lower)) {
         return { ltd: 35.6812, lng: 139.7671 };
     }
     return null;
+}
+
+/** Last resort: any Tokyo metro–looking free text (school names, odd romaji) still gets a usable point. */
+function roughTokyoMetroFallback(addr) {
+    const s = String(addr);
+    if (!/tokyo|東京|japan|日本|setagaya|世田谷|shinagawa|品川|多摩|調布|chome|丁目|ku|区|154|141|140-?/i.test(s)) {
+        return null;
+    }
+    if (/setagaya|世田谷|kasuya|粕谷|上野毛|二子玉川/i.test(s)) {
+        return { ltd: 35.6464, lng: 139.6532 };
+    }
+    if (/shinagawa|品川|大井|大崎|五反田|田町|高輪|港南|oimachi|大井町/i.test(s)) {
+        return { ltd: 35.6057, lng: 139.7276 };
+    }
+    return { ltd: 35.6762, lng: 139.6503 };
 }
 
 /** Open-Meteo + optional Nominatim only — never calls Google (avoids recursion with getAddressCoordinates). */
@@ -273,6 +481,11 @@ async function geocodeWithoutGoogle(address) {
     } catch (err) {
         console.warn('[maps] Open-Meteo failed:', err.message);
     }
+    try {
+        return await photonGeocode(address);
+    } catch (err) {
+        console.warn('[maps] Photon failed:', err.message);
+    }
     if (process.env.MAPS_ENABLE_NOMINATIM === '1') {
         try {
             return await nominatimGeocode(address);
@@ -282,6 +495,11 @@ async function geocodeWithoutGoogle(address) {
     }
     const lastChance = roughCoordsForDenseAreaHints(address);
     if (lastChance) return lastChance;
+    const metro = roughTokyoMetroFallback(address);
+    if (metro) {
+        console.warn('[maps] Using Tokyo-metro coarse coordinates (geocoding APIs unavailable or rate-limited)');
+        return metro;
+    }
     throw new Error(
         `Unable to resolve "${address}". Try a more specific place (city + country), or set GOOGLE_MAPS_SERVER_API on the server.`
     );
