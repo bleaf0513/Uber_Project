@@ -1,26 +1,17 @@
 const mongoose = require('mongoose');
-require('dotenv').config();
+const dotenv = require('dotenv');
+dotenv.config();
 
-let memoryMongo = null;
+const URI = `mongodb+srv://${process.env.MONGO_USER}:${process.env.MONGO_PASS}@${process.env.MONGO_CONTEXT_URL}`
 
-async function connectToDb() {
-    let uri = process.env.MONGO_URI;
-
-    if (process.env.USE_IN_MEMORY_MONGO === 'true') {
-        const { MongoMemoryServer } = require('mongodb-memory-server');
-        memoryMongo = await MongoMemoryServer.create();
-        uri = memoryMongo.getUri();
-        console.log('[dev] Using in-memory MongoDB (no Atlas or local install needed)');
-    }
-
-    if (!uri) {
-        throw new Error(
-            'Missing MONGO_URI. Options: (1) npm run dev:memory  (2) Set MONGO_URI in backend/.env — see .env.example'
-        );
-    }
-
-    await mongoose.connect(uri);
-    console.log('Connected to MongoDB');
+function connectToDb() {
+    mongoose.connect(URI)
+        .then(() => {
+            console.log('Connected to uberdb database');
+        })
+        .catch((error) => {
+            console.log('Error:', error);
+        });
 }
 
 module.exports = connectToDb;

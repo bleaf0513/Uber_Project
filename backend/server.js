@@ -13,22 +13,6 @@ async function main() {
 
     initializeSocket(server);
 
-    // Bind all interfaces — required on Render/Fly/Docker so the platform proxy can reach the app.
-    server.listen(port, '0.0.0.0', () => {
-        console.log(`Server running on port ${port}`);
-        if (!process.env.GOOGLE_MAPS_SERVER_API && !process.env.GOOGLE_MAPS_API) {
-            console.warn(
-                '[warn] Set GOOGLE_MAPS_API or GOOGLE_MAPS_SERVER_API — backend map calls need a key (see .env.example).'
-            );
-        } else if (!process.env.GOOGLE_MAPS_SERVER_API && process.env.GOOGLE_MAPS_API) {
-            console.warn(
-                '[hint] If Geocoding/Places return REQUEST_DENIED, create GOOGLE_MAPS_SERVER_API — HTTP-referrer keys do not work from Node.'
-            );
-        }
-    });
-}
-
-main().catch((err) => {
-    console.error('Failed to start server:', err.message);
-    process.exit(1);
+server.listen(port, () => {
+    console.log(`Server running on port ${port}`);
 });

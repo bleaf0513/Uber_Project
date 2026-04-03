@@ -51,26 +51,10 @@ function isOriginAllowed(origin) {
 
 function initializeSocket(server) {
     io = socketIo(server, {
-        cookie: false,
-        // Slightly shorter than many edge idle timeouts; reduces stale long-polls when client uses polling fallback.
-        pingTimeout: 20000,
-        pingInterval: 10000,
-        connectTimeout: 45000,
-        perMessageDeflate: false,
-        httpCompression: false,
-        // Let clients upgrade to WebSocket (recommended on Render; polling-only sees more 502s behind the proxy).
-        transports: ['websocket', 'polling'],
         cors: {
-            origin: (origin, callback) => {
-                if (!origin) return callback(null, true);
-                if (isOriginAllowed(origin)) return callback(null, origin);
-                console.warn('[socket] CORS rejected origin:', origin);
-                return callback(null, false);
-            },
-            methods: ['GET', 'POST', 'OPTIONS'],
-            credentials: false,
-            allowedHeaders: ['Content-Type', 'Authorization'],
-        },
+            origin: '*',
+            methods: ['GET', 'POST']
+        }
     });
 
     io.on('connection', (socket) => {
@@ -88,20 +72,19 @@ function initializeSocket(server) {
         });
 
         socket.on('update-location-captain', async (data) => {
-            try {
-                const { userId, location } = data;
-                if (!location || location.ltd == null || location.lng == null) {
-                    return socket.emit('error', { message: 'Invalid location data' });
-                }
-                await captainModel.findByIdAndUpdate(userId, {
-                    location: {
-                        ltd: location.ltd,
-                        lng: location.lng,
-                    },
-                });
-            } catch (err) {
-                console.error('[socket] update-location-captain:', err.message);
+            // //console.log("update-location-captain", data);
+            const { userId, location } = data;
+
+            if (!location || !location.ltd || !location.lng) {
+                return socket.emit('error', { message: 'Invalid location data' });
             }
+
+            await captainModel.findByIdAndUpdate(userId, {
+                location: {
+                    ltd: location.ltd,
+                    lng: location.lng
+                }
+            });
         });
 
         socket.on('disconnect', () => {});

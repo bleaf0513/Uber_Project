@@ -17,32 +17,31 @@ module.exports.createRide = async (req, res) => {
 
     try {
         const ride = await rideService.createRide({ user: req.user._id, pickup, destination, vehicle });
+        res.status(201).json(ride);
 
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
 
-        // Wider radius (km) so demo/testing finds drivers; haversine filter is in maps.service
-        const captainsInRadius = await mapService.getCaptainsInTheRadius(
-            pickupCoordinates.ltd,
-            pickupCoordinates.lng,
-            15
-        );
+        const captainsInRadius = await mapService.getCaptainsInTheRadius(pickupCoordinates.ltd, pickupCoordinates.lng, 2);
+        // //console.log(captainsInRadius);
 
-        ride.otp = '';
+        ride.otp = ""
 
         const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
-        captainsInRadius.forEach((captain) => {
-            if (!captain.socketId) return;
+        // //console.log(rideWithUser);
+        captainsInRadius.map(captain => {
+
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
-            });
-        });
+            })
+
+        })
 
         return res.status(201).json(ride);
     } catch (err) {
-        console.error(err);
-        const msg = err?.message || 'Could not create ride';
-        return res.status(mapsErrorStatus(msg)).json({ message: msg });
+
+        //console.log(err);
+        return res.status(500).json({ message: err.message });
     }
 
 };
@@ -59,9 +58,7 @@ module.exports.getFare = async (req, res) => {
         const fare = await rideService.getFare(pickup, destination);
         return res.status(200).json(fare);
     } catch (err) {
-        console.error(err);
-        const msg = err?.message || 'Could not compute fare';
-        return res.status(mapsErrorStatus(msg)).json({ message: msg });
+        return res.status(500).json({ message: err.message });
     }
 }
 
