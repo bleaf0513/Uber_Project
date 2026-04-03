@@ -18,6 +18,11 @@ const getFare = async (pickup, destination) => {
     }
 
     const distanceTime = await mapService.getDistance(pickup, destination);
+    const meters = distanceTime?.distance?.value;
+    const seconds = distanceTime?.duration?.value;
+    if (!Number.isFinite(meters) || !Number.isFinite(seconds)) {
+        throw new Error('Could not compute fare for this route');
+    }
 
     const baseFare = {
         auto: 30,

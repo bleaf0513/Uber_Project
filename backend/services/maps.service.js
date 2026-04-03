@@ -102,9 +102,36 @@ function inferCountryCodeForOpenMeteo(addr) {
     const s = String(addr);
     if (/\bJapan\b|\bTokyo\b|日本|東京|東京都|大阪|京都|北海道|沖縄|名古屋|福岡|Shinagawa|品川/i.test(s))
         return 'JP';
+    if (/\bChina\b|中国/i.test(s)) return 'CN';
     if (/\bUSA\b|\bUS\b|, [A-Z]{2}\s*\d{5}|United States/i.test(s)) return 'US';
     if (/\bUK\b|United Kingdom|England|Scotland|Wales/i.test(s)) return 'GB';
     return undefined;
+}
+
+/** Bare country names break Open-Meteo when combined with the same countryCode filter (no "Japan" city inside JP). */
+function countryOrRegionCentroid(addr) {
+    const t = String(addr).trim();
+    const key = t.toLowerCase();
+    const table = [
+        [/^japan$|^日本$/i, 36.2048, 138.2529],
+        [/^china$|^中国$/i, 35.8617, 104.1954],
+        [/^usa$|^united states$|^u\.s\.a\.?$/i, 39.8283, -98.5795],
+        [/^uk$|^united kingdom$|^britain$/i, 55.3781, -3.436],
+        [/^france$/i, 46.2276, 2.2137],
+        [/^germany$|^deutschland$/i, 51.1657, 10.4515],
+        [/^india$/i, 20.5937, 78.9629],
+        [/^brazil$/i, -14.235, -51.9253],
+        [/^australia$/i, -25.2744, 133.7751],
+        [/^canada$/i, 56.1304, -106.3468],
+        [/^mexico$/i, 23.6345, -102.5528],
+        [/^korea$|^south korea$/i, 35.9078, 127.7669],
+    ];
+    for (const [re, ltd, lng] of table) {
+        if (re.test(t) || re.test(key)) {
+            return { ltd, lng };
+        }
+    }
+    return null;
 }
 
 async function openMeteoGeocode(address) {
@@ -154,7 +181,13 @@ async function openMeteoGeocode(address) {
         return Array.isArray(results) ? results : [];
     }
 
-    let results = await collectResults(true);
+    // Country-only queries (e.g. "Japan") return nothing if name is filtered by the same countryCode — search globally first.
+    const looksLikeCountryOnly =
+        /^[a-z]{2,20}$/i.test(full.trim()) || /^[\u4e00-\u9fff]{1,4}$/.test(full.trim());
+    let results =
+        countryCode && looksLikeCountryOnly && full.length <= 24
+            ? await collectResults(false)
+            : await collectResults(true);
     if (!results.length && countryCode) {
         results = await collectResults(false);
     }
@@ -231,6 +264,10 @@ function roughCoordsForDenseAreaHints(addr) {
 
 /** Open-Meteo + optional Nominatim only — never calls Google (avoids recursion with getAddressCoordinates). */
 async function geocodeWithoutGoogle(address) {
+    const centroid = countryOrRegionCentroid(address);
+    if (centroid) {
+        return centroid;
+    }
     try {
         return await openMeteoGeocode(address);
     } catch (err) {
