@@ -1,0 +1,15 @@
+# Render Blueprint — wire this Git repo to the Node API in /backend.
+# After pushing, in Render: Blueprints → New Blueprint Instance (or link repo and apply).
+# If you already have a Web Service, set Root Directory to "backend" to match this.
+#
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: uberclone-backend
+    runtime: node
+    rootDir: backend
+    buildCommand: npm install
+    startCommand: npm start
+    # Use `/` until `/healthz` exists on the running commit (then you can switch).
+    healthCheckPath: /
