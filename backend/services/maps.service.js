@@ -504,14 +504,10 @@ async function openMeteoGeocode(address) {
     if (!r || !Number.isFinite(r.latitude) || !Number.isFinite(r.longitude)) {
         throw new Error('Unable to resolve address (Open-Meteo)');
     }
-    if (
-        r.country_code === 'JP' &&
-        /tokyo|東京|shinagawa|品川|140-0001|140-0002|kita-shinagawa|hiromachi/i.test(hint)
-    ) {
+    if (r.country_code === 'JP' && looksLikeTokyoMetroAddress(full)) {
         const lat = r.latitude;
         const lng = r.longitude;
-        const inKanto = lat >= 35.05 && lat <= 35.95 && lng >= 139.35 && lng <= 140.2;
-        if (!inKanto) {
+        if (!inKantoBox(lat, lng)) {
             const fix = roughCoordsForDenseAreaHints(full);
             if (fix) {
                 console.warn('[maps] Open-Meteo matched wrong region; using Tokyo-area estimate');
@@ -543,6 +539,45 @@ function roughCoordsForDenseAreaHints(addr) {
         return { ltd: 35.6812, lng: 139.7671 };
     }
     return null;
+}
+
+function inKantoBox(lat, lng) {
+    return (
+        Number.isFinite(lat) &&
+        Number.isFinite(lng) &&
+        lat >= 35.05 &&
+        lat <= 35.95 &&
+        lng >= 139.35 &&
+        lng <= 140.2
+    );
+}
+
+/**
+ * Photon/OSM sometimes returns a different country's "Shinagawa" (e.g. Hokkaido). If the text clearly
+ * refers to Tokyo/Japan metro but coords are outside Kanto, prefer ward-level estimates.
+ */
+function looksLikeTokyoMetroAddress(s) {
+    const t = String(s);
+    const jpOrTokyo =
+        /\bJapan\b|日本|東京都/i.test(t) ||
+        /(^|[,，])\s*Tokyo\s*([,，]|$)/i.test(t) ||
+        /[,，]\s*Tokyo\s*,\s*Japan/i.test(t);
+    if (!jpOrTokyo) return false;
+    return /\bTokyo\b|東京|Shinagawa|品川|Setagaya|世田谷|Kita-?Shinagawa|北品川|Minami-?Shinagawa|南品川|Meguro|目黒|Shibuya|渋谷|Minato|港区|Chome\b|丁目|\u533a\u7acb|学園|小学校|中学校|高等学校/i.test(
+        t
+    );
+}
+
+function snapMisplacedTokyoGeocode(address, coords) {
+    if (!coords || !Number.isFinite(coords.ltd) || !Number.isFinite(coords.lng)) return coords;
+    if (inKantoBox(coords.ltd, coords.lng)) return coords;
+    if (!looksLikeTokyoMetroAddress(address)) return coords;
+    const fix = roughCoordsForDenseAreaHints(address);
+    if (fix) {
+        console.warn('[maps] Tokyo-area address geocoded outside Kanto; using ward estimate');
+        return fix;
+    }
+    return coords;
 }
 
 /** Last resort: any Tokyo metro–looking free text (school names, odd romaji) still gets a usable point. */
@@ -629,40 +664,43 @@ function isGoogleHardFail(data) {
 }
 
 module.exports.getAddressCoordinates = async (address) => {
-    const addr = stripLeadingVenueBeforeChome(normalizeAddressQuery(address));
+    const addrRaw = normalizeAddressQuery(address);
+    const addr = stripLeadingVenueBeforeChome(addrRaw);
     if (!addr) {
         throw new Error('Address is required');
     }
+    // Metro / country hints live in the full string; stripLeadingVenue may drop "Tokyo, Japan".
+    const finish = (c) => snapMisplacedTokyoGeocode(addrRaw, c);
     const key = serverMapsKey();
     if (!key) {
-        return geocodeWithoutGoogle(addr);
+        return finish(await geocodeWithoutGoogle(addr));
     }
     try {
         const data = await googleMapsFormPost('geocode/json', { address: addr });
 
         if (isGoogleHardFail(data)) {
             console.warn('[maps] Geocoding status', data.status, '— Open-Meteo fallback');
-            return geocodeWithoutGoogle(addr);
+            return finish(await geocodeWithoutGoogle(addr));
         }
         if (data.status === 'OK' && data.results?.length) {
             const loc = data.results[0]?.geometry?.location;
             const lat = loc?.lat;
             const lng = loc?.lng;
             if (Number.isFinite(lat) && Number.isFinite(lng)) {
-                return { ltd: lat, lng };
+                return finish({ ltd: lat, lng });
             }
         }
-        return geocodeWithoutGoogle(addr);
+        return finish(await geocodeWithoutGoogle(addr));
     } catch (error) {
         const status = error?.response?.status;
         if (status === 429 || status === 403) {
             console.warn('[maps] Geocoding HTTP', status, '— Open-Meteo fallback');
-            return geocodeWithoutGoogle(addr);
+            return finish(await geocodeWithoutGoogle(addr));
         }
         if (error instanceof Error && !error.response) {
             if (error.name === 'TypeError' || error.name === 'ReferenceError') {
                 console.error('[maps] geocode unexpected:', error);
-                return geocodeWithoutGoogle(addr);
+                return finish(await geocodeWithoutGoogle(addr));
             }
             const m = error.message || '';
             const isAxiosFail =
@@ -672,11 +710,11 @@ module.exports.getAddressCoordinates = async (address) => {
                 /timeout|Request failed with status code|Network Error/i.test(m);
             if (isAxiosFail) {
                 console.warn('[maps] geocode network — Open-Meteo fallback');
-                return geocodeWithoutGoogle(addr);
+                return finish(await geocodeWithoutGoogle(addr));
             }
         }
         console.warn('[maps] geocode — Open-Meteo fallback:', error?.message);
-        return geocodeWithoutGoogle(addr);
+        return finish(await geocodeWithoutGoogle(addr));
     }
 };
 
@@ -720,8 +758,9 @@ module.exports.getDistance = async (origin, destination) => {
             console.warn('[maps] No Google server key; estimating distance via fallbacks');
         }
 
-        const from = await module.exports.getAddressCoordinates(o);
-        const to = await module.exports.getAddressCoordinates(d);
+        // Pass original strings so getAddressCoordinates keeps country/city context for Tokyo snap (strip drops "Japan, Tokyo").
+        const from = await module.exports.getAddressCoordinates(origin);
+        const to = await module.exports.getAddressCoordinates(destination);
         const metersRaw = haversineMeters(from.ltd, from.lng, to.ltd, to.lng);
         if (!Number.isFinite(metersRaw)) {
             throw new Error('Could not compute distance between locations');
