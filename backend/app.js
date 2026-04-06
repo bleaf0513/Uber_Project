@@ -29,6 +29,38 @@ app.get('/', (req, res) => {
     res.send('Hello World');
 });
 
+/**
+ * Deploy / build probe — use after Render redeploy to confirm this instance runs new code.
+ * Open: GET https://<your-host>/version (no auth)
+ * Compare `git.commit` to your GitHub commit SHA after each deploy.
+ */
+app.get('/version', (req, res) => {
+    const commit =
+        process.env.RENDER_GIT_COMMIT ||
+        process.env.GIT_COMMIT ||
+        process.env.VERCEL_GIT_COMMIT_SHA ||
+        null;
+    res.json({
+        ok: true,
+        service: 'uberclone-backend',
+        node: process.version,
+        maps: {
+            /** Matches routes/maps.routes.js: read-only GETs have no JWT middleware. */
+            readOnlyRoutesPublic: true,
+        },
+        git: {
+            commit: commit,
+            branch: process.env.RENDER_GIT_BRANCH || process.env.GIT_BRANCH || null,
+        },
+        render: {
+            serviceId: process.env.RENDER_SERVICE_ID || null,
+            /** e.g. uber-project-psfi.onrender.com */
+            externalUrl: process.env.RENDER_EXTERNAL_URL || null,
+        },
+        time: new Date().toISOString(),
+    });
+});
+
 app.use('/users', userRoutes);
 app.use('/captain', captainRoutes);
 app.use('/maps', mapRoutes);
