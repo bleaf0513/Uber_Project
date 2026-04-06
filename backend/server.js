@@ -14,7 +14,15 @@ async function main() {
     initializeSocket(server);
 
     server.listen(port, () => {
+        const commit =
+            process.env.RENDER_GIT_COMMIT ||
+            process.env.GIT_COMMIT ||
+            process.env.VERCEL_GIT_COMMIT_SHA ||
+            '(not set)';
         console.log(`Server running on port ${port}`);
+        console.log(
+            `[boot] Deploy probe: GET /version and /healthz | RENDER_GIT_COMMIT|GIT_COMMIT=${commit}`
+        );
     });
 }
 
