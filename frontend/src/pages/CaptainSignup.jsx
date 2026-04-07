@@ -62,7 +62,7 @@ const CaptainSignup = () => {
 
       if (isOffline) {
         toast.error(
-          `Cannot reach the API (${getApiHintOrigin()}). Start the backend in another terminal: cd backend → npm run dev:memory — then refresh this page.`
+          `No se puede conectar con la API (${getApiHintOrigin()}). Inicia el backend en otra terminal: cd backend -> npm run dev:memory y luego recarga esta pagina.`
         );
       } else {
         const msg =
@@ -71,8 +71,8 @@ const CaptainSignup = () => {
           (Array.isArray(err.response?.data?.errors) &&
             err.response.data.errors[0]?.msg) ||
           err.message ||
-          "Signup failed.";
-        toast.error(typeof msg === "string" ? msg : "Signup failed.");
+          "Error al registrarse.";
+        toast.error(typeof msg === "string" ? msg : "Error al registrarse.");
       }
     } finally {
       setSubmitting(false);
@@ -98,7 +98,7 @@ const CaptainSignup = () => {
             }}
           >
             <h3 className="text-base mb-2 font-semibold">
-              What should we call you?
+              Como quieres que te llamemos?
             </h3>
             <div className="flex gap-3 mb-4">
               <input
@@ -107,7 +107,7 @@ const CaptainSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-base placeholder:text-base  placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="First name"
+                placeholder="Nombre"
               />
               <input
                 value={lastname}
@@ -115,30 +115,30 @@ const CaptainSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-base placeholder:text-base  placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="Last name"
+                placeholder="Apellido"
               />
             </div>
 
-            <h3 className="text-base mb-2 font-semibold">What's your email</h3>
+            <h3 className="text-base mb-2 font-semibold">Cual es tu correo?</h3>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="bg-[#ededed] mb-4 rounded-lg px-4 py-2 border w-full text-base placeholder:text-base  placeholder:ml-2"
               required
               type="email"
-              placeholder="your_email@here.com"
+              placeholder="tu_correo@aqui.com"
             />
-            <h3 className="text-base mb-2 font-semibold">Enter Password</h3>
+            <h3 className="text-base mb-2 font-semibold">Ingresa la contrasena</h3>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="bg-[#ededed] mb-4 rounded-lg px-4 py-2 border w-full text-base placeholder:text-base  placeholder:ml-2"
               type="password"
               required
-              placeholder="yourPassword"
+              placeholder="tuContrasena"
             />
             <h3 className="text-base mb-2 font-semibold">
-              Vehicle Information
+              Informacion del vehiculo
             </h3>
             <div className="flex gap-3 mb-5">
               <input
@@ -147,7 +147,7 @@ const CaptainSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-lg placeholder:text-base  placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="Vehicle Color"
+                placeholder="Color del vehiculo"
               />
               <input
                 value={vehiclePlate}
@@ -155,7 +155,7 @@ const CaptainSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-lg placeholder:text-base  placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="Vehicle Plate"
+                placeholder="Placa del vehiculo"
               />
             </div>
             <div className="flex gap-3 mb-10">
@@ -165,7 +165,7 @@ const CaptainSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-lg placeholder:text-base  placeholder:ml-2 w-1/2"
                 required
                 type="number"
-                placeholder="Vehicle Capacity"
+                placeholder="Capacidad del vehiculo"
               />
               <select
                 value={vehicleType}
@@ -174,11 +174,11 @@ const CaptainSignup = () => {
                 required
               >
                 <option value="" disabled>
-                  Select Vehicle Type
+                  Selecciona tipo de vehiculo
                 </option>
-                <option value="car">Car</option>
+                <option value="car">Auto</option>
                 <option value="auto">Auto</option>
-                <option value="motorcycle">Motorcycle</option>
+                <option value="motorcycle">Motocicleta</option>
               </select>
             </div>
 
@@ -187,12 +187,12 @@ const CaptainSignup = () => {
               disabled={submitting}
               className="bg-black text-white font-semibold mb-3 rounded-lg px-4 py-3 border w-full text-lg mt-2 disabled:opacity-60"
             >
-              {submitting ? "Creating…" : "Create Account"}
+              {submitting ? "Creando..." : "Crear cuenta"}
             </button>
             <p className="text-center">
-              Already a captain?{" "}
+              Ya eres capitan?{" "}
               <Link to="/captain-login" className="text-blue-600">
-                Login here.
+                Inicia sesion aqui.
               </Link>
             </p>
           </form>

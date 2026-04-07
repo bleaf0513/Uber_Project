@@ -4,12 +4,12 @@ import { toast } from "react-toastify";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
 
-const FinishRide = ({ setFinishRidePanel, ride }) => {
+const FinalizarRide = ({ setFinalizarRidePanel, ride }) => {
   const [check, setCheck] = React.useState(false);
   const navigate = useNavigate();
 
   const notify = () => {
-    toast.error("Please check the bottom box", {
+    toast.error("Por favor marca la casilla inferior", {
       position: "top-center",
       autoClose: 5000,
       zIndex: 9999,
@@ -41,7 +41,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
     }
   }
 
-  const handleFinish = () => {
+  const handleFinalizar = () => {
     if (check) {
       endRide();
     } else {
@@ -64,7 +64,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
   return (
     <div>
       <div className="flex flex-col justify-center items-center py-3 ">
-        <h2 className="text-2xl font-semibold">Finish this Ride</h2>
+        <h2 className="text-2xl font-semibold">Finalizar este viaje</h2>
 
         <div
           className="mt-2"
@@ -145,7 +145,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
           className="flex flex-row items-center justify-around gap-3"
         >
           <button
-            onClick={handleFinish}
+            onClick={handleFinalizar}
             style={{
               width: "60%",
               padding: "5px",
@@ -154,11 +154,11 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
             }}
             className="bg-green-600 text-white text-xl font-semibold rounded-lg text-center"
           >
-            Finish
+            Finalizar
           </button>
           <button
             onClick={() => {
-              setFinishRidePanel(false);
+              setFinalizarRidePanel(false);
             }}
             style={{
               width: "60%",
@@ -168,7 +168,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
             }}
             className="bg-red text-white font-semibold text-xl rounded-lg"
           >
-            Cancel
+            Cancelar
           </button>
         </div>
 
@@ -184,7 +184,7 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
           />
 
           <p className="text-center text-[11px] text-gray-600">
-            Click on the Finish Ride button only if payment was successful in
+            Click on the Finalizar Ride button only if payment was successful in
             case of Cash Payment.
           </p>
         </div>
@@ -193,4 +193,4 @@ const FinishRide = ({ setFinishRidePanel, ride }) => {
   );
 };
 
-export default FinishRide;
+export default FinalizarRide;

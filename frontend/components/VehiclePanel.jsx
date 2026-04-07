@@ -35,7 +35,7 @@ const VehiclePanel = (props) => {
           onClick={() => props.setVehiclePanel(false)}
           className="rounded-full bg-gray-900 text-white text-sm px-5 py-2"
         >
-          Close
+          Cerrar
         </button>
       </div>
     );
@@ -61,7 +61,7 @@ const VehiclePanel = (props) => {
               fill="currentFill"
             />
           </svg>
-          <span className="sr-only">Loading...</span>
+          <span className="sr-only">Autogando...</span>
         </div>
       </div>
     );
@@ -94,7 +94,7 @@ const VehiclePanel = (props) => {
           className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="car" label="Car" />
+            <VehicleThumb name="car" label="Auto" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
@@ -112,7 +112,7 @@ const VehiclePanel = (props) => {
                 Date.now() + props.distance.duration.value * 1000 * 1.0
               ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </h2>
-            <h2 className="text-sm font-light">Comfortable, spacious</h2>
+            <h2 className="text-sm font-light">Comodo y espacioso</h2>
           </div>
 
           <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">
@@ -131,7 +131,7 @@ const VehiclePanel = (props) => {
           className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="moto" label="Motorcycle" />
+            <VehicleThumb name="moto" label="Motocicleta" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
@@ -149,7 +149,7 @@ const VehiclePanel = (props) => {
                 Date.now() + props.distance.duration.value * 1000 * 0.85
               ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </h2>
-            <h2 className="text-sm font-light">Affordable, fast</h2>
+            <h2 className="text-sm font-light">Economico y rapido</h2>
           </div>
 
           <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">
@@ -168,7 +168,7 @@ const VehiclePanel = (props) => {
           className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="auto" label="Auto rickshaw" />
+            <VehicleThumb name="auto" label="Mototaxi" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
@@ -186,7 +186,7 @@ const VehiclePanel = (props) => {
                 Date.now() + props.distance.duration.value * 1000 * 0.94
               ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
             </h2>
-            <h2 className="text-sm font-light">Affordable, compact sized</h2>
+            <h2 className="text-sm font-light">Economico y compacto</h2>
           </div>
 
           <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">

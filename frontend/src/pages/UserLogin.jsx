@@ -63,7 +63,7 @@ const UserLogin = () => {
         }
       }
     } catch (error) {
-      notify("Login failed, invalid email or password", false);
+      notify("Inicio de sesion fallido, correo o contrasena invalida", false);
       console.error("Login failed:", error);
     } finally {
       setLoading(false);
@@ -90,31 +90,31 @@ const UserLogin = () => {
                 submitHandler(e);
               }}
             >
-              <h3 className="text-xl mb-2 font-semibold">What's your email</h3>
+              <h3 className="text-xl mb-2 font-semibold">Cual es tu correo?</h3>
               <input
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 className="bg-[#ededed] mb-7 rounded-lg px-4 py-2 border w-full text-lg placeholder:text-base font-semibold placeholder:ml-2"
                 required
                 type="email"
-                placeholder="your_email@here.com"
+                placeholder="tu_correo@aqui.com"
               />
-              <h3 className="text-xl mb-2 font-semibold">Enter Password</h3>
+              <h3 className="text-xl mb-2 font-semibold">Ingresa la contrasena</h3>
               <input
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 className="bg-[#ededed] mb-7 rounded-lg px-4 py-2 border w-full text-lg placeholder:text-base font-semibold placeholder:ml-2"
                 type="password"
                 required
-                placeholder="yourPassword"
+                placeholder="tuContrasena"
               />
               <button className="bg-black text-white font-semibold mb-5 rounded-lg px-4 py-3 border w-full text-lg mt-2">
-                {loading ? "Loading..." : "Login"}
+                {loading ? "Cargando..." : "Iniciar sesion"}
               </button>
               <p className="text-center">
-                New here?{" "}
+                Nuevo aqui?{" "}
                 <Link to="/signup" className="text-blue-600">
-                  create an account now.
+                  crea una cuenta ahora.
                 </Link>
               </p>
             </form>
@@ -125,7 +125,7 @@ const UserLogin = () => {
             to="/captain-login"
             className="flex justify-center items-center bg-blue-600 text-white font-semibold mb-7 rounded-lg px-4 py-3 border w-full text-lg mx-7 "
           >
-            Sign in as Captain
+            Entrar como Capitan
           </Link>
         </div>
       </div>

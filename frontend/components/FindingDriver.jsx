@@ -73,7 +73,7 @@ const FindingDriver = (props) => {
     <div>
       <div className="flex flex-col justify-center items-center py-3 ">
         <div className="flex flex-row justify-center items-center">
-          <h2 className="text-2xl font-semibold">Finding Drivers</h2>
+          <h2 className="text-2xl font-semibold">Buscando conductores</h2>
           <div className="mx-2" role="status">
             <svg
               aria-hidden="true"
@@ -91,7 +91,7 @@ const FindingDriver = (props) => {
                 fill="currentFill"
               />
             </svg>
-            <span className="sr-only">Loading...</span>
+            <span className="sr-only">Cargando...</span>
           </div>
         </div>
 
@@ -163,7 +163,7 @@ const FindingDriver = (props) => {
             <h2 className="text-xl font-semibold">
               ₹{Math.ceil(props.selectedPrice)}
             </h2>
-            <h4 className="text-sm">Cash or UPI Only</h4>
+            <h4 className="text-sm">Solo efectivo o UPI</h4>
             <div
               className="my-2"
               style={{ height: "2px", width: "100%", background: "#D6D6D6" }}

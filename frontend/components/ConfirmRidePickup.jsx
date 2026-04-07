@@ -5,9 +5,9 @@ import "remixicon/fonts/remixicon.css";
 import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
-const ConfirmRidePickup = (props) => {
+const ConfirmarRidePickup = (props) => {
   if (props.ride === null) {
-    return <div>Loading...</div>;
+    return <div>Cargando...</div>;
   }
   const navigate = useNavigate();
   const [otp, setOtp] = React.useState("");
@@ -44,7 +44,7 @@ const ConfirmRidePickup = (props) => {
     <form action="" onSubmit={(e) => handleSubmit(e)}>
       <div>
         <div className="flex flex-col justify-center items-center py-3 ">
-          <h2 className="text-2xl font-semibold">Confirm to start the ride</h2>
+          <h2 className="text-2xl font-semibold">Confirmara para iniciar el viaje</h2>
           <div
             className="mt-2"
             style={{
@@ -84,7 +84,7 @@ const ConfirmRidePickup = (props) => {
             className="text-center w-[80%] bg-gray-200 py-2 rounded-lg text-lg font-semibold font-mono"
             type="number"
             required
-            placeholder="Enter OTP"
+            placeholder="Ingresa OTP"
           />
         </div>
         <div className="flex flex-col justify-start items-start mx-2">
@@ -120,7 +120,7 @@ const ConfirmRidePickup = (props) => {
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
               <h2 className="text-xl font-semibold">₹{props.ride.fare}</h2>
-              <h4 className="text-sm">Cash Cash</h4>
+              <h4 className="text-sm">Solo efectivo</h4>
               <div
                 className="my-2"
                 style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -147,11 +147,11 @@ const ConfirmRidePickup = (props) => {
               }}
               className="bg-green-600 text-white text-xl font-semibold rounded-lg text-center"
             >
-              Confirm
+              Confirmar
             </button>
             <button
               onClick={() => {
-                props.setConfirmRidePickup(false);
+                props.setConfirmarRidePickup(false);
               }}
               style={{
                 width: "60%",
@@ -161,7 +161,7 @@ const ConfirmRidePickup = (props) => {
               }}
               className="bg-red text-white font-semibold text-xl rounded-lg"
             >
-              Cancel
+              Cancelar
             </button>
           </div>
         </div>
@@ -170,4 +170,4 @@ const ConfirmRidePickup = (props) => {
   );
 };
 
-export default ConfirmRidePickup;
+export default ConfirmarRidePickup;

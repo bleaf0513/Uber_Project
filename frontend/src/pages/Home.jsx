@@ -216,7 +216,7 @@ function Home() {
           const detail =
             typeof apiMsg === "string" && apiMsg.trim()
               ? apiMsg
-              : error?.message || "Could not load prices for this route.";
+              : error?.message || "No se pudieron cargar los precios para esta ruta.";
           console.error("Error fetching fare or distance:", detail, error);
           setPrices(null);
           setDistance(null);
@@ -446,7 +446,7 @@ function Home() {
       >
         <div className="h-[32%] bg-white p-5 flex flex-col justify-around z-50">
           <h4 ref={titleRef} className="text-3xl font-semibold ml-1">
-            Find a ride
+            Buscar un viaje
           </h4>
           <i
             onClick={() => {
@@ -472,7 +472,7 @@ function Home() {
               }}
               className="bg-[#eee] rounded-lg px-3 py-3 text-lg w-full mt-2 mb-2 pl-16"
               type="text"
-              placeholder="Add a pick-up location"
+              placeholder="Agregar punto de recogida"
             />
             <input
               value={destination}
@@ -486,7 +486,7 @@ function Home() {
               }}
               className="bg-[#eee] rounded-lg px-3 py-3 text-lg w-full mt-2 mb-2 pl-16"
               type="text"
-              placeholder="Enter your destination"
+              placeholder="Ingresa tu destino"
             />
           </form>
         </div>

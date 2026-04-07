@@ -88,7 +88,7 @@ const ConfirmedRide = (props) => {
             <h2 className="text-xl font-semibold">
               ₹{Math.ceil(props.selectedPrice)}
             </h2>
-            <h4 className="text-sm">Cash or UPI Only</h4>
+            <h4 className="text-sm">Solo efectivo o UPI</h4>
             <div
               className="my-2"
               style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -106,7 +106,7 @@ const ConfirmedRide = (props) => {
           style={{ width: "60%", padding: "5px", paddingBottom: "8px" }}
           className="bg-black text-white text-xl rounded-lg mb-5"
         >
-          Confirm Ride
+          Confirmar viaje
         </button>
       </div>
     </div>

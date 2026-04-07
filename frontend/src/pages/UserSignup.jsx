@@ -15,7 +15,7 @@ const UserSignup = () => {
     return new Promise((res) => setTimeout(res, delay));
   }
   const notify = () =>
-    toast.success(`Registered, Redirecting to Login`, {
+    toast.success(`Registrado, redirigiendo al inicio de sesion`, {
       position: "top-center",
       autoClose: 5000,
       hideProgressBar: false,
@@ -80,7 +80,7 @@ const UserSignup = () => {
             }}
           >
             <h3 className="text-base mb-2 font-semibold">
-              What should we call you?
+              Como quieres que te llamemos?
             </h3>
             <div className="flex gap-3 mb-5">
               <input
@@ -89,7 +89,7 @@ const UserSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-lg placeholder:text-base font-semibold placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="First name"
+                placeholder="Nombre"
               />
               <input
                 value={lastname}
@@ -97,35 +97,35 @@ const UserSignup = () => {
                 className="bg-[#ededed] rounded-lg px-4 py-2 border text-lg placeholder:text-base font-semibold placeholder:ml-2 w-1/2"
                 required
                 type="text"
-                placeholder="Last name"
+                placeholder="Apellido"
               />
             </div>
 
-            <h3 className="text-base mb-2 font-semibold">What's your email</h3>
+            <h3 className="text-base mb-2 font-semibold">Cual es tu correo?</h3>
             <input
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="bg-[#ededed] mb-5 rounded-lg px-4 py-2 border w-full text-lg placeholder:text-base font-semibold placeholder:ml-2"
               required
               type="email"
-              placeholder="your_email@here.com"
+              placeholder="tu_correo@aqui.com"
             />
-            <h3 className="text-base mb-2 font-semibold">Enter Password</h3>
+            <h3 className="text-base mb-2 font-semibold">Ingresa la contrasena</h3>
             <input
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               className="bg-[#ededed] mb-5 rounded-lg px-4 py-2 border w-full text-lg placeholder:text-base font-semibold placeholder:ml-2"
               type="password"
               required
-              placeholder="yourPassword"
+              placeholder="tuContrasena"
             />
             <button className="bg-black text-white font-semibold mb-5 rounded-lg px-4 py-3 border w-full text-lg mt-2">
-              Create Account
+              Crear cuenta
             </button>
             <p className="text-center">
-              Already a user?{" "}
+              Ya eres usuario?{" "}
               <Link to="/login" className="text-blue-600">
-                Login here.
+                Inicia sesion aqui.
               </Link>
             </p>
           </form>
@@ -133,9 +133,9 @@ const UserSignup = () => {
       </div>
       <div className="flex justify-center items-center p-4 bg-gray-100">
         <p className="text-center text-[11px] text-gray-600">
-          By creating an account, you agree to our Terms of Service and Privacy
-          Policy. Your information is safe with us and will not be shared
-          without your consent.
+          Al crear una cuenta, aceptas nuestros Terminos de servicio y
+          Politica de privacidad. Tu informacion esta segura y no se compartira
+          sin tu consentimiento.
         </p>
       </div>
       <ToastContainer />

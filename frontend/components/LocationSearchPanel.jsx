@@ -36,7 +36,7 @@ const LocationSearchPanel = ({ suggestions = [], onSuggestionSelect }) => {
       ))}
       {safeSuggestions.length === 0 && (
         <div className="p-4 text-center text-gray-500">
-          Type to search locations...
+          Escribe para buscar ubicaciones...
         </div>
       )}
     </>

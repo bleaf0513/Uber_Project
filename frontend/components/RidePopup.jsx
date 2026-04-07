@@ -1,7 +1,7 @@
 import React from "react";
 
 const RidePopup = (props) => {
-  if (!props.ride) return <div>Loading...</div>;
+  if (!props.ride) return <div>Cargando...</div>;
   const destinationAd = props.ride?.destination;
   const pickupAd = props.ride?.pickup;
   const fare = props.ride?.fare;
@@ -21,7 +21,7 @@ const RidePopup = (props) => {
   return (
     <div>
       <div className="flex flex-col justify-center items-center py-3 ">
-        <h2 className="text-2xl font-semibold">New Ride Available</h2>
+        <h2 className="text-2xl font-semibold">Nuevo viaje disponible</h2>
         <div
           className="mt-2"
           style={{
@@ -67,7 +67,7 @@ const RidePopup = (props) => {
           </div>
           <div className="flex flex-col justify-start items-start w-full mr-5">
             <h2 className="text-xl font-semibold">₹{fare}</h2>
-            <h4 className="text-sm">Cash Cash</h4>
+            <h4 className="text-sm">Solo efectivo</h4>
             <div
               className="my-2"
               style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -91,7 +91,7 @@ const RidePopup = (props) => {
           }}
           className="bg-green-600 text-white text-xl font-semibold rounded-lg"
         >
-          Accept
+          Aceptar
         </button>
         <button
           onClick={() => {
@@ -106,7 +106,7 @@ const RidePopup = (props) => {
           }}
           className="bg-red text-white font-semibold text-xl rounded-lg"
         >
-          Ignore
+          Ignorar
         </button>
       </div>
     </div>
