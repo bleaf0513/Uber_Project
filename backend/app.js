@@ -29,49 +29,6 @@ app.get('/', (req, res) => {
     res.send('Hello World');
 });
 
-function deployProbePayload() {
-    const commit =
-        process.env.RENDER_GIT_COMMIT ||
-        process.env.GIT_COMMIT ||
-        process.env.VERCEL_GIT_COMMIT_SHA ||
-        null;
-    return {
-        ok: true,
-        service: 'uberclone-backend',
-        node: process.version,
-        endpoints: ['/version', '/healthz'],
-        maps: {
-            /** Matches routes/maps.routes.js: read-only GETs have no JWT middleware. */
-            readOnlyRoutesPublic: true,
-        },
-        git: {
-            commit: commit,
-            branch: process.env.RENDER_GIT_BRANCH || process.env.GIT_BRANCH || null,
-        },
-        render: {
-            serviceId: process.env.RENDER_SERVICE_ID || null,
-            /** e.g. uber-project-psfi.onrender.com */
-            externalUrl: process.env.RENDER_EXTERNAL_URL || null,
-        },
-        time: new Date().toISOString(),
-    };
-}
-
-/**
- * Deploy / build probe — use after Render redeploy to confirm this instance runs new code.
- * Open either URL (no auth):
- *   GET /version
- *   GET /healthz
- * Compare `git.commit` to your GitHub commit SHA after each deploy.
- */
-app.get('/version', (req, res) => {
-    res.json(deployProbePayload());
-});
-
-app.get('/healthz', (req, res) => {
-    res.json(deployProbePayload());
-});
-
 app.use('/users', userRoutes);
 app.use('/captain', captainRoutes);
 app.use('/maps', mapRoutes);
