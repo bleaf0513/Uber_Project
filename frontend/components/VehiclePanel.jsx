@@ -1,7 +1,7 @@
 import React from "react";
 
 function VehicleThumb({ name, label }) {
-  const src = `${import.meta.env.BASE_URL}vehicles/${name}.svg`;
+  const src = `${import.meta.env.BASE_URL}vehicles/${name}.png`;
   return (
     <img
       src={src}
