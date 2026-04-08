@@ -222,8 +222,6 @@ const LogisticsDriverMap = ({ selectedDriver, driverDeliveries }) => {
 };
 
 const EnterpriseLogistics = () => {
-  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
-
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
@@ -232,6 +230,7 @@ const EnterpriseLogistics = () => {
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressSelected, setAddressSelected] = useState(false);
+
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
   const addressBoxRef = useRef(null);
@@ -340,71 +339,38 @@ const EnterpriseLogistics = () => {
     };
   }, []);
 
-  const geocodeAddress = (address, placeId = "") => {
-  return new Promise((resolve, reject) => {
-    if (!mapsApiLoaded || !window.google?.maps) {
-      reject(new Error("Google Maps aún no está cargado."));
-      return;
+  const handleAddressSelect = async (suggestion) => {
+    try {
+      const { data } = await axios.get(`${getApiBaseUrl()}/maps/geocode-place`, {
+        params: {
+          placeId: suggestion.place_id || "",
+          address: suggestion.description || "",
+        },
+        timeout: 18000,
+      });
+
+      setFormData((prev) => ({
+        ...prev,
+        address: data.formattedAddress || suggestion.description,
+        placeId: data.placeId || suggestion.place_id || "",
+        deliveryLocation: {
+          lat: Number(data.lat),
+          lng: Number(data.lng),
+        },
+      }));
+
+      setAddressSelected(true);
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+    } catch (error) {
+      console.error("Error selecting address:", error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No fue posible obtener la coordenada de esa dirección."
+      );
     }
-
-    const geocoder = new window.google.maps.Geocoder();
-
-    const request = placeId
-      ? { placeId }
-      : { address, region: "co" };
-
-    geocoder.geocode(request, (results, status) => {
-      if (
-        status === "OK" &&
-        results &&
-        results[0] &&
-        results[0].geometry &&
-        results[0].geometry.location
-      ) {
-        const location = results[0].geometry.location;
-
-        resolve({
-          lat: location.lat(),
-          lng: location.lng(),
-          formattedAddress: results[0].formatted_address || address,
-          placeId: results[0].place_id || placeId || "",
-        });
-      } else {
-        reject(
-          new Error(
-            `No se pudo geolocalizar esa dirección. Estado: ${status || "desconocido"}`
-          )
-        );
-      }
-    });
-  });
-};
-
-const handleAddressSelect = async (suggestion) => {
-  try {
-    const geo = await geocodeAddress(
-      suggestion.description,
-      suggestion.place_id || ""
-    );
-
-    setFormData((prev) => ({
-      ...prev,
-      address: geo.formattedAddress,
-      placeId: geo.placeId || suggestion.place_id || "",
-      deliveryLocation: {
-        lat: Number(geo.lat),
-        lng: Number(geo.lng),
-      },
-    }));
-
-    setAddressSelected(true);
-    setAddressSuggestions([]);
-    setShowSuggestions(false);
-  } catch (error) {
-    console.error("Error selecting address:", error);
-    alert(error?.message || "No fue posible obtener la coordenada de esa dirección.");
-  }
-};
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -452,9 +418,7 @@ const handleAddressSelect = async (suggestion) => {
     }
 
     if (!addressSelected || !placeId || !deliveryLocation) {
-      alert(
-        "Debes escoger la dirección desde la lista de sugerencias para guardar la coordenada."
-      );
+      alert("Debes escoger la dirección desde la lista de sugerencias.");
       return;
     }
 
