@@ -2,6 +2,115 @@ import React, { useEffect, useMemo, useRef, useState, useCallback } from "react"
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
+import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
+
+const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
+
+const EnterpriseLogisticsDriverMap = ({ selectedDriver }) => {
+  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
+
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+  const infoWindowRef = useRef(null);
+
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+        center: DEFAULT_CENTER,
+        zoom: 12,
+        mapTypeControl: false,
+        streetViewControl: false,
+        fullscreenControl: true,
+        zoomControl: true,
+      });
+
+      infoWindowRef.current = new window.google.maps.InfoWindow();
+    }
+  }, [mapsApiLoaded]);
+
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
+
+    if (!selectedDriver?.currentLocation?.lat || !selectedDriver?.currentLocation?.lng) {
+      if (markerRef.current) {
+        markerRef.current.setMap(null);
+        markerRef.current = null;
+      }
+
+      mapInstanceRef.current.setCenter(DEFAULT_CENTER);
+      mapInstanceRef.current.setZoom(12);
+      return;
+    }
+
+    const coords = {
+      lat: Number(selectedDriver.currentLocation.lat),
+      lng: Number(selectedDriver.currentLocation.lng),
+    };
+
+    if (!markerRef.current) {
+      markerRef.current = new window.google.maps.Marker({
+        map: mapInstanceRef.current,
+        position: coords,
+        title: selectedDriver.name || "Conductor",
+        icon: {
+          url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+        },
+      });
+    } else {
+      markerRef.current.setPosition(coords);
+      markerRef.current.setTitle(selectedDriver.name || "Conductor");
+      markerRef.current.setMap(mapInstanceRef.current);
+    }
+
+    mapInstanceRef.current.panTo(coords);
+    mapInstanceRef.current.setZoom(15);
+
+    const updatedAtText = selectedDriver.currentLocation.updatedAt
+      ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+      : "Sin registro";
+
+    const content = `
+      <div style="min-width:220px;padding:4px 6px;">
+        <div style="font-weight:700;font-size:15px;margin-bottom:6px;">
+          ${selectedDriver.name || "Conductor"}
+        </div>
+        <div style="font-size:13px;margin-bottom:4px;">
+          Estado: <b>${selectedDriver.status || "Disponible"}</b>
+        </div>
+        <div style="font-size:13px;margin-bottom:4px;">
+          Vehículo: ${selectedDriver.vehicle || "-"}
+        </div>
+        <div style="font-size:13px;margin-bottom:4px;">
+          Placa: ${selectedDriver.plate || "-"}
+        </div>
+        <div style="font-size:13px;margin-bottom:4px;">
+          Última actualización: ${updatedAtText}
+        </div>
+        <div style="font-size:12px;color:#666;">
+          ${coords.lat}, ${coords.lng}
+        </div>
+      </div>
+    `;
+
+    if (infoWindowRef.current) {
+      infoWindowRef.current.setContent(content);
+      infoWindowRef.current.open({
+        anchor: markerRef.current,
+        map: mapInstanceRef.current,
+      });
+    }
+  }, [mapsApiLoaded, selectedDriver]);
+
+  return (
+    <div
+      ref={mapRef}
+      className="w-full h-[420px] rounded-2xl overflow-hidden border border-gray-200"
+    />
+  );
+};
 
 const EnterpriseLogistics = () => {
   const [drivers, setDrivers] = useState([]);
@@ -270,6 +379,25 @@ const EnterpriseLogistics = () => {
     };
   }, [filteredDeliveries]);
 
+  const selectedDriverPendingDeliveries = useMemo(() => {
+    if (!selectedDriver) return [];
+
+    return deliveries.filter(
+      (delivery) =>
+        String(delivery.assignedDriverId) === String(selectedDriver.id) &&
+        delivery.status !== "Finalizada"
+    );
+  }, [deliveries, selectedDriver]);
+
+  const openDriverInGoogleMaps = () => {
+    if (!selectedDriver?.currentLocation?.lat || !selectedDriver?.currentLocation?.lng) {
+      return;
+    }
+
+    const url = `https://www.google.com/maps?q=${selectedDriver.currentLocation.lat},${selectedDriver.currentLocation.lng}`;
+    window.open(url, "_blank");
+  };
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
@@ -445,6 +573,81 @@ const EnterpriseLogistics = () => {
             </div>
           </div>
         </div>
+
+        {selectedDriver ? (
+          <div className="bg-white rounded-2xl shadow p-5 mb-5">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">
+                  Ubicación del conductor
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Seguimiento visual en tiempo real
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={openDriverInGoogleMaps}
+                disabled={!selectedDriver?.currentLocation?.lat}
+                className={`px-4 py-2 rounded-xl font-semibold ${
+                  selectedDriver?.currentLocation?.lat
+                    ? "bg-green-600 text-white"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                Abrir en Google Maps
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-4">
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="text-sm text-gray-500">Conductor</p>
+                <p className="font-bold text-gray-900">{selectedDriver.name}</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="text-sm text-gray-500">Estado</p>
+                <p className="font-bold text-gray-900">
+                  {selectedDriver.status || "Disponible"}
+                </p>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4">
+                <p className="text-sm text-gray-500">Última actualización</p>
+                <p className="font-bold text-gray-900">
+                  {selectedDriver.currentLocation?.updatedAt
+                    ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+                    : "Aún no reportada"}
+                </p>
+              </div>
+            </div>
+
+            <EnterpriseLogisticsDriverMap selectedDriver={selectedDriver} />
+
+            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-blue-50 rounded-xl p-4">
+                <p className="text-sm text-blue-700 font-semibold">
+                  Coordenadas actuales
+                </p>
+                <p className="text-sm text-gray-800 mt-1">
+                  {selectedDriver.currentLocation
+                    ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
+                    : "Sin ubicación reportada"}
+                </p>
+              </div>
+
+              <div className="bg-purple-50 rounded-xl p-4">
+                <p className="text-sm text-purple-700 font-semibold">
+                  Entregas pendientes de este conductor
+                </p>
+                <p className="text-2xl font-bold text-purple-700 mt-1">
+                  {selectedDriverPendingDeliveries.length}
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : null}
 
         <div className="bg-white rounded-2xl shadow p-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
