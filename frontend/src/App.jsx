@@ -34,31 +34,28 @@ const App = () => {
   }, []);
 
   const DesktopMessage = () => (
-    <div
-      className="text-2xl font-semibold font-sans text-white flex flex-col justify-center items-center"
-      style={{
-        height: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        textAlign: "center",
-        padding: "20px",
-        background: "linear-gradient(to right, #00c6ff, #0072ff)",
-      }}
-    >
-      <img
-        className="w-[10%] p-2.5"
-        src="/logo-centralgo.jpeg"
-        alt="logo"
-      />
-      <h1>
-        Central Go está diseñado para verse mejor en celular.
-        <br />
-        Por favor abre la app en modo móvil o desde tu teléfono.
-      </h1>
-
-    </div>
-  );
+  <div
+    className="text-white flex flex-col justify-center items-center"
+    style={{
+      height: "100vh",
+      textAlign: "center",
+      padding: "20px",
+      background: "linear-gradient(to right, #00c6ff, #0072ff)",
+    }}
+  >
+    <img
+      className="w-40 mb-6 object-contain"
+      src="/logo-centralgo.png"
+      alt="Central Go"
+    />
+    <h1 className="text-3xl font-bold mb-3">
+      Central Go está diseñado para verse mejor en celular
+    </h1>
+    <p className="text-lg max-w-xl">
+      Por favor abre la aplicación en modo móvil o desde tu teléfono.
+    </p>
+  </div>
+);
 
   return isMobileView ? (
     <div>
