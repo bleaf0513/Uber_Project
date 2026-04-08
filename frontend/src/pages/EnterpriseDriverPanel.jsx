@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 
-const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 }; // Medellín
+const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 
 const haversineDistanceKm = (a, b) => {
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -29,7 +29,6 @@ const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
   activeDelivery,
-  drivers,
   setDrivers,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
@@ -41,8 +40,8 @@ const EnterpriseDriverMap = ({
   const directionsRendererRef = useRef(null);
   const geocoderRef = useRef(null);
   const watchIdRef = useRef(null);
-  const lastGeocodeSignatureRef = useRef("");
-  const routeRequestIdRef = useRef(0);
+  const lastSignatureRef = useRef("");
+  const routeBuildIdRef = useRef(0);
 
   const [geoError, setGeoError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
@@ -53,18 +52,22 @@ const EnterpriseDriverMap = ({
     totalDurationText: "",
   });
 
-  const activeStops = useMemo(() => {
-    const pending = assignedDeliveries.filter(
-      (delivery) => delivery.status !== "Finalizada" && delivery.address
+  const pendingStops = useMemo(() => {
+    const base = assignedDeliveries.filter(
+      (delivery) =>
+        delivery &&
+        delivery.status !== "Finalizada" &&
+        delivery.address &&
+        String(delivery.address).trim() !== ""
     );
 
     if (activeDelivery?.id) {
-      const current = pending.find((d) => d.id === activeDelivery.id);
-      const others = pending.filter((d) => d.id !== activeDelivery.id);
-      return current ? [current, ...others] : pending;
+      const current = base.find((d) => String(d.id) === String(activeDelivery.id));
+      const others = base.filter((d) => String(d.id) !== String(activeDelivery.id));
+      return current ? [current, ...others] : [activeDelivery, ...others];
     }
 
-    return pending;
+    return base;
   }, [assignedDeliveries, activeDelivery]);
 
   const persistDriverLocation = (coords) => {
@@ -109,16 +112,15 @@ const EnterpriseDriverMap = ({
 
       geocoderRef.current = new window.google.maps.Geocoder();
 
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer(
-        {
-          suppressMarkers: false,
-          preserveViewport: false,
-          panel: directionsPanelRef.current || null,
-        }
-      );
+      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
+        suppressMarkers: false,
+        preserveViewport: false,
+      });
 
       directionsRendererRef.current.setMap(mapInstanceRef.current);
-    } else if (directionsRendererRef.current && directionsPanelRef.current) {
+    }
+
+    if (directionsRendererRef.current && directionsPanelRef.current) {
       directionsRendererRef.current.setPanel(directionsPanelRef.current);
     }
   }, [mapsApiLoaded, selectedDriver]);
@@ -161,7 +163,7 @@ const EnterpriseDriverMap = ({
         driverMarkerRef.current.setPosition(coords);
       }
 
-      if (!activeStops.length) {
+      if (!pendingStops.length) {
         mapInstanceRef.current.setCenter(coords);
         mapInstanceRef.current.setZoom(15);
       }
@@ -171,9 +173,7 @@ const EnterpriseDriverMap = ({
       setIsTracking(false);
 
       if (error.code === 1) {
-        setGeoError(
-          "Debes permitir la ubicación en tiempo real para ver tu ruta."
-        );
+        setGeoError("Debes permitir la ubicación en tiempo real para ver tu ruta.");
       } else if (error.code === 2) {
         setGeoError("No se pudo determinar tu ubicación actual.");
       } else if (error.code === 3) {
@@ -204,7 +204,7 @@ const EnterpriseDriverMap = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [mapsApiLoaded, selectedDriver, activeStops.length]);
+  }, [mapsApiLoaded, selectedDriver, pendingStops.length, setDrivers]);
 
   useEffect(() => {
     if (
@@ -212,13 +212,17 @@ const EnterpriseDriverMap = ({
       !window.google?.maps ||
       !mapInstanceRef.current ||
       !geocoderRef.current ||
-      !directionsRendererRef.current ||
-      !selectedDriver?.currentLocation
+      !directionsRendererRef.current
     ) {
       return;
     }
 
-    if (!activeStops.length) {
+    const driverLocation = selectedDriver?.currentLocation;
+    if (!driverLocation?.lat || !driverLocation?.lng) {
+      return;
+    }
+
+    if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
       if (directionsPanelRef.current) {
         directionsPanelRef.current.innerHTML = "";
@@ -233,17 +237,18 @@ const EnterpriseDriverMap = ({
     }
 
     const signature = JSON.stringify({
-      driverLocation: selectedDriver.currentLocation,
+      driverLat: Number(driverLocation.lat).toFixed(6),
+      driverLng: Number(driverLocation.lng).toFixed(6),
       activeDeliveryId: activeDelivery?.id || null,
-      stops: activeStops.map((item) => ({
-        id: item.id,
-        address: item.address,
-        status: item.status,
+      stops: pendingStops.map((s) => ({
+        id: s.id,
+        address: s.address,
+        status: s.status,
       })),
     });
 
-    if (signature === lastGeocodeSignatureRef.current) return;
-    lastGeocodeSignatureRef.current = signature;
+    if (signature === lastSignatureRef.current) return;
+    lastSignatureRef.current = signature;
 
     const geocodeAddress = (address) =>
       new Promise((resolve, reject) => {
@@ -253,6 +258,7 @@ const EnterpriseDriverMap = ({
             resolve({
               lat: location.lat(),
               lng: location.lng(),
+              formattedAddress: results[0].formatted_address || address,
             });
           } else {
             reject(new Error(`No se pudo geocodificar: ${address}`));
@@ -261,11 +267,11 @@ const EnterpriseDriverMap = ({
       });
 
     const buildRoute = async () => {
-      const requestId = ++routeRequestIdRef.current;
+      const buildId = ++routeBuildIdRef.current;
 
       try {
         const geocodedStops = await Promise.all(
-          activeStops.map(async (delivery) => {
+          pendingStops.map(async (delivery) => {
             const coords = await geocodeAddress(delivery.address);
             return {
               ...delivery,
@@ -274,106 +280,119 @@ const EnterpriseDriverMap = ({
           })
         );
 
-        if (requestId !== routeRequestIdRef.current) return;
+        if (buildId !== routeBuildIdRef.current) return;
 
-        const driverCoords = {
-          lat: Number(selectedDriver.currentLocation.lat),
-          lng: Number(selectedDriver.currentLocation.lng),
+        const originCoords = {
+          lat: Number(driverLocation.lat),
+          lng: Number(driverLocation.lng),
         };
 
         let orderedStops = [...geocodedStops];
 
         if (!activeDelivery?.id) {
           orderedStops.sort((a, b) => {
-            const distA = haversineDistanceKm(driverCoords, a.coords);
-            const distB = haversineDistanceKm(driverCoords, b.coords);
+            const distA = haversineDistanceKm(originCoords, a.coords);
+            const distB = haversineDistanceKm(originCoords, b.coords);
             return distA - distB;
           });
         }
 
-        setRouteInfo((prev) => ({
-          ...prev,
-          orderedStops,
-          totalStops: orderedStops.length,
-        }));
-
         const directionsService = new window.google.maps.DirectionsService();
 
-        const origin = driverCoords;
         const destination =
           orderedStops.length === 1
-            ? orderedStops[0].address
-            : orderedStops[orderedStops.length - 1].address;
+            ? orderedStops[0].formattedAddress || orderedStops[0].address
+            : orderedStops[orderedStops.length - 1].formattedAddress ||
+              orderedStops[orderedStops.length - 1].address;
 
         const waypoints =
           orderedStops.length > 1
             ? orderedStops.slice(0, -1).map((stop) => ({
-                location: stop.address,
+                location: stop.formattedAddress || stop.address,
                 stopover: true,
               }))
             : [];
 
         directionsService.route(
           {
-            origin,
+            origin: originCoords,
             destination,
             waypoints,
-            optimizeWaypoints: activeDelivery ? false : true,
+            optimizeWaypoints: !activeDelivery?.id,
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
           (result, status) => {
-            if (requestId !== routeRequestIdRef.current) return;
+            if (buildId !== routeBuildIdRef.current) return;
 
             if (status === "OK" && result) {
               directionsRendererRef.current.setDirections(result);
 
               const legs = result.routes?.[0]?.legs || [];
-              const totalDistance = legs.reduce(
+              const totalDistanceMeters = legs.reduce(
                 (sum, leg) => sum + (leg.distance?.value || 0),
                 0
               );
-              const totalDuration = legs.reduce(
+              const totalDurationSeconds = legs.reduce(
                 (sum, leg) => sum + (leg.duration?.value || 0),
                 0
               );
 
-              const totalKm = (totalDistance / 1000).toFixed(1);
-              const totalMinutes = Math.round(totalDuration / 60);
+              const totalKm = (totalDistanceMeters / 1000).toFixed(1);
+              const totalMin = Math.round(totalDurationSeconds / 60);
 
               setRouteInfo({
                 orderedStops,
                 totalStops: orderedStops.length,
                 totalDistanceText: `${totalKm} km`,
                 totalDurationText:
-                  totalMinutes >= 60
-                    ? `${Math.floor(totalMinutes / 60)} h ${
-                        totalMinutes % 60
-                      } min`
-                    : `${totalMinutes} min`,
+                  totalMin >= 60
+                    ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
+                    : `${totalMin} min`,
               });
             } else {
               console.error("Error trazando la ruta:", status);
+              setRouteInfo({
+                orderedStops: geocodedStops,
+                totalStops: geocodedStops.length,
+                totalDistanceText: "",
+                totalDurationText: "",
+              });
             }
           }
         );
       } catch (error) {
         console.error("Error construyendo ruta:", error);
+        setRouteInfo({
+          orderedStops: activeDelivery?.address ? [activeDelivery] : [],
+          totalStops: activeDelivery?.address ? 1 : 0,
+          totalDistanceText: "",
+          totalDurationText: "",
+        });
       }
     };
 
     buildRoute();
-  }, [mapsApiLoaded, selectedDriver, activeStops, activeDelivery]);
+  }, [mapsApiLoaded, selectedDriver, pendingStops, activeDelivery]);
 
   const openExternalGoogleMaps = () => {
-    if (!selectedDriver?.currentLocation || !routeInfo.orderedStops.length) return;
+    const driverLocation = selectedDriver?.currentLocation;
+    if (!driverLocation?.lat || !driverLocation?.lng) return;
 
-    const origin = `${selectedDriver.currentLocation.lat},${selectedDriver.currentLocation.lng}`;
-    const destination =
-      routeInfo.orderedStops[routeInfo.orderedStops.length - 1].address;
-
-    const waypointAddresses =
-      routeInfo.orderedStops.length > 1
+    const stopsForNavigation =
+      routeInfo.orderedStops.length > 0
         ? routeInfo.orderedStops
+        : activeDelivery?.address
+        ? [activeDelivery]
+        : [];
+
+    if (!stopsForNavigation.length) return;
+
+    const origin = `${driverLocation.lat},${driverLocation.lng}`;
+    const destination = stopsForNavigation[stopsForNavigation.length - 1].address;
+
+    const waypoints =
+      stopsForNavigation.length > 1
+        ? stopsForNavigation
             .slice(0, -1)
             .map((stop) => encodeURIComponent(stop.address))
             .join("|")
@@ -383,12 +402,22 @@ const EnterpriseDriverMap = ({
       origin
     )}&destination=${encodeURIComponent(
       destination
-    )}&travelmode=driving${
-      waypointAddresses ? `&waypoints=${waypointAddresses}` : ""
-    }`;
+    )}&travelmode=driving${waypoints ? `&waypoints=${waypoints}` : ""}`;
 
     window.open(url, "_blank");
   };
+
+  const canNavigate =
+    !!selectedDriver?.currentLocation?.lat &&
+    !!selectedDriver?.currentLocation?.lng &&
+    (routeInfo.orderedStops.length > 0 || !!activeDelivery?.address);
+
+  const visibleStops =
+    routeInfo.orderedStops.length > 0
+      ? routeInfo.orderedStops
+      : activeDelivery?.address
+      ? [activeDelivery]
+      : [];
 
   return (
     <div>
@@ -414,7 +443,7 @@ const EnterpriseDriverMap = ({
             <p className="text-sm text-gray-700">
               Paradas:{" "}
               <span className="font-semibold text-gray-900">
-                {routeInfo.totalStops}
+                {visibleStops.length}
               </span>
             </p>
 
@@ -452,9 +481,9 @@ const EnterpriseDriverMap = ({
             <button
               type="button"
               onClick={openExternalGoogleMaps}
-              disabled={!routeInfo.orderedStops.length}
+              disabled={!canNavigate}
               className={`px-4 py-2 rounded-xl font-semibold ${
-                routeInfo.orderedStops.length
+                canNavigate
                   ? "bg-green-600 text-white"
                   : "bg-gray-300 text-gray-500 cursor-not-allowed"
               }`}
@@ -463,16 +492,16 @@ const EnterpriseDriverMap = ({
             </button>
           </div>
 
-          {routeInfo.orderedStops.length > 0 ? (
+          {visibleStops.length > 0 ? (
             <div className="bg-gray-50 rounded-xl p-3">
               <p className="text-sm font-bold text-gray-900 mb-2">
                 Orden de la ruta
               </p>
 
               <div className="space-y-2">
-                {routeInfo.orderedStops.map((stop, index) => (
+                {visibleStops.map((stop, index) => (
                   <div
-                    key={stop.id}
+                    key={stop.id || index}
                     className={`text-sm border-b last:border-b-0 pb-2 last:pb-0 ${
                       activeDelivery?.id === stop.id
                         ? "text-blue-700 font-semibold"
@@ -533,18 +562,19 @@ const EnterpriseDriverPanel = () => {
       setDrivers(savedDrivers);
       setDeliveries(savedDeliveries);
 
-      const inProgress = savedDeliveries.find(
-        (delivery) =>
-          delivery.status === "En curso" &&
-          String(delivery.assignedDriverId) ===
-            String(
-              savedDrivers.find(
-                (driver) => String(driver.cedula) === String(savedCedula)
-              )?.id || ""
-            )
+      const currentDriver = savedDrivers.find(
+        (driver) => String(driver.cedula) === String(savedCedula)
       );
 
-      setActiveDeliveryId(inProgress?.id || "");
+      if (currentDriver) {
+        const inProgress = savedDeliveries.find(
+          (delivery) =>
+            String(delivery.assignedDriverId) === String(currentDriver.id) &&
+            delivery.status === "En curso"
+        );
+
+        setActiveDeliveryId(inProgress?.id || "");
+      }
     };
 
     loadData();
@@ -593,7 +623,7 @@ const EnterpriseDriverPanel = () => {
       if (
         String(delivery.assignedDriverId) === String(selectedDriver.id) &&
         delivery.status === "En curso" &&
-        delivery.id !== deliveryId
+        String(delivery.id) !== String(deliveryId)
       ) {
         return {
           ...delivery,
@@ -601,7 +631,7 @@ const EnterpriseDriverPanel = () => {
         };
       }
 
-      if (delivery.id === deliveryId) {
+      if (String(delivery.id) === String(deliveryId)) {
         return {
           ...delivery,
           status: "En curso",
@@ -631,7 +661,7 @@ const EnterpriseDriverPanel = () => {
     if (!selectedDriver) return;
 
     const updatedDeliveries = deliveries.map((delivery) =>
-      delivery.id === deliveryId
+      String(delivery.id) === String(deliveryId)
         ? {
             ...delivery,
             status: "Finalizada",
@@ -642,23 +672,20 @@ const EnterpriseDriverPanel = () => {
 
     updateDeliveriesStorage(updatedDeliveries);
 
-    const pendingForDriver = updatedDeliveries.filter(
+    const remaining = updatedDeliveries.filter(
       (delivery) =>
         String(delivery.assignedDriverId) === String(selectedDriver.id) &&
         delivery.status !== "Finalizada"
     );
 
-    const nextActive = pendingForDriver.find(
-      (delivery) => delivery.status === "En curso"
-    );
-
+    const nextActive = remaining.find((delivery) => delivery.status === "En curso");
     setActiveDeliveryId(nextActive?.id || "");
 
     const updatedDrivers = drivers.map((driver) =>
       driver.id === selectedDriver.id
         ? {
             ...driver,
-            status: pendingForDriver.length ? "En ruta" : "Disponible",
+            status: remaining.length ? "En ruta" : "Disponible",
           }
         : driver
     );
@@ -675,9 +702,7 @@ const EnterpriseDriverPanel = () => {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
         <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
-          <h2 className="text-2xl font-bold text-gray-900">
-            Sesión no válida
-          </h2>
+          <h2 className="text-2xl font-bold text-gray-900">Sesión no válida</h2>
           <p className="text-gray-600 mt-3">
             Debes ingresar con tu cédula desde el acceso de conductor.
           </p>
@@ -765,7 +790,6 @@ const EnterpriseDriverPanel = () => {
             selectedDriver={selectedDriver}
             assignedDeliveries={assignedDeliveries}
             activeDelivery={activeDelivery}
-            drivers={drivers}
             setDrivers={setDrivers}
           />
         </div>
