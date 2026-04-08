@@ -30,7 +30,19 @@ const EnterpriseDeliveryHistory = () => {
     return () => clearInterval(interval);
   }, []);
 
+  const hasActiveFilters = useMemo(() => {
+    return (
+      searchInvoice.trim() !== "" ||
+      searchClient.trim() !== "" ||
+      searchDriver.trim() !== "" ||
+      searchDate.trim() !== "" ||
+      searchStatus.trim() !== ""
+    );
+  }, [searchInvoice, searchClient, searchDriver, searchDate, searchStatus]);
+
   const filteredDeliveries = useMemo(() => {
+    if (!hasActiveFilters) return [];
+
     return deliveries.filter((delivery) => {
       const invoiceMatch = String(delivery.invoiceNumber || "")
         .toLowerCase()
@@ -54,7 +66,9 @@ const EnterpriseDeliveryHistory = () => {
         delivery.createdAt ||
         "";
 
-      const dateMatch = searchDate ? String(baseDate).startsWith(searchDate) : true;
+      const dateMatch = searchDate
+        ? String(baseDate).startsWith(searchDate)
+        : true;
 
       return (
         invoiceMatch &&
@@ -71,6 +85,7 @@ const EnterpriseDeliveryHistory = () => {
     searchDriver,
     searchDate,
     searchStatus,
+    hasActiveFilters,
   ]);
 
   const totalResults = filteredDeliveries.length;
@@ -165,7 +180,9 @@ const EnterpriseDeliveryHistory = () => {
 
           <div className="mt-4 bg-blue-50 rounded-xl p-4">
             <p className="text-sm text-blue-700 font-semibold">
-              Resultados encontrados: {totalResults}
+              {hasActiveFilters
+                ? `Resultados encontrados: ${totalResults}`
+                : "Usa los filtros para buscar entregas específicas."}
             </p>
           </div>
         </div>
@@ -175,7 +192,11 @@ const EnterpriseDeliveryHistory = () => {
             Resultados del historial
           </h2>
 
-          {filteredDeliveries.length === 0 ? (
+          {!hasActiveFilters ? (
+            <p className="text-gray-500">
+              Aún no has realizado ninguna búsqueda.
+            </p>
+          ) : filteredDeliveries.length === 0 ? (
             <p className="text-gray-500">
               No se encontraron entregas con esos filtros.
             </p>
@@ -184,13 +205,13 @@ const EnterpriseDeliveryHistory = () => {
               {filteredDeliveries
                 .slice()
                 .sort((a, b) => {
-                  const dateA = new Date(
-                    b.finishedAt || b.startedAt || b.createdAt || 0
-                  );
-                  const dateB = new Date(
+                  const timeA = new Date(
                     a.finishedAt || a.startedAt || a.createdAt || 0
-                  );
-                  return dateA - dateB;
+                  ).getTime();
+                  const timeB = new Date(
+                    b.finishedAt || b.startedAt || b.createdAt || 0
+                  ).getTime();
+                  return timeB - timeA;
                 })
                 .map((delivery) => {
                   const assignedDriver = drivers.find(
