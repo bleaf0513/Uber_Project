@@ -25,16 +25,6 @@ const haversineDistanceKm = (a, b) => {
   return R * c;
 };
 
-const formatDuration = (seconds) => {
-  const totalMin = Math.round(seconds / 60);
-  if (totalMin >= 60) {
-    const hours = Math.floor(totalMin / 60);
-    const minutes = totalMin % 60;
-    return `${hours} h${minutes ? ` ${minutes} min` : ""}`;
-  }
-  return `${totalMin} min`;
-};
-
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
@@ -54,7 +44,6 @@ const EnterpriseDriverMap = ({
   const routeBuildIdRef = useRef(0);
 
   const [geoError, setGeoError] = useState("");
-  const [routeError, setRouteError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
   const [routeInfo, setRouteInfo] = useState({
     orderedStops: [],
@@ -229,12 +218,7 @@ const EnterpriseDriverMap = ({
     }
 
     const driverLocation = selectedDriver?.currentLocation;
-    if (
-      driverLocation?.lat === undefined ||
-      driverLocation?.lng === undefined ||
-      driverLocation?.lat === null ||
-      driverLocation?.lng === null
-    ) {
+    if (!driverLocation?.lat || !driverLocation?.lng) {
       return;
     }
 
@@ -243,7 +227,6 @@ const EnterpriseDriverMap = ({
       if (directionsPanelRef.current) {
         directionsPanelRef.current.innerHTML = "";
       }
-      setRouteError("");
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
@@ -285,7 +268,6 @@ const EnterpriseDriverMap = ({
 
     const buildRoute = async () => {
       const buildId = ++routeBuildIdRef.current;
-      setRouteError("");
 
       try {
         const geocodedStops = await Promise.all(
@@ -305,25 +287,10 @@ const EnterpriseDriverMap = ({
           lng: Number(driverLocation.lng),
         };
 
-        let preOrderedStops = [...geocodedStops];
+        let orderedStops = [...geocodedStops];
 
-        if (activeDelivery?.id) {
-          const firstStop = preOrderedStops.find(
-            (s) => String(s.id) === String(activeDelivery.id)
-          );
-          const remainingStops = preOrderedStops.filter(
-            (s) => String(s.id) !== String(activeDelivery.id)
-          );
-
-          remainingStops.sort((a, b) => {
-            const distA = haversineDistanceKm(firstStop.coords, a.coords);
-            const distB = haversineDistanceKm(firstStop.coords, b.coords);
-            return distA - distB;
-          });
-
-          preOrderedStops = firstStop ? [firstStop, ...remainingStops] : remainingStops;
-        } else {
-          preOrderedStops.sort((a, b) => {
+        if (!activeDelivery?.id) {
+          orderedStops.sort((a, b) => {
             const distA = haversineDistanceKm(originCoords, a.coords);
             const distB = haversineDistanceKm(originCoords, b.coords);
             return distA - distB;
@@ -332,76 +299,26 @@ const EnterpriseDriverMap = ({
 
         const directionsService = new window.google.maps.DirectionsService();
 
-        if (preOrderedStops.length === 1) {
-          directionsService.route(
-            {
-              origin: originCoords,
-              destination:
-                preOrderedStops[0].formattedAddress || preOrderedStops[0].address,
-              travelMode: window.google.maps.TravelMode.DRIVING,
-            },
-            (result, status) => {
-              if (buildId !== routeBuildIdRef.current) return;
-
-              if (status === "OK" && result) {
-                directionsRendererRef.current.setDirections(result);
-
-                const legs = result.routes?.[0]?.legs || [];
-                const totalDistanceMeters = legs.reduce(
-                  (sum, leg) => sum + (leg.distance?.value || 0),
-                  0
-                );
-                const totalDurationSeconds = legs.reduce(
-                  (sum, leg) => sum + (leg.duration?.value || 0),
-                  0
-                );
-
-                setRouteInfo({
-                  orderedStops: preOrderedStops,
-                  totalStops: preOrderedStops.length,
-                  totalDistanceText: `${(totalDistanceMeters / 1000).toFixed(1)} km`,
-                  totalDurationText: formatDuration(totalDurationSeconds),
-                });
-              } else {
-                setRouteError("No se pudo calcular la ruta de esta entrega.");
-                setRouteInfo({
-                  orderedStops: preOrderedStops,
-                  totalStops: preOrderedStops.length,
-                  totalDistanceText: "",
-                  totalDurationText: "",
-                });
-              }
-            }
-          );
-          return;
-        }
-
-        let requestStops = [...preOrderedStops];
-        let originForRoute = originCoords;
-        let optimizeWaypoints = false;
-
-        if (activeDelivery?.id && requestStops.length > 0) {
-          originForRoute = originCoords;
-          optimizeWaypoints = false;
-        } else {
-          optimizeWaypoints = true;
-        }
-
         const destination =
-          requestStops[requestStops.length - 1].formattedAddress ||
-          requestStops[requestStops.length - 1].address;
+          orderedStops.length === 1
+            ? orderedStops[0].formattedAddress || orderedStops[0].address
+            : orderedStops[orderedStops.length - 1].formattedAddress ||
+              orderedStops[orderedStops.length - 1].address;
 
-        const waypoints = requestStops.slice(0, -1).map((stop) => ({
-          location: stop.formattedAddress || stop.address,
-          stopover: true,
-        }));
+        const waypoints =
+          orderedStops.length > 1
+            ? orderedStops.slice(0, -1).map((stop) => ({
+                location: stop.formattedAddress || stop.address,
+                stopover: true,
+              }))
+            : [];
 
         directionsService.route(
           {
-            origin: originForRoute,
+            origin: originCoords,
             destination,
             waypoints,
-            optimizeWaypoints,
+            optimizeWaypoints: !activeDelivery?.id,
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
           (result, status) => {
@@ -420,31 +337,23 @@ const EnterpriseDriverMap = ({
                 0
               );
 
-              let finalOrderedStops = [...requestStops];
-
-              if (!activeDelivery?.id && result.routes?.[0]?.waypoint_order?.length) {
-                const waypointOrder = result.routes[0].waypoint_order;
-                const originalWaypointStops = requestStops.slice(0, -1);
-                const reorderedWaypointStops = waypointOrder.map(
-                  (index) => originalWaypointStops[index]
-                );
-                finalOrderedStops = [
-                  ...reorderedWaypointStops,
-                  requestStops[requestStops.length - 1],
-                ];
-              }
+              const totalKm = (totalDistanceMeters / 1000).toFixed(1);
+              const totalMin = Math.round(totalDurationSeconds / 60);
 
               setRouteInfo({
-                orderedStops: finalOrderedStops,
-                totalStops: finalOrderedStops.length,
-                totalDistanceText: `${(totalDistanceMeters / 1000).toFixed(1)} km`,
-                totalDurationText: formatDuration(totalDurationSeconds),
+                orderedStops,
+                totalStops: orderedStops.length,
+                totalDistanceText: `${totalKm} km`,
+                totalDurationText:
+                  totalMin >= 60
+                    ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
+                    : `${totalMin} min`,
               });
             } else {
-              setRouteError("No se pudo calcular la ruta con Google Maps.");
+              console.error("Error trazando la ruta:", status);
               setRouteInfo({
-                orderedStops: requestStops,
-                totalStops: requestStops.length,
+                orderedStops: geocodedStops,
+                totalStops: geocodedStops.length,
                 totalDistanceText: "",
                 totalDurationText: "",
               });
@@ -453,12 +362,9 @@ const EnterpriseDriverMap = ({
         );
       } catch (error) {
         console.error("Error construyendo ruta:", error);
-        setRouteError("No se pudo procesar una o más direcciones de entrega.");
-
-        const fallbackStops = activeDelivery?.address ? [activeDelivery] : [];
         setRouteInfo({
-          orderedStops: fallbackStops,
-          totalStops: fallbackStops.length,
+          orderedStops: activeDelivery?.address ? [activeDelivery] : [],
+          totalStops: activeDelivery?.address ? 1 : 0,
           totalDistanceText: "",
           totalDurationText: "",
         });
@@ -470,15 +376,7 @@ const EnterpriseDriverMap = ({
 
   const openExternalGoogleMaps = () => {
     const driverLocation = selectedDriver?.currentLocation;
-
-    if (
-      driverLocation?.lat === undefined ||
-      driverLocation?.lng === undefined ||
-      driverLocation?.lat === null ||
-      driverLocation?.lng === null
-    ) {
-      return;
-    }
+    if (!driverLocation?.lat || !driverLocation?.lng) return;
 
     const stopsForNavigation =
       routeInfo.orderedStops.length > 0
@@ -510,8 +408,8 @@ const EnterpriseDriverMap = ({
   };
 
   const canNavigate =
-    selectedDriver?.currentLocation?.lat !== undefined &&
-    selectedDriver?.currentLocation?.lng !== undefined &&
+    !!selectedDriver?.currentLocation?.lat &&
+    !!selectedDriver?.currentLocation?.lng &&
     (routeInfo.orderedStops.length > 0 || !!activeDelivery?.address);
 
   const visibleStops =
@@ -566,10 +464,6 @@ const EnterpriseDriverMap = ({
 
           {geoError ? (
             <p className="text-sm text-red-600 font-medium">{geoError}</p>
-          ) : null}
-
-          {routeError ? (
-            <p className="text-sm text-red-600 font-medium">{routeError}</p>
           ) : null}
 
           {activeDelivery ? (
