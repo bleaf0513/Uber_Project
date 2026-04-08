@@ -406,7 +406,7 @@ function Home() {
     <div className="h-screen position-relative w-screen">
       <div>
         <img
-  className="absolute w-28 ml-7 pt-7 z-30"
+  className="absolute w-20 ml-7 pt-7 z-30"
   src="/logo-centralgo.png"
   alt="Central Go"
 />
