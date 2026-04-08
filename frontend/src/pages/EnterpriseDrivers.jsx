@@ -17,6 +17,19 @@ const EnterpriseDrivers = () => {
     plate: "",
   });
 
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(0, 150)}`
+      );
+    }
+  };
+
   const fetchDrivers = async () => {
     try {
       setLoading(true);
@@ -26,7 +39,7 @@ const EnterpriseDrivers = () => {
         credentials: "include",
       });
 
-      const data = await response.json();
+      const data = await parseJsonSafe(response, "GET /enterprise-drivers");
 
       if (!response.ok) {
         throw new Error(data.message || "No se pudieron obtener los conductores.");
@@ -82,7 +95,7 @@ const EnterpriseDrivers = () => {
         }),
       });
 
-      const data = await response.json();
+      const data = await parseJsonSafe(response, "POST /enterprise-drivers");
 
       if (!response.ok) {
         throw new Error(data.message || "No se pudo guardar el conductor.");
@@ -117,7 +130,10 @@ const EnterpriseDrivers = () => {
         credentials: "include",
       });
 
-      const data = await response.json();
+      const data = await parseJsonSafe(
+        response,
+        "DELETE /enterprise-drivers/:id"
+      );
 
       if (!response.ok) {
         throw new Error(data.message || "No se pudo eliminar el conductor.");
