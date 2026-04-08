@@ -1,25 +1,18 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 const EnterpriseDriverPanel = () => {
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
-  const [selectedDriverId, setSelectedDriverId] = useState("");
+  const [activeCedula, setActiveCedula] = useState("");
+  const navigate = useNavigate();
 
   useEffect(() => {
-    const savedDrivers = JSON.parse(
-      localStorage.getItem("enterpriseDrivers") || "[]"
-    );
-    const savedDeliveries = JSON.parse(
-      localStorage.getItem("enterpriseDeliveries") || "[]"
-    );
+    const savedCedula =
+      localStorage.getItem("activeEnterpriseDriverCedula") || "";
+    setActiveCedula(savedCedula);
 
-    setDrivers(savedDrivers);
-    setDeliveries(savedDeliveries);
-  }, []);
-
-  useEffect(() => {
-    const interval = setInterval(() => {
+    const loadData = () => {
       const savedDrivers = JSON.parse(
         localStorage.getItem("enterpriseDrivers") || "[]"
       );
@@ -29,22 +22,27 @@ const EnterpriseDriverPanel = () => {
 
       setDrivers(savedDrivers);
       setDeliveries(savedDeliveries);
-    }, 2000);
+    };
 
+    loadData();
+
+    const interval = setInterval(loadData, 2000);
     return () => clearInterval(interval);
   }, []);
 
   const selectedDriver = useMemo(() => {
-    return drivers.find((d) => String(d.id) === String(selectedDriverId));
-  }, [drivers, selectedDriverId]);
+    return drivers.find(
+      (driver) => String(driver.cedula) === String(activeCedula)
+    );
+  }, [drivers, activeCedula]);
 
   const assignedDeliveries = useMemo(() => {
-    if (!selectedDriverId) return [];
+    if (!selectedDriver) return [];
     return deliveries.filter(
       (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriverId)
+        String(delivery.assignedDriverId) === String(selectedDriver.id)
     );
-  }, [deliveries, selectedDriverId]);
+  }, [deliveries, selectedDriver]);
 
   const updateDriversStorage = (updatedDrivers) => {
     setDrivers(updatedDrivers);
@@ -92,8 +90,6 @@ const EnterpriseDriverPanel = () => {
     );
 
     updateDriversStorage(updatedDrivers);
-
-    alert("Entrega iniciada. Aquí luego mostraremos la ruta inteligente.");
   };
 
   const handleFinishDelivery = (deliveryId) => {
@@ -130,79 +126,118 @@ const EnterpriseDriverPanel = () => {
     updateDriversStorage(updatedDrivers);
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem("activeEnterpriseDriverCedula");
+    navigate("/enterprise-driver-login");
+  };
+
+  if (!activeCedula) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
+        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Sesión no válida
+          </h2>
+          <p className="text-gray-600 mt-3">
+            Debes ingresar con tu cédula desde el acceso de conductor.
+          </p>
+          <Link
+            to="/enterprise-driver-login"
+            className="inline-block mt-5 bg-green-600 text-white px-5 py-3 rounded-xl font-semibold"
+          >
+            Ir al login del conductor
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (!selectedDriver) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
+        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold text-gray-900">
+            Conductor no encontrado
+          </h2>
+          <p className="text-gray-600 mt-3">
+            La cédula ingresada no está asociada a un conductor activo.
+          </p>
+          <Link
+            to="/enterprise-driver-login"
+            className="inline-block mt-5 bg-green-600 text-white px-5 py-3 rounded-xl font-semibold"
+          >
+            Volver al login del conductor
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
+      <div className="bg-green-700 text-white px-6 py-5 shadow-lg">
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Panel del Conductor</h1>
-            <p className="text-sm text-blue-100 mt-1">
-              Inicia y finaliza entregas asignadas
+            <p className="text-sm text-green-100 mt-1">
+              Bienvenido, {selectedDriver.name}
             </p>
           </div>
 
-          <Link
-            to="/enterprise-dashboard"
-            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="bg-white text-green-700 px-4 py-2 rounded-xl font-semibold"
           >
-            Volver
-          </Link>
+            Cerrar sesión
+          </button>
         </div>
       </div>
 
       <div className="p-5">
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Seleccionar conductor
+            Tus datos
           </h2>
 
-          <select
-            value={selectedDriverId}
-            onChange={(e) => setSelectedDriverId(e.target.value)}
-            className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-          >
-            <option value="">Selecciona un conductor</option>
-            {drivers.map((driver) => (
-              <option key={driver.id} value={driver.id}>
-                {driver.name} - {driver.vehicle} - {driver.plate}
-              </option>
-            ))}
-          </select>
-
-          {selectedDriver && (
-            <div className="mt-4 bg-gray-50 rounded-xl p-4">
-              <p className="font-semibold text-gray-900">{selectedDriver.name}</p>
-              <p className="text-sm text-gray-600">
-                Estado: {selectedDriver.status || "Disponible"}
-              </p>
-              <p className="text-sm text-gray-600">
-                Ubicación:{" "}
-                {selectedDriver.currentLocation
-                  ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
-                  : "Aún no reportada"}
-              </p>
-            </div>
-          )}
+          <div className="bg-gray-50 rounded-xl p-4">
+            <p className="font-semibold text-gray-900">{selectedDriver.name}</p>
+            <p className="text-sm text-gray-600">
+              Cédula: {selectedDriver.cedula}
+            </p>
+            <p className="text-sm text-gray-600">
+              Estado: {selectedDriver.status || "Disponible"}
+            </p>
+            <p className="text-sm text-gray-600">
+              Vehículo: {selectedDriver.vehicle} · {selectedDriver.plate}
+            </p>
+            <p className="text-sm text-gray-600">
+              Ubicación:{" "}
+              {selectedDriver.currentLocation
+                ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
+                : "Aún no reportada"}
+            </p>
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Ruta inteligente del conductor
+            Tu ruta
           </h2>
 
           <div className="w-full h-80 rounded-2xl bg-gray-200 flex items-center justify-center text-gray-500 font-semibold">
-            Aquí irá el mapa con la ruta optimizada por cercanía
+            Aquí irá el mapa con tu ruta optimizada
           </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Pedidos asignados
+            Tus pedidos asignados
           </h2>
 
           {assignedDeliveries.length === 0 ? (
             <p className="text-gray-500">
-              Este conductor no tiene pedidos asignados.
+              No tienes pedidos asignados en este momento.
             </p>
           ) : (
             <div className="space-y-4">
@@ -220,6 +255,7 @@ const EnterpriseDriverPanel = () => {
                   <p className="text-sm text-gray-600">
                     Teléfono: {delivery.clientPhone}
                   </p>
+
                   <p className="text-sm mt-2">
                     Estado:{" "}
                     <span
@@ -234,6 +270,12 @@ const EnterpriseDriverPanel = () => {
                       {delivery.status}
                     </span>
                   </p>
+
+                  {delivery.notes ? (
+                    <p className="text-sm text-gray-500 mt-1">
+                      Observaciones: {delivery.notes}
+                    </p>
+                  ) : null}
 
                   <div className="flex gap-3 mt-4">
                     {delivery.status === "Pendiente" && (
