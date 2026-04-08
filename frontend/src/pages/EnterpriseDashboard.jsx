@@ -93,10 +93,10 @@ const EnterpriseDashboard = () => {
         </div>
       </div>
 
-      <div className="px-5 pb-5 grid grid-cols-1 gap-4">
+      <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
         <Link
           to="/enterprise-drivers"
-          className="bg-white rounded-2xl shadow p-5 block"
+          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
         >
           <h2 className="text-xl font-bold text-gray-900">
             Conductores empresariales
@@ -108,7 +108,7 @@ const EnterpriseDashboard = () => {
 
         <Link
           to="/enterprise-logistics"
-          className="bg-white rounded-2xl shadow p-5 block"
+          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
         >
           <h2 className="text-xl font-bold text-gray-900">
             Panel de logística
@@ -118,7 +118,31 @@ const EnterpriseDashboard = () => {
           </p>
         </Link>
 
-      
+        <Link
+          to="/enterprise-delivery-stats"
+          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
+        >
+          <h2 className="text-xl font-bold text-gray-900">
+            Estadísticas de entregas
+          </h2>
+          <p className="text-gray-600 mt-2">
+            Consulta el rendimiento de las entregas por día o por mes y analiza
+            el desempeño general de los conductores.
+          </p>
+        </Link>
+
+        <Link
+          to="/enterprise-delivery-history"
+          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
+        >
+          <h2 className="text-xl font-bold text-gray-900">
+            Historial de entregas
+          </h2>
+          <p className="text-gray-600 mt-2">
+            Busca entregas por factura, cliente, conductor o fecha y revisa todo
+            el historial operativo.
+          </p>
+        </Link>
       </div>
     </div>
   );
