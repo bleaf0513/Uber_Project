@@ -87,8 +87,8 @@ const CaptainLogin = () => {
         <div className="ml-6 pt-5 pb-2.5">
           <Link to="/">
             <img
-              className="w-12"
-              src="https://pngimg.com/uploads/uber/uber_PNG13.png"
+              className="w-40"
+  src="/logo-centralgo.png"
               alt="logo"
             />
           </Link>
