@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext"; // ajusta la ruta si este archivo está en otra carpeta
+import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 }; // Medellín
 
@@ -28,29 +28,44 @@ const haversineDistanceKm = (a, b) => {
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
+  activeDelivery,
   drivers,
   setDrivers,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
+
   const mapRef = useRef(null);
+  const directionsPanelRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const driverMarkerRef = useRef(null);
   const directionsRendererRef = useRef(null);
   const geocoderRef = useRef(null);
   const watchIdRef = useRef(null);
   const lastGeocodeSignatureRef = useRef("");
+  const routeRequestIdRef = useRef(0);
+
   const [geoError, setGeoError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
   const [routeInfo, setRouteInfo] = useState({
     orderedStops: [],
     totalStops: 0,
+    totalDistanceText: "",
+    totalDurationText: "",
   });
 
   const activeStops = useMemo(() => {
-    return assignedDeliveries.filter(
+    const pending = assignedDeliveries.filter(
       (delivery) => delivery.status !== "Finalizada" && delivery.address
     );
-  }, [assignedDeliveries]);
+
+    if (activeDelivery?.id) {
+      const current = pending.find((d) => d.id === activeDelivery.id);
+      const others = pending.filter((d) => d.id !== activeDelivery.id);
+      return current ? [current, ...others] : pending;
+    }
+
+    return pending;
+  }, [assignedDeliveries, activeDelivery]);
 
   const persistDriverLocation = (coords) => {
     if (!selectedDriver) return;
@@ -89,6 +104,7 @@ const EnterpriseDriverMap = ({
         mapTypeControl: false,
         streetViewControl: false,
         fullscreenControl: true,
+        zoomControl: true,
       });
 
       geocoderRef.current = new window.google.maps.Geocoder();
@@ -97,10 +113,13 @@ const EnterpriseDriverMap = ({
         {
           suppressMarkers: false,
           preserveViewport: false,
+          panel: directionsPanelRef.current || null,
         }
       );
 
       directionsRendererRef.current.setMap(mapInstanceRef.current);
+    } else if (directionsRendererRef.current && directionsPanelRef.current) {
+      directionsRendererRef.current.setPanel(directionsPanelRef.current);
     }
   }, [mapsApiLoaded, selectedDriver]);
 
@@ -201,12 +220,21 @@ const EnterpriseDriverMap = ({
 
     if (!activeStops.length) {
       directionsRendererRef.current.set("directions", null);
-      setRouteInfo({ orderedStops: [], totalStops: 0 });
+      if (directionsPanelRef.current) {
+        directionsPanelRef.current.innerHTML = "";
+      }
+      setRouteInfo({
+        orderedStops: [],
+        totalStops: 0,
+        totalDistanceText: "",
+        totalDurationText: "",
+      });
       return;
     }
 
     const signature = JSON.stringify({
       driverLocation: selectedDriver.currentLocation,
+      activeDeliveryId: activeDelivery?.id || null,
       stops: activeStops.map((item) => ({
         id: item.id,
         address: item.address,
@@ -233,6 +261,8 @@ const EnterpriseDriverMap = ({
       });
 
     const buildRoute = async () => {
+      const requestId = ++routeRequestIdRef.current;
+
       try {
         const geocodedStops = await Promise.all(
           activeStops.map(async (delivery) => {
@@ -244,21 +274,28 @@ const EnterpriseDriverMap = ({
           })
         );
 
+        if (requestId !== routeRequestIdRef.current) return;
+
         const driverCoords = {
           lat: Number(selectedDriver.currentLocation.lat),
           lng: Number(selectedDriver.currentLocation.lng),
         };
 
-        const orderedStops = [...geocodedStops].sort((a, b) => {
-          const distA = haversineDistanceKm(driverCoords, a.coords);
-          const distB = haversineDistanceKm(driverCoords, b.coords);
-          return distA - distB;
-        });
+        let orderedStops = [...geocodedStops];
 
-        setRouteInfo({
+        if (!activeDelivery?.id) {
+          orderedStops.sort((a, b) => {
+            const distA = haversineDistanceKm(driverCoords, a.coords);
+            const distB = haversineDistanceKm(driverCoords, b.coords);
+            return distA - distB;
+          });
+        }
+
+        setRouteInfo((prev) => ({
+          ...prev,
           orderedStops,
           totalStops: orderedStops.length,
-        });
+        }));
 
         const directionsService = new window.google.maps.DirectionsService();
 
@@ -281,12 +318,39 @@ const EnterpriseDriverMap = ({
             origin,
             destination,
             waypoints,
-            optimizeWaypoints: false,
+            optimizeWaypoints: activeDelivery ? false : true,
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
           (result, status) => {
-            if (status === "OK") {
+            if (requestId !== routeRequestIdRef.current) return;
+
+            if (status === "OK" && result) {
               directionsRendererRef.current.setDirections(result);
+
+              const legs = result.routes?.[0]?.legs || [];
+              const totalDistance = legs.reduce(
+                (sum, leg) => sum + (leg.distance?.value || 0),
+                0
+              );
+              const totalDuration = legs.reduce(
+                (sum, leg) => sum + (leg.duration?.value || 0),
+                0
+              );
+
+              const totalKm = (totalDistance / 1000).toFixed(1);
+              const totalMinutes = Math.round(totalDuration / 60);
+
+              setRouteInfo({
+                orderedStops,
+                totalStops: orderedStops.length,
+                totalDistanceText: `${totalKm} km`,
+                totalDurationText:
+                  totalMinutes >= 60
+                    ? `${Math.floor(totalMinutes / 60)} h ${
+                        totalMinutes % 60
+                      } min`
+                    : `${totalMinutes} min`,
+              });
             } else {
               console.error("Error trazando la ruta:", status);
             }
@@ -298,59 +362,149 @@ const EnterpriseDriverMap = ({
     };
 
     buildRoute();
-  }, [mapsApiLoaded, selectedDriver, activeStops]);
+  }, [mapsApiLoaded, selectedDriver, activeStops, activeDelivery]);
+
+  const openExternalGoogleMaps = () => {
+    if (!selectedDriver?.currentLocation || !routeInfo.orderedStops.length) return;
+
+    const origin = `${selectedDriver.currentLocation.lat},${selectedDriver.currentLocation.lng}`;
+    const destination =
+      routeInfo.orderedStops[routeInfo.orderedStops.length - 1].address;
+
+    const waypointAddresses =
+      routeInfo.orderedStops.length > 1
+        ? routeInfo.orderedStops
+            .slice(0, -1)
+            .map((stop) => encodeURIComponent(stop.address))
+            .join("|")
+        : "";
+
+    const url = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(
+      origin
+    )}&destination=${encodeURIComponent(
+      destination
+    )}&travelmode=driving${
+      waypointAddresses ? `&waypoints=${waypointAddresses}` : ""
+    }`;
+
+    window.open(url, "_blank");
+  };
 
   return (
     <div>
       <div
         ref={mapRef}
-        className="w-full h-80 rounded-2xl overflow-hidden"
-        style={{ minHeight: "320px" }}
+        className="w-full h-[420px] rounded-2xl overflow-hidden border"
       />
 
-      <div className="mt-3 space-y-2">
-        <p className="text-sm text-gray-700">
-          Seguimiento en tiempo real:{" "}
-          <span
-            className={`font-semibold ${
-              isTracking ? "text-green-600" : "text-red-600"
-            }`}
-          >
-            {isTracking ? "Activo" : "Inactivo"}
-          </span>
-        </p>
-
-        {geoError ? (
-          <p className="text-sm text-red-600 font-medium">{geoError}</p>
-        ) : null}
-
-        <p className="text-sm text-gray-600">
-          Paradas pendientes: {routeInfo.totalStops}
-        </p>
-
-        {routeInfo.orderedStops.length > 0 ? (
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-sm font-bold text-gray-900 mb-2">
-              Orden sugerido por cercanía
+      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <div className="lg:col-span-2 space-y-3">
+          <div className="bg-gray-50 rounded-xl p-3 flex flex-wrap gap-4">
+            <p className="text-sm text-gray-700">
+              Seguimiento en tiempo real:{" "}
+              <span
+                className={`font-semibold ${
+                  isTracking ? "text-green-600" : "text-red-600"
+                }`}
+              >
+                {isTracking ? "Activo" : "Inactivo"}
+              </span>
             </p>
 
-            <div className="space-y-2">
-              {routeInfo.orderedStops.map((stop, index) => (
-                <div
-                  key={stop.id}
-                  className="text-sm text-gray-700 border-b last:border-b-0 pb-2 last:pb-0"
-                >
-                  <span className="font-semibold">{index + 1}.</span>{" "}
-                  {stop.clientName} — {stop.address}
-                </div>
-              ))}
-            </div>
+            <p className="text-sm text-gray-700">
+              Paradas:{" "}
+              <span className="font-semibold text-gray-900">
+                {routeInfo.totalStops}
+              </span>
+            </p>
+
+            <p className="text-sm text-gray-700">
+              Distancia:{" "}
+              <span className="font-semibold text-gray-900">
+                {routeInfo.totalDistanceText || "—"}
+              </span>
+            </p>
+
+            <p className="text-sm text-gray-700">
+              Tiempo estimado:{" "}
+              <span className="font-semibold text-gray-900">
+                {routeInfo.totalDurationText || "—"}
+              </span>
+            </p>
           </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            Aún no hay direcciones pendientes para dibujar ruta.
-          </p>
-        )}
+
+          {geoError ? (
+            <p className="text-sm text-red-600 font-medium">{geoError}</p>
+          ) : null}
+
+          {activeDelivery ? (
+            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+              <p className="text-sm font-bold text-blue-900 mb-1">
+                Entrega en curso
+              </p>
+              <p className="text-sm text-blue-800">
+                {activeDelivery.clientName} — {activeDelivery.address}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={openExternalGoogleMaps}
+              disabled={!routeInfo.orderedStops.length}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                routeInfo.orderedStops.length
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
+              }`}
+            >
+              Abrir navegación en Google Maps
+            </button>
+          </div>
+
+          {routeInfo.orderedStops.length > 0 ? (
+            <div className="bg-gray-50 rounded-xl p-3">
+              <p className="text-sm font-bold text-gray-900 mb-2">
+                Orden de la ruta
+              </p>
+
+              <div className="space-y-2">
+                {routeInfo.orderedStops.map((stop, index) => (
+                  <div
+                    key={stop.id}
+                    className={`text-sm border-b last:border-b-0 pb-2 last:pb-0 ${
+                      activeDelivery?.id === stop.id
+                        ? "text-blue-700 font-semibold"
+                        : "text-gray-700"
+                    }`}
+                  >
+                    <span className="font-semibold">{index + 1}.</span>{" "}
+                    {stop.clientName} — {stop.address}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <p className="text-sm text-gray-500">
+              Aún no hay direcciones pendientes para dibujar la ruta.
+            </p>
+          )}
+        </div>
+
+        <div className="bg-white border rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b bg-gray-50">
+            <p className="font-bold text-gray-900">Indicaciones</p>
+            <p className="text-xs text-gray-500">
+              Paso a paso de la navegación
+            </p>
+          </div>
+
+          <div
+            ref={directionsPanelRef}
+            className="p-3 text-sm text-gray-700 max-h-[420px] overflow-y-auto"
+          />
+        </div>
       </div>
     </div>
   );
@@ -360,6 +514,7 @@ const EnterpriseDriverPanel = () => {
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [activeCedula, setActiveCedula] = useState("");
+  const [activeDeliveryId, setActiveDeliveryId] = useState("");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -377,6 +532,19 @@ const EnterpriseDriverPanel = () => {
 
       setDrivers(savedDrivers);
       setDeliveries(savedDeliveries);
+
+      const inProgress = savedDeliveries.find(
+        (delivery) =>
+          delivery.status === "En curso" &&
+          String(delivery.assignedDriverId) ===
+            String(
+              savedDrivers.find(
+                (driver) => String(driver.cedula) === String(savedCedula)
+              )?.id || ""
+            )
+      );
+
+      setActiveDeliveryId(inProgress?.id || "");
     };
 
     loadData();
@@ -399,6 +567,12 @@ const EnterpriseDriverPanel = () => {
     );
   }, [deliveries, selectedDriver]);
 
+  const activeDelivery = useMemo(() => {
+    return assignedDeliveries.find(
+      (delivery) => String(delivery.id) === String(activeDeliveryId)
+    );
+  }, [assignedDeliveries, activeDeliveryId]);
+
   const updateDriversStorage = (updatedDrivers) => {
     setDrivers(updatedDrivers);
     localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
@@ -415,17 +589,31 @@ const EnterpriseDriverPanel = () => {
   const handleStartDelivery = (deliveryId) => {
     if (!selectedDriver) return;
 
-    const updatedDeliveries = deliveries.map((delivery) =>
-      delivery.id === deliveryId
-        ? {
-            ...delivery,
-            status: "En curso",
-            startedAt: new Date().toISOString(),
-          }
-        : delivery
-    );
+    const updatedDeliveries = deliveries.map((delivery) => {
+      if (
+        String(delivery.assignedDriverId) === String(selectedDriver.id) &&
+        delivery.status === "En curso" &&
+        delivery.id !== deliveryId
+      ) {
+        return {
+          ...delivery,
+          status: "Pendiente",
+        };
+      }
+
+      if (delivery.id === deliveryId) {
+        return {
+          ...delivery,
+          status: "En curso",
+          startedAt: new Date().toISOString(),
+        };
+      }
+
+      return delivery;
+    });
 
     updateDeliveriesStorage(updatedDeliveries);
+    setActiveDeliveryId(deliveryId);
 
     const updatedDrivers = drivers.map((driver) =>
       driver.id === selectedDriver.id
@@ -454,17 +642,23 @@ const EnterpriseDriverPanel = () => {
 
     updateDeliveriesStorage(updatedDeliveries);
 
-    const hasOtherInProgress = updatedDeliveries.some(
+    const pendingForDriver = updatedDeliveries.filter(
       (delivery) =>
         String(delivery.assignedDriverId) === String(selectedDriver.id) &&
-        delivery.status === "En curso"
+        delivery.status !== "Finalizada"
     );
+
+    const nextActive = pendingForDriver.find(
+      (delivery) => delivery.status === "En curso"
+    );
+
+    setActiveDeliveryId(nextActive?.id || "");
 
     const updatedDrivers = drivers.map((driver) =>
       driver.id === selectedDriver.id
         ? {
             ...driver,
-            status: hasOtherInProgress ? "En ruta" : "Disponible",
+            status: pendingForDriver.length ? "En ruta" : "Disponible",
           }
         : driver
     );
@@ -570,6 +764,7 @@ const EnterpriseDriverPanel = () => {
           <EnterpriseDriverMap
             selectedDriver={selectedDriver}
             assignedDeliveries={assignedDeliveries}
+            activeDelivery={activeDelivery}
             drivers={drivers}
             setDrivers={setDrivers}
           />
@@ -622,7 +817,7 @@ const EnterpriseDriverPanel = () => {
                     </p>
                   ) : null}
 
-                  <div className="flex gap-3 mt-4">
+                  <div className="flex gap-3 mt-4 flex-wrap">
                     {delivery.status === "Pendiente" && (
                       <button
                         type="button"
@@ -634,13 +829,19 @@ const EnterpriseDriverPanel = () => {
                     )}
 
                     {delivery.status === "En curso" && (
-                      <button
-                        type="button"
-                        onClick={() => handleFinishDelivery(delivery.id)}
-                        className="bg-green-600 text-white px-4 py-2 rounded-xl font-semibold"
-                      >
-                        Finalizar entrega
-                      </button>
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => handleFinishDelivery(delivery.id)}
+                          className="bg-green-600 text-white px-4 py-2 rounded-xl font-semibold"
+                        >
+                          Finalizar entrega
+                        </button>
+
+                        <span className="inline-flex items-center px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold">
+                          Ruta activa en el mapa
+                        </span>
+                      </>
                     )}
                   </div>
                 </div>
