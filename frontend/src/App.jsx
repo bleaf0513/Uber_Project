@@ -14,6 +14,9 @@ import CaptainLogout from "./pages/CaptainLogout";
 import RideStarted from "./pages/RideStarted";
 import CaptainRiding from "./pages/CaptainRiding";
 import { ToastContainer } from "react-toastify";
+import EnterpriseLogin from "./pages/EnterpriseLogin";
+import EnterpriseSignup from "./pages/EnterpriseSignup";
+import EnterpriseDashboard from "./pages/EnterpriseDashboard";
 
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -23,39 +26,35 @@ const App = () => {
       setIsMobileView(window.innerWidth <= 768);
     };
 
-    // Check initially
     checkMobileView();
-
-    // Add resize listener
     window.addEventListener("resize", checkMobileView);
 
-    // Cleanup
     return () => window.removeEventListener("resize", checkMobileView);
   }, []);
 
   const DesktopMessage = () => (
-  <div
-    className="text-white flex flex-col justify-center items-center"
-    style={{
-      height: "100vh",
-      textAlign: "center",
-      padding: "20px",
-      background: "linear-gradient(to right, #00c6ff, #0072ff)",
-    }}
-  >
-    <img
-      className="w-72 mb-10 object-contain"
-      src="/logo-centralgo.png"
-      alt="Central Go"
-    />
-    <h1 className="text-3xl font-bold mb-3">
-      Central Go está diseñado para verse mejor en celular
-    </h1>
-    <p className="text-lg max-w-xl">
-      Por favor abre la aplicación en modo móvil o desde tu teléfono.
-    </p>
-  </div>
-);
+    <div
+      className="text-white flex flex-col justify-center items-center"
+      style={{
+        height: "100vh",
+        textAlign: "center",
+        padding: "20px",
+        background: "linear-gradient(to right, #00c6ff, #0072ff)",
+      }}
+    >
+      <img
+        className="w-72 mb-10 object-contain"
+        src="/logo-centralgo.png"
+        alt="Central Go"
+      />
+      <h1 className="text-3xl font-bold mb-3">
+        Central Go está diseñado para verse mejor en celular
+      </h1>
+      <p className="text-lg max-w-xl">
+        Por favor abre la aplicación en modo móvil o desde tu teléfono.
+      </p>
+    </div>
+  );
 
   return isMobileView ? (
     <div>
@@ -66,6 +65,11 @@ const App = () => {
         <Route path="/captain-login" element={<CaptainLogin />} />
         <Route path="/captain-signup" element={<CaptainSignup />} />
         <Route path="/riding" element={<RideStarted />} />
+
+        <Route path="/enterprise-login" element={<EnterpriseLogin />} />
+        <Route path="/enterprise-signup" element={<EnterpriseSignup />} />
+        <Route path="/enterprise-dashboard" element={<EnterpriseDashboard />} />
+
         <Route
           path="/captain-home"
           element={
@@ -74,6 +78,7 @@ const App = () => {
             </CaptainProtectedWrapper>
           }
         />
+
         <Route
           path="/home"
           element={
@@ -82,6 +87,7 @@ const App = () => {
             </UserProtectedWrapper>
           }
         />
+
         <Route
           path="/user-logout"
           element={
@@ -89,8 +95,10 @@ const App = () => {
               <UserLogout />
             </UserProtectedWrapper>
           }
-        ></Route>
-        <Route path="/captain-riding" element={<CaptainRiding />}></Route>
+        />
+
+        <Route path="/captain-riding" element={<CaptainRiding />} />
+
         <Route
           path="/captain-logout"
           element={
@@ -98,8 +106,9 @@ const App = () => {
               <CaptainLogout />
             </CaptainProtectedWrapper>
           }
-        ></Route>
+        />
       </Routes>
+
       <ToastContainer />
     </div>
   ) : (
