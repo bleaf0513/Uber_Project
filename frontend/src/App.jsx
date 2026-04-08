@@ -48,14 +48,13 @@ const App = () => {
     >
       <img
         className="w-[10%] p-2.5"
-        src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Uber_logo_2018.svg/1200px-Uber_logo_2018.svg.png"
+        src="https://drive.google.com/file/d/1v3g4jj32aaQxKQ3nRZVQlkjufrBsUyZZ/view?usp=drive_link"
         alt="logo"
       />
       <h1>
-        Please switch to mobile viewing mode using developer tools or open on a
-        mobile device.
+        Central Go está diseñado para verse mejor en celular.
         <br />
-        This website is designed for mobile devices only.
+        Por favor abre la app en modo móvil o desde tu teléfono.
       </h1>
 
     </div>
