@@ -9,8 +9,26 @@ const EnterpriseLogin = () => {
   const submitHandler = (e) => {
     e.preventDefault();
 
-    // Aquí después conectamos el login real con backend
-    // Por ahora solo redirige al panel empresarial
+    const savedEnterprises = JSON.parse(
+      localStorage.getItem("enterpriseAccounts") || "[]"
+    );
+
+    const matchedEnterprise = savedEnterprises.find(
+      (enterprise) =>
+        enterprise.email.trim().toLowerCase() === email.trim().toLowerCase() &&
+        enterprise.password === password
+    );
+
+    if (!matchedEnterprise) {
+      alert("Correo o contraseña incorrectos.");
+      return;
+    }
+
+    localStorage.setItem(
+      "activeEnterpriseAccount",
+      JSON.stringify(matchedEnterprise)
+    );
+
     navigate("/enterprise-dashboard");
   };
 
