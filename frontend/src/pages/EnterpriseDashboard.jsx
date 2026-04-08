@@ -118,15 +118,7 @@ const EnterpriseDashboard = () => {
           </p>
         </Link>
 
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Mapa y seguimiento en tiempo real
-          </h2>
-
-          <div className="w-full h-80 rounded-2xl bg-gray-200 flex items-center justify-center text-gray-500 font-semibold">
-            Aquí irá el mapa empresarial en tiempo real
-          </div>
-        </div>
+      
       </div>
     </div>
   );
