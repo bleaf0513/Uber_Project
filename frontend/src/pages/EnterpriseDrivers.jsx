@@ -1,8 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseDrivers = () => {
   const [drivers, setDrivers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     cedula: "",
@@ -12,17 +17,33 @@ const EnterpriseDrivers = () => {
     plate: "",
   });
 
-  useEffect(() => {
-    const savedDrivers = localStorage.getItem("enterpriseDrivers");
-    if (savedDrivers) {
-      setDrivers(JSON.parse(savedDrivers));
-    }
-  }, []);
+  const fetchDrivers = async () => {
+    try {
+      setLoading(true);
 
-  const persistDrivers = (updatedDrivers) => {
-    setDrivers(updatedDrivers);
-    localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron obtener los conductores.");
+      }
+
+      setDrivers(data.drivers || []);
+    } catch (error) {
+      console.error("Error cargando conductores:", error);
+      alert(error.message || "Error cargando conductores.");
+    } finally {
+      setLoading(false);
+    }
   };
+
+  useEffect(() => {
+    fetchDrivers();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -32,7 +53,7 @@ const EnterpriseDrivers = () => {
     }));
   };
 
-  const handleSaveDriver = (e) => {
+  const handleSaveDriver = async (e) => {
     e.preventDefault();
 
     const { name, cedula, phone, email, vehicle, plate } = formData;
@@ -42,45 +63,72 @@ const EnterpriseDrivers = () => {
       return;
     }
 
-    const cedulaExists = drivers.some(
-      (driver) => String(driver.cedula) === String(cedula)
-    );
+    try {
+      setSaving(true);
 
-    if (cedulaExists) {
-      alert("Ya existe un conductor registrado con esa cédula.");
-      return;
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          name,
+          cedula,
+          phone,
+          email,
+          vehicle,
+          plate,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo guardar el conductor.");
+      }
+
+      setFormData({
+        name: "",
+        cedula: "",
+        phone: "",
+        email: "",
+        vehicle: "",
+        plate: "",
+      });
+
+      await fetchDrivers();
+      alert("Conductor guardado correctamente.");
+    } catch (error) {
+      console.error("Error guardando conductor:", error);
+      alert(error.message || "Error guardando conductor.");
+    } finally {
+      setSaving(false);
     }
-
-    const newDriver = {
-      id: Date.now(),
-      name,
-      cedula,
-      phone,
-      email,
-      vehicle,
-      plate,
-      status: "Disponible",
-      currentLocation: null,
-    };
-
-    const updatedDrivers = [...drivers, newDriver];
-    persistDrivers(updatedDrivers);
-
-    setFormData({
-      name: "",
-      cedula: "",
-      phone: "",
-      email: "",
-      vehicle: "",
-      plate: "",
-    });
-
-    alert("Conductor guardado correctamente.");
   };
 
-  const handleDeleteDriver = (id) => {
-    const updatedDrivers = drivers.filter((driver) => driver.id !== id);
-    persistDrivers(updatedDrivers);
+  const handleDeleteDriver = async (id) => {
+    const confirmed = window.confirm("¿Seguro que deseas eliminar este conductor?");
+    if (!confirmed) return;
+
+    try {
+      const response = await fetch(`${API_BASE}/enterprise-drivers/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo eliminar el conductor.");
+      }
+
+      await fetchDrivers();
+      alert("Conductor eliminado correctamente.");
+    } catch (error) {
+      console.error("Error eliminando conductor:", error);
+      alert(error.message || "Error eliminando conductor.");
+    }
   };
 
   return (
@@ -166,9 +214,10 @@ const EnterpriseDrivers = () => {
 
             <button
               type="submit"
-              className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold"
+              disabled={saving}
+              className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-70"
             >
-              Guardar conductor
+              {saving ? "Guardando..." : "Guardar conductor"}
             </button>
           </form>
         </div>
@@ -178,7 +227,9 @@ const EnterpriseDrivers = () => {
             Conductores registrados
           </h2>
 
-          {drivers.length === 0 ? (
+          {loading ? (
+            <p className="text-gray-500">Cargando conductores...</p>
+          ) : drivers.length === 0 ? (
             <p className="text-gray-500">
               Aún no hay conductores registrados.
             </p>
@@ -186,7 +237,7 @@ const EnterpriseDrivers = () => {
             <div className="space-y-4">
               {drivers.map((driver) => (
                 <div
-                  key={driver.id}
+                  key={driver._id}
                   className="border rounded-xl p-4 flex justify-between items-center"
                 >
                   <div>
@@ -208,7 +259,7 @@ const EnterpriseDrivers = () => {
 
                     <button
                       type="button"
-                      onClick={() => handleDeleteDriver(driver.id)}
+                      onClick={() => handleDeleteDriver(driver._id)}
                       className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold"
                     >
                       Eliminar
