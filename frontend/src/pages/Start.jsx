@@ -15,24 +15,12 @@ const accessCards = [
     emoji: "🙋",
   },
   {
-    title: "Conductor de empresa",
+    title: "Logística empresarial",
     description:
-      "Accede a tus asignaciones empresariales, revisa rutas y gestiona entregas.",
-    buttonText: "Entrar como conductor de empresa",
-    to: "/enterprise-driver-login",
-    badge: "Logística",
-    buttonClass: "bg-green-600 text-white",
-    cardAccent: "border-green-200",
-    iconBg: "bg-green-100",
-    emoji: "🚚",
-  },
-  {
-    title: "Panel empresa",
-    description:
-      "Supervisa conductores, entregas, rutas y rendimiento operativo de tu empresa.",
-    buttonText: "Entrar al panel empresa",
-    to: "/enterprise-login",
-    badge: "Gestión",
+      "Accede al módulo de seguimiento, entregas, operación logística y control empresarial.",
+    buttonText: "Entrar a logística empresarial",
+    to: "/enterprise-access",
+    badge: "Empresas",
     buttonClass: "bg-blue-600 text-white",
     cardAccent: "border-blue-200",
     iconBg: "bg-blue-100",
@@ -70,7 +58,7 @@ const Start = () => {
           </h1>
 
           <p className="text-gray-600 mt-3 text-base leading-relaxed">
-            Selecciona tu perfil para continuar y entrar al módulo correcto.
+            Selecciona el tipo de acceso para continuar al módulo correcto.
           </p>
         </div>
 
@@ -112,14 +100,6 @@ const Start = () => {
               </div>
             </div>
           ))}
-        </div>
-
-        <div className="max-w-2xl mx-auto mt-7 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4">
-          <p className="text-sm text-gray-600 text-center leading-relaxed">
-            <span className="font-semibold text-gray-900">Cliente:</span> solicita tu viaje.{" "}
-            <span className="font-semibold text-gray-900">Conductor de empresa:</span> entra a operar entregas.{" "}
-            <span className="font-semibold text-gray-900">Panel empresa:</span> administra la logística.
-          </p>
         </div>
       </div>
     </div>
