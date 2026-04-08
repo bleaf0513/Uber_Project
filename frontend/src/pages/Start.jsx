@@ -49,6 +49,23 @@ const Start = () => {
             Ingresar como empresa
           </Link>
         </div>
+
+        <div className="mt-4 border border-gray-200 rounded-2xl p-4 bg-gray-50 shadow-sm">
+          <h3 className="text-lg font-bold text-gray-900">
+            Ingreso Conductor Empresarial
+          </h3>
+
+          <p className="text-sm text-gray-600 mt-2">
+            Accede a tus asignaciones, inicia entregas y finaliza recorridos.
+          </p>
+
+          <Link
+            to="/enterprise-driver-login"
+            className="flex items-center justify-center w-full bg-green-600 text-white py-3 rounded-xl mt-4 text-base font-semibold"
+          >
+            Ingresar como conductor
+          </Link>
+        </div>
       </div>
     </div>
   );
