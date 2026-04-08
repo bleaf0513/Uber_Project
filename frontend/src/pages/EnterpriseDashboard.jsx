@@ -1,7 +1,39 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 
 const EnterpriseDashboard = () => {
+  const [driversCount, setDriversCount] = useState(0);
+  const [deliveriesInProgress, setDeliveriesInProgress] = useState(0);
+  const [deliveriesFinishedToday, setDeliveriesFinishedToday] = useState(0);
+
+  useEffect(() => {
+    const savedDrivers = JSON.parse(
+      localStorage.getItem("enterpriseDrivers") || "[]"
+    );
+
+    const savedDeliveries = JSON.parse(
+      localStorage.getItem("enterpriseDeliveries") || "[]"
+    );
+
+    setDriversCount(savedDrivers.length);
+
+    const inProgress = savedDeliveries.filter(
+      (delivery) => delivery.status === "En curso"
+    ).length;
+
+    const today = new Date().toISOString().split("T")[0];
+
+    const finishedToday = savedDeliveries.filter(
+      (delivery) =>
+        delivery.status === "Finalizada" &&
+        delivery.finishedAt &&
+        delivery.finishedAt.startsWith(today)
+    ).length;
+
+    setDeliveriesInProgress(inProgress);
+    setDeliveriesFinishedToday(finishedToday);
+  }, []);
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
@@ -27,21 +59,27 @@ const EnterpriseDashboard = () => {
           <h3 className="text-gray-500 text-sm font-semibold">
             Conductores activos
           </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">12</p>
+          <p className="text-3xl font-bold text-gray-900 mt-3">
+            {driversCount}
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5">
           <h3 className="text-gray-500 text-sm font-semibold">
             Entregas en curso
           </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">8</p>
+          <p className="text-3xl font-bold text-gray-900 mt-3">
+            {deliveriesInProgress}
+          </p>
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5">
           <h3 className="text-gray-500 text-sm font-semibold">
             Finalizadas hoy
           </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">27</p>
+          <p className="text-3xl font-bold text-gray-900 mt-3">
+            {deliveriesFinishedToday}
+          </p>
         </div>
       </div>
 
