@@ -1,225 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
-
-const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
-
-const haversineDistanceKm = (a, b) => {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const R = 6371;
-
-  const dLat = toRad(Number(b.lat) - Number(a.lat));
-  const dLng = toRad(Number(b.lng) - Number(a.lng));
-  const lat1 = toRad(Number(a.lat));
-  const lat2 = toRad(Number(b.lat));
-
-  const aa =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLng / 2) *
-      Math.sin(dLng / 2) *
-      Math.cos(lat1) *
-      Math.cos(lat2);
-
-  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
-  return R * c;
-};
-
-const LogisticsDriverMap = ({ selectedDriver, driverDeliveries }) => {
-  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
-  const mapRef = useRef(null);
-  const mapInstanceRef = useRef(null);
-  const driverMarkerRef = useRef(null);
-  const deliveryMarkersRef = useRef([]);
-  const directionsRendererRef = useRef(null);
-  const [orderedStops, setOrderedStops] = useState([]);
-
-  const activeStops = useMemo(() => {
-    return driverDeliveries.filter(
-      (delivery) =>
-        delivery.status !== "Finalizada" &&
-        delivery.deliveryLocation &&
-        typeof delivery.deliveryLocation.lat !== "undefined" &&
-        typeof delivery.deliveryLocation.lng !== "undefined"
-    );
-  }, [driverDeliveries]);
-
-  useEffect(() => {
-    if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
-
-    if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-        center: selectedDriver?.currentLocation
-          ? {
-              lat: Number(selectedDriver.currentLocation.lat),
-              lng: Number(selectedDriver.currentLocation.lng),
-            }
-          : DEFAULT_CENTER,
-        zoom: 13,
-        mapTypeControl: false,
-        streetViewControl: false,
-        fullscreenControl: true,
-      });
-
-      directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-        suppressMarkers: false,
-        preserveViewport: false,
-      });
-
-      directionsRendererRef.current.setMap(mapInstanceRef.current);
-    }
-  }, [mapsApiLoaded, selectedDriver]);
-
-  useEffect(() => {
-    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
-
-    if (driverMarkerRef.current) {
-      driverMarkerRef.current.setMap(null);
-      driverMarkerRef.current = null;
-    }
-
-    deliveryMarkersRef.current.forEach((marker) => marker.setMap(null));
-    deliveryMarkersRef.current = [];
-
-    if (!selectedDriver?.currentLocation) {
-      setOrderedStops([]);
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.set("directions", null);
-      }
-      return;
-    }
-
-    const driverCoords = {
-      lat: Number(selectedDriver.currentLocation.lat),
-      lng: Number(selectedDriver.currentLocation.lng),
-    };
-
-    driverMarkerRef.current = new window.google.maps.Marker({
-      map: mapInstanceRef.current,
-      position: driverCoords,
-      title: `Conductor: ${selectedDriver.name}`,
-      icon: {
-        url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-      },
-    });
-
-    mapInstanceRef.current.setCenter(driverCoords);
-
-    if (!activeStops.length) {
-      mapInstanceRef.current.setZoom(15);
-      setOrderedStops([]);
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.set("directions", null);
-      }
-      return;
-    }
-
-    const sortedStops = [...activeStops].sort((a, b) => {
-      const distA = haversineDistanceKm(driverCoords, a.deliveryLocation);
-      const distB = haversineDistanceKm(driverCoords, b.deliveryLocation);
-      return distA - distB;
-    });
-
-    setOrderedStops(sortedStops);
-
-    sortedStops.forEach((delivery, index) => {
-      const marker = new window.google.maps.Marker({
-        map: mapInstanceRef.current,
-        position: {
-          lat: Number(delivery.deliveryLocation.lat),
-          lng: Number(delivery.deliveryLocation.lng),
-        },
-        title: `${index + 1}. ${delivery.clientName}`,
-        label: `${index + 1}`,
-      });
-
-      deliveryMarkersRef.current.push(marker);
-    });
-
-    const directionsService = new window.google.maps.DirectionsService();
-
-    const origin = driverCoords;
-    const destination =
-      sortedStops.length === 1
-        ? {
-            lat: Number(sortedStops[0].deliveryLocation.lat),
-            lng: Number(sortedStops[0].deliveryLocation.lng),
-          }
-        : {
-            lat: Number(sortedStops[sortedStops.length - 1].deliveryLocation.lat),
-            lng: Number(sortedStops[sortedStops.length - 1].deliveryLocation.lng),
-          };
-
-    const waypoints =
-      sortedStops.length > 1
-        ? sortedStops.slice(0, -1).map((stop) => ({
-            location: {
-              lat: Number(stop.deliveryLocation.lat),
-              lng: Number(stop.deliveryLocation.lng),
-            },
-            stopover: true,
-          }))
-        : [];
-
-    directionsService.route(
-      {
-        origin,
-        destination,
-        waypoints,
-        optimizeWaypoints: false,
-        travelMode: window.google.maps.TravelMode.DRIVING,
-      },
-      (result, status) => {
-        if (status === "OK") {
-          directionsRendererRef.current.setDirections(result);
-        } else {
-          console.error("No fue posible trazar la ruta en logística:", status);
-        }
-      }
-    );
-  }, [mapsApiLoaded, selectedDriver, activeStops]);
-
-  return (
-    <div>
-      <div
-        ref={mapRef}
-        className="w-full h-80 rounded-2xl overflow-hidden"
-        style={{ minHeight: "320px" }}
-      />
-
-      <div className="mt-3 space-y-2">
-        <p className="text-sm text-gray-600">
-          Pedidos geolocalizados pendientes: {orderedStops.length}
-        </p>
-
-        {orderedStops.length > 0 ? (
-          <div className="bg-gray-50 rounded-xl p-3">
-            <p className="text-sm font-bold text-gray-900 mb-2">
-              Orden sugerido por cercanía
-            </p>
-
-            <div className="space-y-2">
-              {orderedStops.map((stop, index) => (
-                <div
-                  key={stop.id}
-                  className="text-sm text-gray-700 border-b last:border-b-0 pb-2 last:pb-0"
-                >
-                  <span className="font-semibold">{index + 1}.</span>{" "}
-                  {stop.clientName} — {stop.address}
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <p className="text-sm text-gray-500">
-            Este conductor aún no tiene pedidos con coordenadas listas.
-          </p>
-        )}
-      </div>
-    </div>
-  );
-};
 
 const EnterpriseLogistics = () => {
   const [drivers, setDrivers] = useState([]);
@@ -243,7 +25,6 @@ const EnterpriseLogistics = () => {
     assignedDriverId: "",
     notes: "",
     placeId: "",
-    deliveryLocation: null,
   });
 
   useEffect(() => {
@@ -339,37 +120,16 @@ const EnterpriseLogistics = () => {
     };
   }, []);
 
-  const handleAddressSelect = async (suggestion) => {
-    try {
-      const { data } = await axios.get(`${getApiBaseUrl()}/maps/geocode-place`, {
-        params: {
-          placeId: suggestion.place_id || "",
-          address: suggestion.description || "",
-        },
-        timeout: 18000,
-      });
+  const handleAddressSelect = (suggestion) => {
+    setFormData((prev) => ({
+      ...prev,
+      address: suggestion.description || "",
+      placeId: suggestion.place_id || "",
+    }));
 
-      setFormData((prev) => ({
-        ...prev,
-        address: data.formattedAddress || suggestion.description,
-        placeId: data.placeId || suggestion.place_id || "",
-        deliveryLocation: {
-          lat: Number(data.lat),
-          lng: Number(data.lng),
-        },
-      }));
-
-      setAddressSelected(true);
-      setAddressSuggestions([]);
-      setShowSuggestions(false);
-    } catch (error) {
-      console.error("Error selecting address:", error);
-      alert(
-        error?.response?.data?.message ||
-          error?.message ||
-          "No fue posible obtener la coordenada de esa dirección."
-      );
-    }
+    setAddressSelected(true);
+    setAddressSuggestions([]);
+    setShowSuggestions(false);
   };
 
   const handleChange = (e) => {
@@ -383,7 +143,6 @@ const EnterpriseLogistics = () => {
 
       if (name === "address") {
         next.placeId = "";
-        next.deliveryLocation = null;
         setAddressSelected(false);
         fetchSuggestions(value);
       }
@@ -403,7 +162,6 @@ const EnterpriseLogistics = () => {
       assignedDriverId,
       notes,
       placeId,
-      deliveryLocation,
     } = formData;
 
     if (
@@ -417,7 +175,7 @@ const EnterpriseLogistics = () => {
       return;
     }
 
-    if (!addressSelected || !placeId || !deliveryLocation) {
+    if (!addressSelected) {
       alert("Debes escoger la dirección desde la lista de sugerencias.");
       return;
     }
@@ -448,10 +206,6 @@ const EnterpriseLogistics = () => {
         startedAt: null,
         finishedAt: null,
         placeId,
-        deliveryLocation: {
-          lat: Number(deliveryLocation.lat),
-          lng: Number(deliveryLocation.lng),
-        },
       };
 
       const updatedDeliveries = [...deliveries, newDelivery];
@@ -469,14 +223,13 @@ const EnterpriseLogistics = () => {
         assignedDriverId: "",
         notes: "",
         placeId: "",
-        deliveryLocation: null,
       });
 
       setAddressSelected(false);
       setAddressSuggestions([]);
       setShowSuggestions(false);
 
-      alert("Entrega guardada y asignada correctamente con coordenadas.");
+      alert("Entrega guardada y asignada correctamente.");
     } catch (error) {
       console.error("Error guardando la entrega:", error);
       alert("No fue posible guardar la entrega.");
@@ -508,14 +261,6 @@ const EnterpriseLogistics = () => {
         String(delivery.assignedDriverId) === String(selectedDriverFilter)
     );
   }, [deliveries, selectedDriverFilter]);
-
-  const selectedDriverDeliveries = useMemo(() => {
-    if (!selectedDriver) return [];
-    return deliveries.filter(
-      (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriver.id)
-    );
-  }, [deliveries, selectedDriver]);
 
   const stats = useMemo(() => {
     return {
@@ -607,10 +352,9 @@ const EnterpriseLogistics = () => {
               )}
             </div>
 
-            {formData.deliveryLocation ? (
+            {addressSelected ? (
               <p className="text-xs text-green-600 font-medium">
-                Dirección validada: {formData.deliveryLocation.lat},{" "}
-                {formData.deliveryLocation.lng}
+                Dirección seleccionada correctamente.
               </p>
             ) : (
               <p className="text-xs text-orange-600 font-medium">
@@ -702,46 +446,6 @@ const EnterpriseLogistics = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Ubicación del conductor
-          </h2>
-
-          {selectedDriver ? (
-            <>
-              <div className="mb-4">
-                <p className="font-semibold text-gray-900">
-                  {selectedDriver.name}
-                </p>
-                <p className="text-sm text-gray-600">
-                  Cédula: {selectedDriver.cedula}
-                </p>
-                <p className="text-sm text-gray-600">
-                  {selectedDriver.vehicle} · {selectedDriver.plate}
-                </p>
-                <p className="text-sm text-gray-600">
-                  Estado: {selectedDriver.status || "Disponible"}
-                </p>
-                <p className="text-sm text-gray-600">
-                  Ubicación:{" "}
-                  {selectedDriver.currentLocation
-                    ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
-                    : "Aún no reportada"}
-                </p>
-              </div>
-
-              <LogisticsDriverMap
-                selectedDriver={selectedDriver}
-                driverDeliveries={selectedDriverDeliveries}
-              />
-            </>
-          ) : (
-            <div className="w-full h-52 rounded-2xl bg-gray-100 flex items-center justify-center text-gray-500 font-semibold">
-              Selecciona un conductor para ver su ubicación y sus pedidos
-            </div>
-          )}
-        </div>
-
         <div className="bg-white rounded-2xl shadow p-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
             Pedidos asignados
@@ -769,16 +473,11 @@ const EnterpriseLogistics = () => {
                     Asignado a: {delivery.assignedDriverName}
                   </p>
 
-                  {delivery.deliveryLocation ? (
+                  {delivery.placeId ? (
                     <p className="text-xs text-gray-500 mt-1">
-                      Coordenadas: {delivery.deliveryLocation.lat},{" "}
-                      {delivery.deliveryLocation.lng}
+                      placeId: {delivery.placeId}
                     </p>
-                  ) : (
-                    <p className="text-xs text-red-500 mt-1">
-                      Esta entrega no tiene coordenadas.
-                    </p>
-                  )}
+                  ) : null}
 
                   <p className="text-sm mt-2">
                     Estado:{" "}
