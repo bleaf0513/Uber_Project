@@ -15,16 +15,35 @@ function VehicleThumb({ name, label }) {
   );
 }
 
-// Define the formatDuration function
 const formatDuration = (duration) => {
-  const hours = Math.floor(duration / 3600);
-  const minutes = Math.floor((duration % 3600) / 60);
-  return `${hours}h ${minutes}m`;
+  const safeDuration = Number(duration) || 0;
+  const hours = Math.floor(safeDuration / 3600);
+  const minutes = Math.floor((safeDuration % 3600) / 60);
+
+  if (hours <= 0) return `${minutes} min`;
+  return `${hours}h ${minutes} min`;
 };
-const handleVehicleSelection = (vehicle, price) => {
-  props.setSelectedVehicle(vehicle);
-  props.setSelectedPrice(price);
+
+const formatArrivalTime = (durationInSeconds) => {
+  const safeDuration = Number(durationInSeconds) || 0;
+  return new Date(Date.now() + safeDuration * 1000).toLocaleTimeString(
+    "es-CO",
+    {
+      hour: "2-digit",
+      minute: "2-digit",
+    }
+  );
 };
+
+const formatCOP = (value) => {
+  const number = Number(value) || 0;
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Math.ceil(number));
+};
+
 const VehiclePanel = (props) => {
   if (props.pricingError) {
     return (
@@ -41,7 +60,7 @@ const VehiclePanel = (props) => {
     );
   }
 
-  if (props.distance?.status != "OK") {
+  if (props.distance?.status !== "OK") {
     return (
       <div className="w-full h-[70vw] flex flex-col justify-center items-center">
         <div role="status">
@@ -61,11 +80,16 @@ const VehiclePanel = (props) => {
               fill="currentFill"
             />
           </svg>
-          <span className="sr-only">Autogando...</span>
+          <span className="sr-only">Cargando...</span>
         </div>
       </div>
     );
   }
+
+  const baseDuration = props.distance?.duration?.value || 0;
+  const carPrice = props.prices?.car || 0;
+  const motoPrice = props.prices?.moto || 0;
+  const autoPrice = props.prices?.auto || 0;
 
   return (
     <div>
@@ -87,19 +111,19 @@ const VehiclePanel = (props) => {
         <div
           onClick={() => {
             props.setSelectedVehicle("car");
-            props.setSelectedPrice(props.prices.car);
+            props.setSelectedPrice(carPrice);
             props.setConfirmRidePanel(true);
             props.setVehiclePanel(false);
           }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
+          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="car" label="Auto" />
+            <VehicleThumb name="car" label="Carro" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
             <div className="flex flex-row justify-start items-center">
-              <h1 className="text-2xl font-semibold">UberGo</h1>
+              <h1 className="text-2xl font-semibold">Central Go</h1>
               <div className="mx-2 flex items-center justify-center">
                 <i className="ri-user-fill ri-sm"></i>
                 <h4>4</h4>
@@ -107,31 +131,29 @@ const VehiclePanel = (props) => {
             </div>
 
             <h2 className="text-sm font-light">
-              {formatDuration(props.distance.duration.value)} |{" "}
-              {new Date(
-                Date.now() + props.distance.duration.value * 1000 * 1.0
-              ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {formatDuration(baseDuration)} | {formatArrivalTime(baseDuration)}
             </h2>
-            <h2 className="text-sm font-light">Comodo y espacioso</h2>
+            <h2 className="text-sm font-light">Cómodo y espacioso</h2>
           </div>
 
-          <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">
+          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
             <h2 className="text-2xl font-semibold pt-0.5">
-              ₹{Math.ceil(props.prices.car)}
+              {formatCOP(carPrice)}
             </h2>
           </div>
         </div>
+
         <div
           onClick={() => {
             props.setSelectedVehicle("moto");
-            props.setSelectedPrice(props.prices.moto);
+            props.setSelectedPrice(motoPrice);
             props.setConfirmRidePanel(true);
             props.setVehiclePanel(false);
           }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
+          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="moto" label="Motocicleta" />
+            <VehicleThumb name="moto" label="Moto" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
@@ -144,36 +166,35 @@ const VehiclePanel = (props) => {
             </div>
 
             <h2 className="text-sm font-light">
-              {formatDuration(props.distance.duration.value * 0.85)} |{" "}
-              {new Date(
-                Date.now() + props.distance.duration.value * 1000 * 0.85
-              ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {formatDuration(baseDuration * 0.85)} |{" "}
+              {formatArrivalTime(baseDuration * 0.85)}
             </h2>
-            <h2 className="text-sm font-light">Economico y rapido</h2>
+            <h2 className="text-sm font-light">Económica y rápida</h2>
           </div>
 
-          <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">
+          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
             <h2 className="text-2xl font-semibold pt-0.5">
-              ₹{Math.ceil(props.prices.moto)}
+              {formatCOP(motoPrice)}
             </h2>
           </div>
         </div>
+
         <div
           onClick={() => {
             props.setSelectedVehicle("auto");
-            props.setSelectedPrice(props.prices.auto);
+            props.setSelectedPrice(autoPrice);
             props.setConfirmRidePanel(true);
             props.setVehiclePanel(false);
           }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl   my-2"
+          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
         >
           <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="auto" label="Mototaxi" />
+            <VehicleThumb name="auto" label="Auto" />
           </div>
 
           <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
             <div className="flex flex-row justify-start items-center">
-              <h1 className="text-2xl font-semibold">UberAuto</h1>
+              <h1 className="text-2xl font-semibold">Auto</h1>
               <div className="mx-2 flex items-center justify-center">
                 <i className="ri-user-fill ri-sm"></i>
                 <h4>3</h4>
@@ -181,17 +202,15 @@ const VehiclePanel = (props) => {
             </div>
 
             <h2 className="text-sm font-light">
-              {formatDuration(props.distance.duration.value * 0.94)} |{" "}
-              {new Date(
-                Date.now() + props.distance.duration.value * 1000 * 0.94
-              ).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              {formatDuration(baseDuration * 0.94)} |{" "}
+              {formatArrivalTime(baseDuration * 0.94)}
             </h2>
-            <h2 className="text-sm font-light">Economico y compacto</h2>
+            <h2 className="text-sm font-light">Económico y compacto</h2>
           </div>
 
-          <div className="shrink-0 w-[20%] text-2xl py-2 flex flex-col justify-start items-center pr-2">
+          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
             <h2 className="text-2xl font-semibold pt-0.5">
-              ₹{Math.ceil(props.prices.auto)}
+              {formatCOP(autoPrice)}
             </h2>
           </div>
         </div>
