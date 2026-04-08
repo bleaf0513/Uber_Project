@@ -44,7 +44,7 @@ const App = () => {
     }}
   >
     <img
-      className="w-40 mb-6 object-contain"
+      className="w-64 mb-8 object-contain"
       src="/logo-centralgo.png"
       alt="Central Go"
     />
