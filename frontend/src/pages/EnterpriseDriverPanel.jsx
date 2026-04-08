@@ -176,8 +176,7 @@ const EnterpriseDriverPanel = () => {
                 Estado: {selectedDriver.status || "Disponible"}
               </p>
               <p className="text-sm text-gray-600">
-                Ubicación:
-                {" "}
+                Ubicación:{" "}
                 {selectedDriver.currentLocation
                   ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
                   : "Aún no reportada"}
