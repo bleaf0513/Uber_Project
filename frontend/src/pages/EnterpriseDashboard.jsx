@@ -1,48 +1,110 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseDashboard = () => {
   const [driversCount, setDriversCount] = useState(0);
   const [deliveriesInProgress, setDeliveriesInProgress] = useState(0);
   const [deliveriesFinishedToday, setDeliveriesFinishedToday] = useState(0);
+  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const loadStats = () => {
-      const savedDrivers = JSON.parse(
-        localStorage.getItem("enterpriseDrivers") || "[]"
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(
+          0,
+          150
+        )}`
+      );
+    }
+  };
+
+  const loadStats = useCallback(async () => {
+    try {
+      setLoading(true);
+
+      const [driversResponse, deliveriesResponse] = await Promise.all([
+        fetch(`${API_BASE}/enterprise-drivers`, {
+          method: "GET",
+          credentials: "include",
+        }),
+        fetch(`${API_BASE}/enterprise-deliveries`, {
+          method: "GET",
+          credentials: "include",
+        }),
+      ]);
+
+      const driversData = await parseJsonSafe(
+        driversResponse,
+        "GET /enterprise-drivers"
+      );
+      const deliveriesData = await parseJsonSafe(
+        deliveriesResponse,
+        "GET /enterprise-deliveries"
       );
 
-      const savedDeliveries = JSON.parse(
-        localStorage.getItem("enterpriseDeliveries") || "[]"
-      );
+      if (!driversResponse.ok) {
+        throw new Error(
+          driversData.message || "No se pudieron cargar los conductores."
+        );
+      }
 
-      setDriversCount(savedDrivers.length);
+      if (!deliveriesResponse.ok) {
+        throw new Error(
+          deliveriesData.message || "No se pudieron cargar las entregas."
+        );
+      }
 
-      const inProgress = savedDeliveries.filter(
+      const drivers = Array.isArray(driversData.drivers)
+        ? driversData.drivers
+        : [];
+
+      const deliveries = Array.isArray(deliveriesData.deliveries)
+        ? deliveriesData.deliveries
+        : [];
+
+      setDriversCount(drivers.length);
+
+      const inProgress = deliveries.filter(
         (delivery) => delivery.status === "En curso"
       ).length;
 
       const today = new Date().toISOString().split("T")[0];
 
-      const finishedToday = savedDeliveries.filter(
-        (delivery) =>
+      const finishedToday = deliveries.filter((delivery) => {
+        const finishedAt = delivery.finishedAt || delivery.updatedAt || "";
+        return (
           delivery.status === "Finalizada" &&
-          delivery.finishedAt &&
-          delivery.finishedAt.startsWith(today)
-      ).length;
+          String(finishedAt).startsWith(today)
+        );
+      }).length;
 
       setDeliveriesInProgress(inProgress);
       setDeliveriesFinishedToday(finishedToday);
-    };
+    } catch (error) {
+      console.error("Error cargando estadísticas empresariales:", error);
+      alert(error.message || "Error cargando estadísticas.");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
 
+  useEffect(() => {
     loadStats();
 
     const interval = setInterval(() => {
       loadStats();
-    }, 2000);
+    }, 4000);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [loadStats]);
 
   return (
     <div className="min-h-screen bg-gray-100">
@@ -70,7 +132,7 @@ const EnterpriseDashboard = () => {
             Conductores activos
           </h3>
           <p className="text-3xl font-bold text-gray-900 mt-3">
-            {driversCount}
+            {loading ? "..." : driversCount}
           </p>
         </div>
 
@@ -79,7 +141,7 @@ const EnterpriseDashboard = () => {
             Entregas en curso
           </h3>
           <p className="text-3xl font-bold text-gray-900 mt-3">
-            {deliveriesInProgress}
+            {loading ? "..." : deliveriesInProgress}
           </p>
         </div>
 
@@ -88,7 +150,7 @@ const EnterpriseDashboard = () => {
             Finalizadas hoy
           </h3>
           <p className="text-3xl font-bold text-gray-900 mt-3">
-            {deliveriesFinishedToday}
+            {loading ? "..." : deliveriesFinishedToday}
           </p>
         </div>
       </div>
