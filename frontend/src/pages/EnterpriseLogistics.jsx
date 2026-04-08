@@ -221,10 +221,14 @@ const LogisticsDriverMap = ({ selectedDriver, driverDeliveries }) => {
 
 const EnterpriseLogistics = () => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
+  const addressInputRef = useRef(null);
+  const autocompleteRef = useRef(null);
+
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
+  const [addressSelected, setAddressSelected] = useState(false);
 
   const [formData, setFormData] = useState({
     invoiceNumber: "",
@@ -233,6 +237,8 @@ const EnterpriseLogistics = () => {
     clientPhone: "",
     assignedDriverId: "",
     notes: "",
+    placeId: "",
+    deliveryLocation: null,
   });
 
   useEffect(() => {
@@ -254,49 +260,73 @@ const EnterpriseLogistics = () => {
     return () => clearInterval(interval);
   }, []);
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData((prev) => ({
-      ...prev,
-      [name]: value,
-    }));
-  };
+  useEffect(() => {
+    if (
+      !mapsApiLoaded ||
+      !window.google?.maps?.places ||
+      !addressInputRef.current ||
+      autocompleteRef.current
+    ) {
+      return;
+    }
 
-  const geocodeAddress = (address) => {
-    return new Promise((resolve, reject) => {
-      if (!mapsApiLoaded || !window.google?.maps) {
-        reject(new Error("Google Maps aún no está cargado."));
+    autocompleteRef.current = new window.google.maps.places.Autocomplete(
+      addressInputRef.current,
+      {
+        fields: ["formatted_address", "geometry", "place_id", "name"],
+        componentRestrictions: { country: "co" },
+      }
+    );
+
+    autocompleteRef.current.addListener("place_changed", () => {
+      const place = autocompleteRef.current.getPlace();
+
+      if (!place || !place.geometry || !place.geometry.location) {
+        setAddressSelected(false);
+        setFormData((prev) => ({
+          ...prev,
+          placeId: "",
+          deliveryLocation: null,
+        }));
         return;
       }
 
-      const geocoder = new window.google.maps.Geocoder();
+      const formattedAddress =
+        place.formatted_address || place.name || addressInputRef.current.value;
 
-      geocoder.geocode({ address }, (results, status) => {
-        if (
-          status === "OK" &&
-          results &&
-          results[0] &&
-          results[0].geometry &&
-          results[0].geometry.location
-        ) {
-          const location = results[0].geometry.location;
+      setAddressSelected(true);
+      setFormData((prev) => ({
+        ...prev,
+        address: formattedAddress,
+        placeId: place.place_id || "",
+        deliveryLocation: {
+          lat: Number(place.geometry.location.lat()),
+          lng: Number(place.geometry.location.lng()),
+        },
+      }));
+    });
+  }, [mapsApiLoaded]);
 
-          resolve({
-            lat: location.lat(),
-            lng: location.lng(),
-            formattedAddress: results[0].formatted_address || address,
-            placeId: results[0].place_id || "",
-          });
-        } else {
-          reject(
-            new Error("No se pudo encontrar una coordenada válida para esa dirección.")
-          );
-        }
-      });
+  const handleChange = (e) => {
+    const { name, value } = e.target;
+
+    setFormData((prev) => {
+      const next = {
+        ...prev,
+        [name]: value,
+      };
+
+      if (name === "address") {
+        next.placeId = "";
+        next.deliveryLocation = null;
+        setAddressSelected(false);
+      }
+
+      return next;
     });
   };
 
-  const handleSaveDelivery = async (e) => {
+  const handleSaveDelivery = (e) => {
     e.preventDefault();
 
     const {
@@ -306,6 +336,8 @@ const EnterpriseLogistics = () => {
       clientPhone,
       assignedDriverId,
       notes,
+      placeId,
+      deliveryLocation,
     } = formData;
 
     if (
@@ -319,6 +351,13 @@ const EnterpriseLogistics = () => {
       return;
     }
 
+    if (!addressSelected || !placeId || !deliveryLocation) {
+      alert(
+        "Debes escoger la dirección desde las sugerencias de Google para guardar la coordenada."
+      );
+      return;
+    }
+
     const selectedDriver = drivers.find(
       (driver) => String(driver.id) === String(assignedDriverId)
     );
@@ -328,22 +367,14 @@ const EnterpriseLogistics = () => {
       return;
     }
 
-    if (!mapsApiLoaded || !window.google?.maps) {
-      alert("Google Maps aún no está listo. Espera un momento e inténtalo de nuevo.");
-      return;
-    }
-
     try {
       setSavingDelivery(true);
-
-      const geo = await geocodeAddress(address);
 
       const newDelivery = {
         id: Date.now(),
         invoiceNumber,
         clientName,
-        address: geo.formattedAddress,
-        originalAddress: address,
+        address,
         clientPhone,
         assignedDriverId: selectedDriver.id,
         assignedDriverName: selectedDriver.name,
@@ -352,10 +383,10 @@ const EnterpriseLogistics = () => {
         createdAt: new Date().toISOString(),
         startedAt: null,
         finishedAt: null,
-        placeId: geo.placeId,
+        placeId,
         deliveryLocation: {
-          lat: Number(geo.lat),
-          lng: Number(geo.lng),
+          lat: Number(deliveryLocation.lat),
+          lng: Number(deliveryLocation.lng),
         },
       };
 
@@ -373,15 +404,20 @@ const EnterpriseLogistics = () => {
         clientPhone: "",
         assignedDriverId: "",
         notes: "",
+        placeId: "",
+        deliveryLocation: null,
       });
 
-      alert("Entrega guardada, geolocalizada y asignada correctamente.");
+      setAddressSelected(false);
+
+      if (addressInputRef.current) {
+        addressInputRef.current.value = "";
+      }
+
+      alert("Entrega guardada y asignada correctamente con coordenadas.");
     } catch (error) {
-      console.error("Error geolocalizando la entrega:", error);
-      alert(
-        error?.message ||
-          "No fue posible ubicar esa dirección en el mapa. Verifica la dirección."
-      );
+      console.error("Error guardando la entrega:", error);
+      alert("No fue posible guardar la entrega.");
     } finally {
       setSavingDelivery(false);
     }
@@ -473,13 +509,26 @@ const EnterpriseLogistics = () => {
             />
 
             <input
+              ref={addressInputRef}
               name="address"
               type="text"
-              placeholder="Dirección de entrega"
+              placeholder="Dirección de entrega (elige una sugerencia de Google)"
               value={formData.address}
               onChange={handleChange}
+              autoComplete="off"
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
+
+            {formData.deliveryLocation ? (
+              <p className="text-xs text-green-600 font-medium">
+                Dirección validada: {formData.deliveryLocation.lat},{" "}
+                {formData.deliveryLocation.lng}
+              </p>
+            ) : (
+              <p className="text-xs text-orange-600 font-medium">
+                Debes seleccionar una opción sugerida por Google.
+              </p>
+            )}
 
             <input
               name="clientPhone"
@@ -518,7 +567,7 @@ const EnterpriseLogistics = () => {
               disabled={savingDelivery}
               className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-60"
             >
-              {savingDelivery ? "Geolocalizando y guardando..." : "Guardar y asignar entrega"}
+              {savingDelivery ? "Guardando..." : "Guardar y asignar entrega"}
             </button>
           </form>
         </div>
@@ -639,7 +688,7 @@ const EnterpriseLogistics = () => {
                     </p>
                   ) : (
                     <p className="text-xs text-red-500 mt-1">
-                      Esta entrega aún no tiene coordenadas guardadas.
+                      Esta entrega no tiene coordenadas.
                     </p>
                   )}
 
