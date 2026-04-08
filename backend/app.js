@@ -14,6 +14,7 @@ const captainRoutes = require('./routes/captain.routes');
 const cookieParser = require('cookie-parser');
 const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
+const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
 
 app.use(
     cors({
@@ -33,5 +34,6 @@ app.use('/users', userRoutes);
 app.use('/captain', captainRoutes);
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
+app.use('/enterprise-drivers', enterpriseDriverRoutes);
 
 module.exports = app;
