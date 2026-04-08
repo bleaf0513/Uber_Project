@@ -2,18 +2,30 @@ import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 const EnterpriseDriverLogin = () => {
-  const [driverCode, setDriverCode] = useState("");
+  const [cedula, setCedula] = useState("");
   const navigate = useNavigate();
 
   const handleSubmit = (e) => {
     e.preventDefault();
 
-    if (!driverCode.trim()) {
-      alert("Ingresa tu identificador de conductor.");
+    const savedDrivers = JSON.parse(
+      localStorage.getItem("enterpriseDrivers") || "[]"
+    );
+
+    const matchedDriver = savedDrivers.find(
+      (driver) => String(driver.cedula) === String(cedula).trim()
+    );
+
+    if (!matchedDriver) {
+      alert("Esa cédula no corresponde a un conductor empresarial registrado.");
       return;
     }
 
-    localStorage.setItem("activeEnterpriseDriverId", driverCode);
+    localStorage.setItem(
+      "activeEnterpriseDriverCedula",
+      String(matchedDriver.cedula)
+    );
+
     navigate("/enterprise-driver-panel");
   };
 
@@ -33,19 +45,19 @@ const EnterpriseDriverLogin = () => {
         </h2>
 
         <p className="text-gray-600 text-center mt-2">
-          Ingresa con tu identificador para ver tus entregas asignadas.
+          Ingresa con tu cédula registrada por la empresa.
         </p>
 
         <form onSubmit={handleSubmit} className="mt-8">
           <label className="block text-left text-gray-700 font-semibold mb-2">
-            ID del conductor
+            Cédula
           </label>
 
           <input
             type="text"
-            value={driverCode}
-            onChange={(e) => setDriverCode(e.target.value)}
-            placeholder="Ejemplo: 1743637382"
+            value={cedula}
+            onChange={(e) => setCedula(e.target.value)}
+            placeholder="Ingresa tu cédula"
             className="w-full bg-gray-100 rounded-xl px-4 py-3 mb-6 outline-none border border-gray-200 focus:border-green-500"
           />
 
