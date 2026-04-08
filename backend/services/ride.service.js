@@ -181,7 +181,7 @@ module.exports.endRide = async ({ rideId, captain }) => {
         .select("+otp");
 
     if (!ride) {
-        throw new Error("Ride not found");
+        throw new Error("Ride not found"); 
     }
 
     if (ride.status !== "ongoing") {
