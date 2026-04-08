@@ -48,7 +48,7 @@ const App = () => {
     >
       <img
         className="w-[10%] p-2.5"
-        src="https://drive.google.com/file/d/1v3g4jj32aaQxKQ3nRZVQlkjufrBsUyZZ/view?usp=drive_link"
+        src="/logo-centralgo.jpeg"
         alt="logo"
       />
       <h1>
