@@ -118,18 +118,6 @@ const EnterpriseDashboard = () => {
           </p>
         </Link>
 
-        <Link
-          to="/enterprise-driver-panel"
-          className="bg-white rounded-2xl shadow p-5 block"
-        >
-          <h2 className="text-xl font-bold text-gray-900">
-            Panel del conductor
-          </h2>
-          <p className="text-gray-600 mt-2">
-            Consulta pedidos asignados, inicia entregas y finaliza recorridos.
-          </p>
-        </Link>
-
         <div className="bg-white rounded-2xl shadow p-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
             Mapa y seguimiento en tiempo real
