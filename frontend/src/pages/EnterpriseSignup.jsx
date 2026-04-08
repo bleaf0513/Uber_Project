@@ -12,7 +12,42 @@ const EnterpriseSignup = () => {
   const submitHandler = (e) => {
     e.preventDefault();
 
-    // Luego conectamos esto al backend real
+    if (!companyName || !nit || !email || !phone || !password) {
+      alert("Completa todos los campos.");
+      return;
+    }
+
+    const savedEnterprises = JSON.parse(
+      localStorage.getItem("enterpriseAccounts") || "[]"
+    );
+
+    const emailExists = savedEnterprises.some(
+      (enterprise) =>
+        enterprise.email.trim().toLowerCase() === email.trim().toLowerCase()
+    );
+
+    if (emailExists) {
+      alert("Ya existe una empresa registrada con ese correo.");
+      return;
+    }
+
+    const newEnterprise = {
+      id: Date.now(),
+      companyName,
+      nit,
+      email,
+      phone,
+      password,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedEnterprises = [...savedEnterprises, newEnterprise];
+    localStorage.setItem(
+      "enterpriseAccounts",
+      JSON.stringify(updatedEnterprises)
+    );
+
+    alert("Cuenta empresarial creada correctamente.");
     navigate("/enterprise-login");
   };
 
