@@ -125,7 +125,7 @@ const UserLogin = () => {
             to="/captain-login"
             className="flex justify-center items-center bg-blue-600 text-white font-semibold mb-7 rounded-lg px-4 py-3 border w-full text-lg mx-7 "
           >
-            Entrar como Capitan
+            Ingresar como Conductor
           </Link>
         </div>
       </div>
