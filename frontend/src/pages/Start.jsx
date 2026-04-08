@@ -12,25 +12,25 @@ const accessCards = [
     buttonClass: "bg-black text-white",
     cardAccent: "border-black/10",
     iconBg: "bg-gray-100",
-    emoji: "👤",
+    emoji: "🙋",
   },
   {
-    title: "Conductor",
+    title: "Conductor de empresa",
     description:
-      "Accede a tus asignaciones, revisa rutas y gestiona tus entregas o servicios.",
-    buttonText: "Entrar como conductor",
+      "Accede a tus asignaciones empresariales, revisa rutas y gestiona entregas.",
+    buttonText: "Entrar como conductor de empresa",
     to: "/enterprise-driver-login",
-    badge: "Operación",
+    badge: "Logística",
     buttonClass: "bg-green-600 text-white",
     cardAccent: "border-green-200",
     iconBg: "bg-green-100",
-    emoji: "🛵",
+    emoji: "🚚",
   },
   {
-    title: "Empresa",
+    title: "Panel empresa",
     description:
       "Supervisa conductores, entregas, rutas y rendimiento operativo de tu empresa.",
-    buttonText: "Entrar como empresa",
+    buttonText: "Entrar al panel empresa",
     to: "/enterprise-login",
     badge: "Gestión",
     buttonClass: "bg-blue-600 text-white",
@@ -44,7 +44,11 @@ const Start = () => {
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-sky-500 to-blue-600 flex flex-col">
       <div className="pt-7 px-6">
-        <img className="w-44" src="/logo-centralgo.png" alt="Central Go" />
+        <img
+          className="w-44"
+          src="/logo-centralgo.png"
+          alt="Central Go"
+        />
       </div>
 
       <div className="px-6 mt-4">
@@ -58,7 +62,7 @@ const Start = () => {
       <div className="mt-4 bg-white rounded-t-[32px] shadow-2xl px-5 pt-8 pb-10 flex-1">
         <div className="text-center max-w-xl mx-auto">
           <p className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-4 py-2 text-sm font-semibold">
-            Acceso inteligente
+            Selección de acceso
           </p>
 
           <h1 className="text-3xl font-bold text-gray-900 mt-4 leading-tight">
@@ -66,8 +70,7 @@ const Start = () => {
           </h1>
 
           <p className="text-gray-600 mt-3 text-base leading-relaxed">
-            Selecciona tu perfil para continuar. Así evitamos confusiones entre
-            usuarios, conductores y empresas.
+            Selecciona tu perfil para continuar y entrar al módulo correcto.
           </p>
         </div>
 
@@ -113,9 +116,9 @@ const Start = () => {
 
         <div className="max-w-2xl mx-auto mt-7 bg-gray-50 border border-gray-200 rounded-2xl px-4 py-4">
           <p className="text-sm text-gray-600 text-center leading-relaxed">
-            <span className="font-semibold text-gray-900">Cliente:</span> pide tu viaje.{" "}
-            <span className="font-semibold text-gray-900">Conductor:</span> entra a operar.{" "}
-            <span className="font-semibold text-gray-900">Empresa:</span> administra la logística.
+            <span className="font-semibold text-gray-900">Cliente:</span> solicita tu viaje.{" "}
+            <span className="font-semibold text-gray-900">Conductor de empresa:</span> entra a operar entregas.{" "}
+            <span className="font-semibold text-gray-900">Panel empresa:</span> administra la logística.
           </p>
         </div>
       </div>
