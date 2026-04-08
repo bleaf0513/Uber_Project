@@ -66,8 +66,8 @@ const UserSignup = () => {
         <div className="ml-7 py-7">
           <Link to="/">
             <img
-              className="w-16"
-              src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Uber_logo_2018.svg/1200px-Uber_logo_2018.svg.png"
+              className="w-40"
+                src="/logo-centralgo.png"
               alt="logo"
             />
           </Link>
