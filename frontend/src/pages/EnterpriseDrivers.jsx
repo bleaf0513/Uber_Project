@@ -5,6 +5,7 @@ const EnterpriseDrivers = () => {
   const [drivers, setDrivers] = useState([]);
   const [formData, setFormData] = useState({
     name: "",
+    cedula: "",
     phone: "",
     email: "",
     vehicle: "",
@@ -18,6 +19,11 @@ const EnterpriseDrivers = () => {
     }
   }, []);
 
+  const persistDrivers = (updatedDrivers) => {
+    setDrivers(updatedDrivers);
+    localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
+  };
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({
@@ -29,29 +35,40 @@ const EnterpriseDrivers = () => {
   const handleSaveDriver = (e) => {
     e.preventDefault();
 
-    const { name, phone, email, vehicle, plate } = formData;
+    const { name, cedula, phone, email, vehicle, plate } = formData;
 
-    if (!name || !phone || !email || !vehicle || !plate) {
+    if (!name || !cedula || !phone || !email || !vehicle || !plate) {
       alert("Por favor completa todos los campos del conductor.");
+      return;
+    }
+
+    const cedulaExists = drivers.some(
+      (driver) => String(driver.cedula) === String(cedula)
+    );
+
+    if (cedulaExists) {
+      alert("Ya existe un conductor registrado con esa cédula.");
       return;
     }
 
     const newDriver = {
       id: Date.now(),
       name,
+      cedula,
       phone,
       email,
       vehicle,
       plate,
       status: "Disponible",
+      currentLocation: null,
     };
 
     const updatedDrivers = [...drivers, newDriver];
-    setDrivers(updatedDrivers);
-    localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
+    persistDrivers(updatedDrivers);
 
     setFormData({
       name: "",
+      cedula: "",
       phone: "",
       email: "",
       vehicle: "",
@@ -63,8 +80,7 @@ const EnterpriseDrivers = () => {
 
   const handleDeleteDriver = (id) => {
     const updatedDrivers = drivers.filter((driver) => driver.id !== id);
-    setDrivers(updatedDrivers);
-    localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
+    persistDrivers(updatedDrivers);
   };
 
   return (
@@ -99,6 +115,15 @@ const EnterpriseDrivers = () => {
               type="text"
               placeholder="Nombre completo"
               value={formData.name}
+              onChange={handleChange}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            />
+
+            <input
+              name="cedula"
+              type="text"
+              placeholder="Cédula"
+              value={formData.cedula}
               onChange={handleChange}
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
@@ -166,6 +191,9 @@ const EnterpriseDrivers = () => {
                 >
                   <div>
                     <p className="font-bold text-gray-900">{driver.name}</p>
+                    <p className="text-sm text-gray-600">
+                      Cédula: {driver.cedula}
+                    </p>
                     <p className="text-sm text-gray-600">
                       {driver.vehicle} · {driver.plate}
                     </p>
