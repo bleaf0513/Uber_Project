@@ -77,7 +77,7 @@ const UserLogin = () => {
           <div className="ml-7 py-7">
             <Link to="/">
               <img
-                className="w-16"
+                className="w-40 ml-7"
                 src="/logo-centralgo.png"
                 alt="logo"
               />
