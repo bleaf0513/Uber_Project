@@ -1,22 +1,31 @@
 import React from "react";
-import { useGSAP } from "@gsap/react";
-import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
+
 const ConfirmarRidePickup = (props) => {
+  const navigate = useNavigate();
+  const [otp, setOtp] = React.useState("");
+
   if (props.ride === null) {
     return <div>Cargando...</div>;
   }
-  const navigate = useNavigate();
-  const [otp, setOtp] = React.useState("");
+
+  const formatCOP = (value) => {
+    const number = Number(value) || 0;
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    }).format(Math.ceil(number));
+  };
+
   const handleSubmit = async (e) => {
-    //console.log("Submit pressed", otp);
-    e.preventDefault();
-    const response = await axios.get(
-      `${getApiBaseUrl()}/rides/start-ride`,
-      {
+    if (e) e.preventDefault();
+
+    try {
+      const response = await axios.get(`${getApiBaseUrl()}/rides/start-ride`, {
         params: {
           rideId: props.ride._id,
           otp: otp,
@@ -24,27 +33,40 @@ const ConfirmarRidePickup = (props) => {
         headers: {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
         },
-      }
-    );
+      });
 
-    if (response.status === 200) {
-      navigate("/captain-riding", { state: { ride: props.ride } });
+      if (response.status === 200) {
+        navigate("/captain-riding", { state: { ride: props.ride } });
+      }
+    } catch (error) {
+      console.error("Error al iniciar el viaje:", error);
     }
   };
-  const formatAddress = (address) => {
+
+  const formatAddress = (address = "") => {
     const firstCommaIndex = address.indexOf(",");
+
+    if (firstCommaIndex === -1) {
+      return { firstPart: address, secondPart: "" };
+    }
+
     const firstPart = address.substring(0, firstCommaIndex);
     const secondPart = address.substring(firstCommaIndex + 1).trim();
+
     return { firstPart, secondPart };
   };
+
   const { firstPart, secondPart } = formatAddress(props.ride?.pickup);
   const { firstPart: firstPartDest, secondPart: secondPartDest } =
     formatAddress(props.ride?.destination);
+
   return (
-    <form action="" onSubmit={(e) => handleSubmit(e)}>
+    <form onSubmit={handleSubmit}>
       <div>
-        <div className="flex flex-col justify-center items-center py-3 ">
-          <h2 className="text-2xl font-semibold">Confirmara para iniciar el viaje</h2>
+        <div className="flex flex-col justify-center items-center py-3">
+          <h2 className="text-2xl font-semibold">
+            Confirmar para iniciar el viaje
+          </h2>
           <div
             className="mt-2"
             style={{
@@ -61,7 +83,7 @@ const ConfirmarRidePickup = (props) => {
           style={{
             background: "linear-gradient(to right, #f2994a, #f2c94c)",
           }}
-          className="flex flex-row justify-between items-center m-[15px] p-2 bg-[#f2994a] rounded-lg text-white"
+          className="flex flex-row justify-between items-center m-[15px] p-2 rounded-lg text-white"
         >
           <div className="flex flex-row justify-start items-center">
             <img
@@ -70,13 +92,13 @@ const ConfirmarRidePickup = (props) => {
               alt="userImage"
             />
             <h2 className="text-xl font-semibold pl-2">
-              {props.ride.user.fullname.firstname +
-                " " +
-                props.ride.user.fullname.lastname}
+              {props.ride.user.fullname.firstname}{" "}
+              {props.ride.user.fullname.lastname}
             </h2>
           </div>
           <h2 className="text-xl font-semibold"></h2>
         </div>
+
         <div className="w-full flex justify-center items-center p-[15px] mb-3">
           <input
             value={otp}
@@ -87,6 +109,7 @@ const ConfirmarRidePickup = (props) => {
             placeholder="Ingresa OTP"
           />
         </div>
+
         <div className="flex flex-col justify-start items-start mx-2">
           <div className="flex flex-row justify-start w-screen ml-2">
             <div className="flex items-center justify-center w-[20%]">
@@ -101,6 +124,7 @@ const ConfirmarRidePickup = (props) => {
               ></div>
             </div>
           </div>
+
           <div className="flex flex-row justify-start w-screen ml-2">
             <div className="flex items-center justify-center w-[20%]">
               <i className="ri-square-fill"></i>
@@ -114,12 +138,15 @@ const ConfirmarRidePickup = (props) => {
               ></div>
             </div>
           </div>
+
           <div className="flex flex-row justify-start w-screen ml-2">
             <div className="flex items-center justify-center w-[20%]">
               <i className="ri-bank-card-2-fill"></i>
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
-              <h2 className="text-xl font-semibold">₹{props.ride.fare}</h2>
+              <h2 className="text-xl font-semibold">
+                {formatCOP(props.ride.fare)}
+              </h2>
               <h4 className="text-sm">Solo efectivo</h4>
               <div
                 className="my-2"
@@ -135,21 +162,20 @@ const ConfirmarRidePickup = (props) => {
             className="flex flex-row items-center justify-around gap-3"
           >
             <button
-              // to="/captain-riding"
-              onClick={() => {
-                handleSubmit();
-              }}
+              type="submit"
               style={{
                 width: "60%",
                 padding: "5px",
                 paddingBottom: "8px",
                 background: "linear-gradient(to right, #1d976c, #93f9b9)",
               }}
-              className="bg-green-600 text-white text-xl font-semibold rounded-lg text-center"
+              className="text-white text-xl font-semibold rounded-lg text-center"
             >
               Confirmar
             </button>
+
             <button
+              type="button"
               onClick={() => {
                 props.setConfirmarRidePickup(false);
               }}
@@ -159,7 +185,7 @@ const ConfirmarRidePickup = (props) => {
                 paddingBottom: "8px",
                 background: "linear-gradient(to right, #cb2d3e, #ef473a)",
               }}
-              className="bg-red text-white font-semibold text-xl rounded-lg"
+              className="text-white font-semibold text-xl rounded-lg"
             >
               Cancelar
             </button>
