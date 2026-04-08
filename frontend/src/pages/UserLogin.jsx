@@ -78,7 +78,7 @@ const UserLogin = () => {
             <Link to="/">
               <img
                 className="w-16"
-                src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Uber_logo_2018.svg/1200px-Uber_logo_2018.svg.png"
+                src="/logo-centralgo.png"
                 alt="logo"
               />
             </Link>
