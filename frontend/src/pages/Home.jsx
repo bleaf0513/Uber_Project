@@ -407,7 +407,7 @@ function Home() {
       <div>
         <img
   className="absolute w-28 ml-7 pt-7 z-30"
-  src="/logo-centralgo-transparente.png"
+  src="/logo-centralgo.png"
   alt="Central Go"
 />
       </div>
