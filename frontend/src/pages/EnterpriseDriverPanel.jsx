@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
+import { getApiBaseUrl } from "../apiBase";
 
+const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 
 const haversineDistanceKm = (a, b) => {
@@ -29,7 +31,7 @@ const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
   activeDelivery,
-  setDrivers,
+  setSelectedDriver,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
@@ -61,35 +63,56 @@ const EnterpriseDriverMap = ({
         String(delivery.address).trim() !== ""
     );
 
-    if (activeDelivery?.id) {
-      const current = base.find((d) => String(d.id) === String(activeDelivery.id));
-      const others = base.filter((d) => String(d.id) !== String(activeDelivery.id));
+    if (activeDelivery?._id || activeDelivery?.id) {
+      const activeId = String(activeDelivery._id || activeDelivery.id);
+      const current = base.find(
+        (d) => String(d._id || d.id) === activeId
+      );
+      const others = base.filter(
+        (d) => String(d._id || d.id) !== activeId
+      );
       return current ? [current, ...others] : [activeDelivery, ...others];
     }
 
     return base;
   }, [assignedDeliveries, activeDelivery]);
 
-  const persistDriverLocation = (coords) => {
-    if (!selectedDriver) return;
+  const persistDriverLocation = async (coords) => {
+    if (!selectedDriver?._id) return;
 
-    setDrivers((prevDrivers) => {
-      const updatedDrivers = prevDrivers.map((driver) =>
-        driver.id === selectedDriver.id
-          ? {
-              ...driver,
-              currentLocation: {
-                lat: Number(coords.lat),
-                lng: Number(coords.lng),
-                updatedAt: new Date().toISOString(),
-              },
-            }
-          : driver
+    const updatedDriver = {
+      ...selectedDriver,
+      currentLocation: {
+        lat: Number(coords.lat),
+        lng: Number(coords.lng),
+        updatedAt: new Date().toISOString(),
+      },
+    };
+
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
+    );
+
+    try {
+      await fetch(
+        `${API_BASE}/enterprise-drivers/${selectedDriver._id}/location`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({
+            lat: Number(coords.lat),
+            lng: Number(coords.lng),
+          }),
+        }
       );
-
-      localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
-      return updatedDrivers;
-    });
+    } catch (error) {
+      console.error("No se pudo persistir la ubicación en backend:", error);
+    }
   };
 
   useEffect(() => {
@@ -204,7 +227,7 @@ const EnterpriseDriverMap = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, [mapsApiLoaded, selectedDriver, pendingStops.length, setDrivers]);
+  }, [mapsApiLoaded, selectedDriver, pendingStops.length]);
 
   useEffect(() => {
     if (
@@ -239,9 +262,9 @@ const EnterpriseDriverMap = ({
     const signature = JSON.stringify({
       driverLat: Number(driverLocation.lat).toFixed(6),
       driverLng: Number(driverLocation.lng).toFixed(6),
-      activeDeliveryId: activeDelivery?.id || null,
+      activeDeliveryId: activeDelivery?._id || activeDelivery?.id || null,
       stops: pendingStops.map((s) => ({
-        id: s.id,
+        id: s._id || s.id,
         address: s.address,
         status: s.status,
       })),
@@ -289,7 +312,7 @@ const EnterpriseDriverMap = ({
 
         let orderedStops = [...geocodedStops];
 
-        if (!activeDelivery?.id) {
+        if (!(activeDelivery?._id || activeDelivery?.id)) {
           orderedStops.sort((a, b) => {
             const distA = haversineDistanceKm(originCoords, a.coords);
             const distB = haversineDistanceKm(originCoords, b.coords);
@@ -318,7 +341,7 @@ const EnterpriseDriverMap = ({
             origin: originCoords,
             destination,
             waypoints,
-            optimizeWaypoints: !activeDelivery?.id,
+            optimizeWaypoints: !(activeDelivery?._id || activeDelivery?.id),
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
           (result, status) => {
@@ -501,9 +524,10 @@ const EnterpriseDriverMap = ({
               <div className="space-y-2">
                 {visibleStops.map((stop, index) => (
                   <div
-                    key={stop.id || index}
+                    key={stop._id || stop.id || index}
                     className={`text-sm border-b last:border-b-0 pb-2 last:pb-0 ${
-                      activeDelivery?.id === stop.id
+                      String(activeDelivery?._id || activeDelivery?.id) ===
+                      String(stop._id || stop.id)
                         ? "text-blue-700 font-semibold"
                         : "text-gray-700"
                     }`}
@@ -540,73 +564,97 @@ const EnterpriseDriverMap = ({
 };
 
 const EnterpriseDriverPanel = () => {
-  const [drivers, setDrivers] = useState([]);
+  const [selectedDriver, setSelectedDriver] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
   const [activeCedula, setActiveCedula] = useState("");
   const [activeDeliveryId, setActiveDeliveryId] = useState("");
+  const [loadingDriver, setLoadingDriver] = useState(true);
   const navigate = useNavigate();
 
   useEffect(() => {
     const savedCedula =
       localStorage.getItem("activeEnterpriseDriverCedula") || "";
+    const savedDriverId =
+      localStorage.getItem("activeEnterpriseDriverId") || "";
+    const savedDriverData = localStorage.getItem("activeEnterpriseDriverData");
+
     setActiveCedula(savedCedula);
 
-    const loadData = () => {
-      const savedDrivers = JSON.parse(
-        localStorage.getItem("enterpriseDrivers") || "[]"
-      );
-      const savedDeliveries = JSON.parse(
-        localStorage.getItem("enterpriseDeliveries") || "[]"
-      );
+    const loadDriver = async () => {
+      try {
+        setLoadingDriver(true);
 
-      setDrivers(savedDrivers);
-      setDeliveries(savedDeliveries);
+        if (savedDriverData) {
+          const parsedDriver = JSON.parse(savedDriverData);
+          setSelectedDriver(parsedDriver);
+        }
 
-      const currentDriver = savedDrivers.find(
-        (driver) => String(driver.cedula) === String(savedCedula)
-      );
+        if (savedDriverId) {
+          const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+            method: "GET",
+            credentials: "include",
+          });
 
-      if (currentDriver) {
-        const inProgress = savedDeliveries.find(
-          (delivery) =>
-            String(delivery.assignedDriverId) === String(currentDriver.id) &&
-            delivery.status === "En curso"
+          const text = await response.text();
+          const data = JSON.parse(text);
+
+          if (response.ok && data?.drivers?.length) {
+            const matched = data.drivers.find(
+              (driver) => String(driver._id) === String(savedDriverId)
+            );
+
+            if (matched) {
+              setSelectedDriver(matched);
+              localStorage.setItem(
+                "activeEnterpriseDriverData",
+                JSON.stringify(matched)
+              );
+            }
+          }
+        }
+
+        const savedDeliveries = JSON.parse(
+          localStorage.getItem("enterpriseDeliveries") || "[]"
         );
+        setDeliveries(savedDeliveries);
 
-        setActiveDeliveryId(inProgress?.id || "");
+        const parsedDriver = savedDriverData ? JSON.parse(savedDriverData) : null;
+        const currentDriverId = savedDriverId || parsedDriver?._id || "";
+
+        if (currentDriverId) {
+          const inProgress = savedDeliveries.find(
+            (delivery) =>
+              String(delivery.assignedDriverId) === String(currentDriverId) &&
+              delivery.status === "En curso"
+          );
+
+          setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
+        }
+      } catch (error) {
+        console.error("Error cargando panel del conductor:", error);
+      } finally {
+        setLoadingDriver(false);
       }
     };
 
-    loadData();
-
-    const interval = setInterval(loadData, 2000);
-    return () => clearInterval(interval);
+    loadDriver();
   }, []);
-
-  const selectedDriver = useMemo(() => {
-    return drivers.find(
-      (driver) => String(driver.cedula) === String(activeCedula)
-    );
-  }, [drivers, activeCedula]);
 
   const assignedDeliveries = useMemo(() => {
     if (!selectedDriver) return [];
     return deliveries.filter(
       (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriver.id)
+        String(delivery.assignedDriverId) ===
+        String(selectedDriver._id || selectedDriver.id)
     );
   }, [deliveries, selectedDriver]);
 
   const activeDelivery = useMemo(() => {
     return assignedDeliveries.find(
-      (delivery) => String(delivery.id) === String(activeDeliveryId)
+      (delivery) =>
+        String(delivery._id || delivery.id) === String(activeDeliveryId)
     );
   }, [assignedDeliveries, activeDeliveryId]);
-
-  const updateDriversStorage = (updatedDrivers) => {
-    setDrivers(updatedDrivers);
-    localStorage.setItem("enterpriseDrivers", JSON.stringify(updatedDrivers));
-  };
 
   const updateDeliveriesStorage = (updatedDeliveries) => {
     setDeliveries(updatedDeliveries);
@@ -619,11 +667,15 @@ const EnterpriseDriverPanel = () => {
   const handleStartDelivery = (deliveryId) => {
     if (!selectedDriver) return;
 
+    const driverId = selectedDriver._id || selectedDriver.id;
+
     const updatedDeliveries = deliveries.map((delivery) => {
+      const currentId = delivery._id || delivery.id;
+
       if (
-        String(delivery.assignedDriverId) === String(selectedDriver.id) &&
+        String(delivery.assignedDriverId) === String(driverId) &&
         delivery.status === "En curso" &&
-        String(delivery.id) !== String(deliveryId)
+        String(currentId) !== String(deliveryId)
       ) {
         return {
           ...delivery,
@@ -631,7 +683,7 @@ const EnterpriseDriverPanel = () => {
         };
       }
 
-      if (String(delivery.id) === String(deliveryId)) {
+      if (String(currentId) === String(deliveryId)) {
         return {
           ...delivery,
           status: "En curso",
@@ -645,56 +697,62 @@ const EnterpriseDriverPanel = () => {
     updateDeliveriesStorage(updatedDeliveries);
     setActiveDeliveryId(deliveryId);
 
-    const updatedDrivers = drivers.map((driver) =>
-      driver.id === selectedDriver.id
-        ? {
-            ...driver,
-            status: "En ruta",
-          }
-        : driver
-    );
+    const updatedDriver = {
+      ...selectedDriver,
+      status: "En ruta",
+    };
 
-    updateDriversStorage(updatedDrivers);
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
+    );
   };
 
   const handleFinishDelivery = (deliveryId) => {
     if (!selectedDriver) return;
 
-    const updatedDeliveries = deliveries.map((delivery) =>
-      String(delivery.id) === String(deliveryId)
+    const driverId = selectedDriver._id || selectedDriver.id;
+
+    const updatedDeliveries = deliveries.map((delivery) => {
+      const currentId = delivery._id || delivery.id;
+
+      return String(currentId) === String(deliveryId)
         ? {
             ...delivery,
             status: "Finalizada",
             finishedAt: new Date().toISOString(),
           }
-        : delivery
-    );
+        : delivery;
+    });
 
     updateDeliveriesStorage(updatedDeliveries);
 
     const remaining = updatedDeliveries.filter(
       (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriver.id) &&
+        String(delivery.assignedDriverId) === String(driverId) &&
         delivery.status !== "Finalizada"
     );
 
     const nextActive = remaining.find((delivery) => delivery.status === "En curso");
-    setActiveDeliveryId(nextActive?.id || "");
+    setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
 
-    const updatedDrivers = drivers.map((driver) =>
-      driver.id === selectedDriver.id
-        ? {
-            ...driver,
-            status: remaining.length ? "En ruta" : "Disponible",
-          }
-        : driver
+    const updatedDriver = {
+      ...selectedDriver,
+      status: remaining.length ? "En ruta" : "Disponible",
+    };
+
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
     );
-
-    updateDriversStorage(updatedDrivers);
   };
 
   const handleLogout = () => {
     localStorage.removeItem("activeEnterpriseDriverCedula");
+    localStorage.removeItem("activeEnterpriseDriverId");
+    localStorage.removeItem("activeEnterpriseDriverData");
     navigate("/enterprise-driver-login");
   };
 
@@ -712,6 +770,19 @@ const EnterpriseDriverPanel = () => {
           >
             Ir al login del conductor
           </Link>
+        </div>
+      </div>
+    );
+  }
+
+  if (loadingDriver) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
+        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
+          <h2 className="text-2xl font-bold text-gray-900">Cargando panel...</h2>
+          <p className="text-gray-600 mt-3">
+            Estamos validando la sesión del conductor.
+          </p>
         </div>
       </div>
     );
@@ -790,7 +861,7 @@ const EnterpriseDriverPanel = () => {
             selectedDriver={selectedDriver}
             assignedDeliveries={assignedDeliveries}
             activeDelivery={activeDelivery}
-            setDrivers={setDrivers}
+            setSelectedDriver={setSelectedDriver}
           />
         </div>
 
@@ -806,7 +877,7 @@ const EnterpriseDriverPanel = () => {
           ) : (
             <div className="space-y-4">
               {assignedDeliveries.map((delivery) => (
-                <div key={delivery.id} className="border rounded-xl p-4">
+                <div key={delivery._id || delivery.id} className="border rounded-xl p-4">
                   <p className="font-bold text-gray-900">
                     Factura #{delivery.invoiceNumber}
                   </p>
@@ -845,7 +916,7 @@ const EnterpriseDriverPanel = () => {
                     {delivery.status === "Pendiente" && (
                       <button
                         type="button"
-                        onClick={() => handleStartDelivery(delivery.id)}
+                        onClick={() => handleStartDelivery(delivery._id || delivery.id)}
                         className="bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold"
                       >
                         Iniciar entrega
@@ -856,7 +927,7 @@ const EnterpriseDriverPanel = () => {
                       <>
                         <button
                           type="button"
-                          onClick={() => handleFinishDelivery(delivery.id)}
+                          onClick={() => handleFinishDelivery(delivery._id || delivery.id)}
                           className="bg-green-600 text-white px-4 py-2 rounded-xl font-semibold"
                         >
                           Finalizar entrega
