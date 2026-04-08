@@ -5,7 +5,7 @@ const Start = () => {
   return (
     <div className="h-screen w-full flex justify-between flex-col bg-gradient-to-b from-sky-500 to-blue-600 pt-7">
       <img
-        className="w-28 ml-7"
+       className="w-48 ml-7"
         src="/logo-centralgo.png"
         alt="Central Go"
       />
