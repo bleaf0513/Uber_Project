@@ -21,6 +21,8 @@ import EnterpriseDrivers from "./pages/EnterpriseDrivers";
 import EnterpriseLogistics from "./pages/EnterpriseLogistics";
 import EnterpriseDriverPanel from "./pages/EnterpriseDriverPanel";
 import EnterpriseDriverLogin from "./pages/EnterpriseDriverLogin";
+import EnterpriseDeliveryStats from "./pages/EnterpriseDeliveryStats";
+import EnterpriseDeliveryHistory from "./pages/EnterpriseDeliveryHistory";
 
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -82,6 +84,14 @@ const App = () => {
         <Route
           path="/enterprise-driver-panel"
           element={<EnterpriseDriverPanel />}
+        />
+        <Route
+          path="/enterprise-delivery-stats"
+          element={<EnterpriseDeliveryStats />}
+        />
+        <Route
+          path="/enterprise-delivery-history"
+          element={<EnterpriseDeliveryHistory />}
         />
 
         <Route
