@@ -7,31 +7,41 @@ const EnterpriseDashboard = () => {
   const [deliveriesFinishedToday, setDeliveriesFinishedToday] = useState(0);
 
   useEffect(() => {
-    const savedDrivers = JSON.parse(
-      localStorage.getItem("enterpriseDrivers") || "[]"
-    );
+    const loadStats = () => {
+      const savedDrivers = JSON.parse(
+        localStorage.getItem("enterpriseDrivers") || "[]"
+      );
 
-    const savedDeliveries = JSON.parse(
-      localStorage.getItem("enterpriseDeliveries") || "[]"
-    );
+      const savedDeliveries = JSON.parse(
+        localStorage.getItem("enterpriseDeliveries") || "[]"
+      );
 
-    setDriversCount(savedDrivers.length);
+      setDriversCount(savedDrivers.length);
 
-    const inProgress = savedDeliveries.filter(
-      (delivery) => delivery.status === "En curso"
-    ).length;
+      const inProgress = savedDeliveries.filter(
+        (delivery) => delivery.status === "En curso"
+      ).length;
 
-    const today = new Date().toISOString().split("T")[0];
+      const today = new Date().toISOString().split("T")[0];
 
-    const finishedToday = savedDeliveries.filter(
-      (delivery) =>
-        delivery.status === "Finalizada" &&
-        delivery.finishedAt &&
-        delivery.finishedAt.startsWith(today)
-    ).length;
+      const finishedToday = savedDeliveries.filter(
+        (delivery) =>
+          delivery.status === "Finalizada" &&
+          delivery.finishedAt &&
+          delivery.finishedAt.startsWith(today)
+      ).length;
 
-    setDeliveriesInProgress(inProgress);
-    setDeliveriesFinishedToday(finishedToday);
+      setDeliveriesInProgress(inProgress);
+      setDeliveriesFinishedToday(finishedToday);
+    };
+
+    loadStats();
+
+    const interval = setInterval(() => {
+      loadStats();
+    }, 2000);
+
+    return () => clearInterval(interval);
   }, []);
 
   return (
@@ -105,6 +115,18 @@ const EnterpriseDashboard = () => {
           </h2>
           <p className="text-gray-600 mt-2">
             Crea entregas, asigna conductores y organiza la operación.
+          </p>
+        </Link>
+
+        <Link
+          to="/enterprise-driver-panel"
+          className="bg-white rounded-2xl shadow p-5 block"
+        >
+          <h2 className="text-xl font-bold text-gray-900">
+            Panel del conductor
+          </h2>
+          <p className="text-gray-600 mt-2">
+            Consulta pedidos asignados, inicia entregas y finaliza recorridos.
           </p>
         </Link>
 
