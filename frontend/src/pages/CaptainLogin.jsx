@@ -139,7 +139,7 @@ const CaptainLogin = () => {
           to="/login"
           className="flex justify-center items-center bg-green-600 text-white font-semibold mb-7 rounded-lg px-4 py-3 border w-full text-lg mx-7 "
         >
-          Entrar como Usuario
+          Ingresar como Usuario
         </Link>
       </div>
       <ToastContainer />
