@@ -17,6 +17,8 @@ import { ToastContainer } from "react-toastify";
 import EnterpriseLogin from "./pages/EnterpriseLogin";
 import EnterpriseSignup from "./pages/EnterpriseSignup";
 import EnterpriseDashboard from "./pages/EnterpriseDashboard";
+import EnterpriseDrivers from "./pages/EnterpriseDrivers";
+import EnterpriseLogistics from "./pages/EnterpriseLogistics";
 
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -69,6 +71,8 @@ const App = () => {
         <Route path="/enterprise-login" element={<EnterpriseLogin />} />
         <Route path="/enterprise-signup" element={<EnterpriseSignup />} />
         <Route path="/enterprise-dashboard" element={<EnterpriseDashboard />} />
+        <Route path="/enterprise-drivers" element={<EnterpriseDrivers />} />
+        <Route path="/enterprise-logistics" element={<EnterpriseLogistics />} />
 
         <Route
           path="/captain-home"
