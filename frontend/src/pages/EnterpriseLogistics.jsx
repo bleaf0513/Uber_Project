@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
+import axios from "axios";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
+import { getApiBaseUrl } from "../apiBase";
 
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 
@@ -221,14 +223,18 @@ const LogisticsDriverMap = ({ selectedDriver, driverDeliveries }) => {
 
 const EnterpriseLogistics = () => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
-  const addressInputRef = useRef(null);
-  const autocompleteRef = useRef(null);
 
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
+
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressSelected, setAddressSelected] = useState(false);
+  const suggestionTimerRef = useRef(null);
+  const suggestionSeqRef = useRef(0);
+  const addressBoxRef = useRef(null);
 
   const [formData, setFormData] = useState({
     invoiceNumber: "",
@@ -261,51 +267,133 @@ const EnterpriseLogistics = () => {
   }, []);
 
   useEffect(() => {
-    if (
-      !mapsApiLoaded ||
-      !window.google?.maps?.places ||
-      !addressInputRef.current ||
-      autocompleteRef.current
-    ) {
+    const handleOutsideClick = (event) => {
+      if (addressBoxRef.current && !addressBoxRef.current.contains(event.target)) {
+        setShowSuggestions(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleOutsideClick);
+    return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  const normalizeSuggestionRows = (rows) =>
+    (Array.isArray(rows) ? rows : [])
+      .map((row) => ({
+        description:
+          row.description ||
+          row.structured_formatting?.main_text ||
+          row.formatted_address ||
+          "",
+        place_id: row.place_id || "",
+      }))
+      .filter((r) => r.description);
+
+  const runFetchSuggestions = useCallback(async (query) => {
+    const seq = ++suggestionSeqRef.current;
+
+    try {
+      const { data } = await axios.get(
+        `${getApiBaseUrl()}/maps/get-suggestions`,
+        {
+          params: { address: query },
+          timeout: 18000,
+        }
+      );
+
+      if (seq !== suggestionSeqRef.current) return;
+
+      const normalized = normalizeSuggestionRows(data);
+      setAddressSuggestions(normalized);
+      setShowSuggestions(true);
+    } catch (error) {
+      console.error("Error fetching address suggestions:", error);
+      if (seq === suggestionSeqRef.current) {
+        setAddressSuggestions([]);
+        setShowSuggestions(false);
+      }
+    }
+  }, []);
+
+  const fetchSuggestions = (query) => {
+    if (query.length < 3) {
+      if (suggestionTimerRef.current) {
+        clearTimeout(suggestionTimerRef.current);
+        suggestionTimerRef.current = null;
+      }
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
       return;
     }
 
-    autocompleteRef.current = new window.google.maps.places.Autocomplete(
-      addressInputRef.current,
-      {
-        fields: ["formatted_address", "geometry", "place_id", "name"],
-        componentRestrictions: { country: "co" },
-      }
-    );
+    if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
 
-    autocompleteRef.current.addListener("place_changed", () => {
-      const place = autocompleteRef.current.getPlace();
+    suggestionTimerRef.current = setTimeout(() => {
+      suggestionTimerRef.current = null;
+      runFetchSuggestions(query);
+    }, 280);
+  };
 
-      if (!place || !place.geometry || !place.geometry.location) {
-        setAddressSelected(false);
-        setFormData((prev) => ({
-          ...prev,
-          placeId: "",
-          deliveryLocation: null,
-        }));
+  useEffect(() => {
+    return () => {
+      if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+    };
+  }, []);
+
+  const geocodeAddress = (address) => {
+    return new Promise((resolve, reject) => {
+      if (!mapsApiLoaded || !window.google?.maps) {
+        reject(new Error("Google Maps aún no está cargado."));
         return;
       }
 
-      const formattedAddress =
-        place.formatted_address || place.name || addressInputRef.current.value;
+      const geocoder = new window.google.maps.Geocoder();
 
-      setAddressSelected(true);
+      geocoder.geocode({ address }, (results, status) => {
+        if (
+          status === "OK" &&
+          results &&
+          results[0] &&
+          results[0].geometry &&
+          results[0].geometry.location
+        ) {
+          const location = results[0].geometry.location;
+
+          resolve({
+            lat: location.lat(),
+            lng: location.lng(),
+            formattedAddress: results[0].formatted_address || address,
+            placeId: results[0].place_id || "",
+          });
+        } else {
+          reject(new Error("No se pudo geolocalizar esa dirección."));
+        }
+      });
+    });
+  };
+
+  const handleAddressSelect = async (suggestion) => {
+    try {
+      const geo = await geocodeAddress(suggestion.description);
+
       setFormData((prev) => ({
         ...prev,
-        address: formattedAddress,
-        placeId: place.place_id || "",
+        address: geo.formattedAddress,
+        placeId: geo.placeId || suggestion.place_id || "",
         deliveryLocation: {
-          lat: Number(place.geometry.location.lat()),
-          lng: Number(place.geometry.location.lng()),
+          lat: Number(geo.lat),
+          lng: Number(geo.lng),
         },
       }));
-    });
-  }, [mapsApiLoaded]);
+
+      setAddressSelected(true);
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
+    } catch (error) {
+      console.error("Error selecting address:", error);
+      alert("No fue posible obtener la coordenada de esa dirección.");
+    }
+  };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -320,6 +408,7 @@ const EnterpriseLogistics = () => {
         next.placeId = "";
         next.deliveryLocation = null;
         setAddressSelected(false);
+        fetchSuggestions(value);
       }
 
       return next;
@@ -353,7 +442,7 @@ const EnterpriseLogistics = () => {
 
     if (!addressSelected || !placeId || !deliveryLocation) {
       alert(
-        "Debes escoger la dirección desde las sugerencias de Google para guardar la coordenada."
+        "Debes escoger la dirección desde la lista de sugerencias para guardar la coordenada."
       );
       return;
     }
@@ -409,10 +498,8 @@ const EnterpriseLogistics = () => {
       });
 
       setAddressSelected(false);
-
-      if (addressInputRef.current) {
-        addressInputRef.current.value = "";
-      }
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
 
       alert("Entrega guardada y asignada correctamente con coordenadas.");
     } catch (error) {
@@ -508,16 +595,42 @@ const EnterpriseLogistics = () => {
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
-            <input
-              ref={addressInputRef}
-              name="address"
-              type="text"
-              placeholder="Dirección de entrega (elige una sugerencia de Google)"
-              value={formData.address}
-              onChange={handleChange}
-              autoComplete="off"
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
+            <div className="relative" ref={addressBoxRef}>
+              <input
+                name="address"
+                type="text"
+                placeholder="Dirección de entrega"
+                value={formData.address}
+                onChange={handleChange}
+                onFocus={() => {
+                  if (addressSuggestions.length > 0) setShowSuggestions(true);
+                }}
+                autoComplete="off"
+                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+              />
+
+              {showSuggestions && addressSuggestions.length > 0 && (
+                <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-xl max-h-80 overflow-y-auto">
+                  {addressSuggestions.map((suggestion, index) => (
+                    <button
+                      key={`${suggestion.place_id}-${index}`}
+                      type="button"
+                      onClick={() => handleAddressSelect(suggestion)}
+                      className="w-full text-left px-4 py-4 border-b last:border-b-0 hover:bg-gray-50"
+                    >
+                      <div className="flex items-start gap-3">
+                        <div className="mt-1 flex-shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
+                          📍
+                        </div>
+                        <div className="text-sm text-gray-800">
+                          {suggestion.description}
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
 
             {formData.deliveryLocation ? (
               <p className="text-xs text-green-600 font-medium">
@@ -526,7 +639,7 @@ const EnterpriseLogistics = () => {
               </p>
             ) : (
               <p className="text-xs text-orange-600 font-medium">
-                Debes seleccionar una opción sugerida por Google.
+                Escribe mínimo 3 letras y selecciona una dirección de la lista.
               </p>
             )}
 
