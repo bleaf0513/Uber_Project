@@ -23,6 +23,7 @@ import EnterpriseDriverPanel from "./pages/EnterpriseDriverPanel";
 import EnterpriseDriverLogin from "./pages/EnterpriseDriverLogin";
 import EnterpriseDeliveryStats from "./pages/EnterpriseDeliveryStats";
 import EnterpriseDeliveryHistory from "./pages/EnterpriseDeliveryHistory";
+import EnterpriseAccess from "./pages/EnterpriseAccess";
 
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -72,6 +73,7 @@ const App = () => {
         <Route path="/captain-signup" element={<CaptainSignup />} />
         <Route path="/riding" element={<RideStarted />} />
 
+        <Route path="/enterprise-access" element={<EnterpriseAccess />} />
         <Route path="/enterprise-login" element={<EnterpriseLogin />} />
         <Route path="/enterprise-signup" element={<EnterpriseSignup />} />
         <Route path="/enterprise-dashboard" element={<EnterpriseDashboard />} />
