@@ -406,10 +406,10 @@ function Home() {
     <div className="h-screen position-relative w-screen">
       <div>
         <img
-          className="absolute w-16 ml-7 pt-7 z-30"
-          src="https://upload.wikimedia.org/wikipedia/commons/thumb/5/58/Uber_logo_2018.svg/1200px-Uber_logo_2018.svg.png"
-          alt="logo"
-        />
+  className="absolute w-28 ml-7 pt-7 z-30"
+  src="/logo-centralgo-transparente.png"
+  alt="Central Go"
+/>
       </div>
       <Link
         onClick={logoutUser}
