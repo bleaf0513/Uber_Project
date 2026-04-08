@@ -1,42 +1,78 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseDriverLogin = () => {
   const [cedula, setCedula] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const handleSubmit = (e) => {
+  const normalizeCedula = (value) => {
+    return String(value || "")
+      .replace(/\./g, "")
+      .replace(/-/g, "")
+      .replace(/\s+/g, "")
+      .trim();
+  };
+
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
-    const savedDrivers = JSON.parse(
-      localStorage.getItem("enterpriseDrivers") || "[]"
-    );
+    const cleanedCedula = normalizeCedula(cedula);
 
-    const matchedDriver = savedDrivers.find(
-      (driver) => String(driver.cedula) === String(cedula).trim()
-    );
-
-    if (!matchedDriver) {
-      alert("Esa cédula no corresponde a un conductor empresarial registrado.");
+    if (!cleanedCedula) {
+      alert("Por favor ingresa la cédula.");
       return;
     }
 
-    localStorage.setItem(
-      "activeEnterpriseDriverCedula",
-      String(matchedDriver.cedula)
-    );
+    try {
+      setLoading(true);
 
-    navigate("/enterprise-driver-panel");
+      const response = await fetch(`${API_BASE}/enterprise-drivers/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          cedula: cleanedCedula,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "Esa cédula no corresponde a un conductor empresarial registrado."
+        );
+      }
+
+      localStorage.setItem("activeEnterpriseDriverId", data.driver._id);
+      localStorage.setItem("activeEnterpriseDriverCedula", data.driver.cedula);
+      localStorage.setItem(
+        "activeEnterpriseDriverData",
+        JSON.stringify(data.driver)
+      );
+
+      navigate("/enterprise-driver-panel");
+    } catch (error) {
+      console.error("Error en login empresarial:", error);
+      alert(
+        error.message ||
+          "No fue posible iniciar sesión con esa cédula."
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-sky-500 to-blue-700 flex flex-col justify-between">
       <div className="pt-7 px-6">
-        <img
-          className="w-48"
-          src="/logo-centralgo.png"
-          alt="Central Go"
-        />
+        <img className="w-48" src="/logo-centralgo.png" alt="Central Go" />
       </div>
 
       <div className="bg-white rounded-t-3xl shadow-2xl px-6 py-8">
@@ -63,9 +99,10 @@ const EnterpriseDriverLogin = () => {
 
           <button
             type="submit"
-            className="w-full bg-green-600 text-white py-3 rounded-xl text-lg font-semibold"
+            disabled={loading}
+            className="w-full bg-green-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-70"
           >
-            Entrar
+            {loading ? "Ingresando..." : "Entrar"}
           </button>
         </form>
 
