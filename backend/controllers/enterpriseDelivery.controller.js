@@ -103,6 +103,68 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
     }
 };
 
+module.exports.updateEnterpriseDeliveryStatusByDriver = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const driverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!driverId) {
+            return res.status(401).json({
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        if (!['Pendiente', 'En curso', 'Finalizada'].includes(status)) {
+            return res.status(400).json({
+                message: 'Estado no válido.',
+            });
+        }
+
+        const delivery = await EnterpriseDelivery.findOne({
+            _id: id,
+            assignedDriverId: driverId,
+        });
+
+        if (!delivery) {
+            return res.status(404).json({
+                message: 'Entrega no encontrada para este conductor.',
+            });
+        }
+
+        delivery.status = status;
+
+        if (status === 'En curso') {
+            delivery.startedAt = new Date();
+            delivery.finishedAt = undefined;
+        }
+
+        if (status === 'Finalizada') {
+            if (!delivery.startedAt) {
+                delivery.startedAt = new Date();
+            }
+            delivery.finishedAt = new Date();
+        }
+
+        if (status === 'Pendiente') {
+            delivery.finishedAt = undefined;
+        }
+
+        await delivery.save();
+
+        return res.status(200).json({
+            message: 'Estado actualizado correctamente.',
+            delivery,
+        });
+    } catch (error) {
+        console.error('Error actualizando estado de entrega:', error);
+        return res.status(500).json({
+            message: 'Error actualizando estado de entrega.',
+        });
+    }
+};
+
 module.exports.deleteEnterpriseDelivery = async (req, res) => {
     try {
         const { id } = req.params;
