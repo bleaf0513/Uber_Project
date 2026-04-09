@@ -700,23 +700,36 @@ setDeliveries(apiDeliveries);
 };
 
 const persistDriverStatus = async (driverId, status) => {
-  const response = await fetch(`${API_BASE}/enterprise-drivers/${driverId}/status`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    credentials: "include",
-    body: JSON.stringify({ status }),
-  });
+  try {
+    const response = await fetch(`${API_BASE}/enterprise-drivers/${driverId}/status`, {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      credentials: "include",
+      body: JSON.stringify({ status }),
+    });
 
-  const text = await response.text();
-  const data = text ? JSON.parse(text) : {};
+    const text = await response.text();
+    let data = {};
 
-  if (!response.ok) {
-    throw new Error(data.message || "No se pudo actualizar el estado del conductor.");
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (error) {
+      console.error("Respuesta no JSON en persistDriverStatus:", text);
+      return null;
+    }
+
+    if (!response.ok) {
+      console.error("Error actualizando estado del conductor:", data.message || text);
+      return null;
+    }
+
+    return data.driver || null;
+  } catch (error) {
+    console.error("Failed to fetch en persistDriverStatus:", error);
+    return null;
   }
-
-  return data.driver || null;
 };
 
 const persistDeliveryStatus = async (deliveryId, status) => {
@@ -740,13 +753,12 @@ const persistDeliveryStatus = async (deliveryId, status) => {
 };
 
   const handleStartDelivery = async (deliveryId) => {
-  try {
-    if (!selectedDriver) return;
+  if (!selectedDriver) return;
 
+  try {
     const driverId = selectedDriver._id || selectedDriver.id;
 
     const persistedDelivery = await persistDeliveryStatus(deliveryId, "En curso");
-    const persistedDriver = await persistDriverStatus(driverId, "En ruta");
 
     const normalizedPersistedDeliveryId =
       persistedDelivery?._id || persistedDelivery?.id || deliveryId;
@@ -754,9 +766,7 @@ const persistDeliveryStatus = async (deliveryId, status) => {
     const updatedDeliveries = deliveries.map((delivery) => {
       const currentId = delivery._id || delivery.id;
 
-      if (
-        String(currentId) === String(normalizedPersistedDeliveryId)
-      ) {
+      if (String(currentId) === String(normalizedPersistedDeliveryId)) {
         return {
           ...delivery,
           ...persistedDelivery,
@@ -769,30 +779,31 @@ const persistDeliveryStatus = async (deliveryId, status) => {
     updateDeliveriesStorage(updatedDeliveries);
     setActiveDeliveryId(String(normalizedPersistedDeliveryId));
 
-    const updatedDriver = persistedDriver
-      ? {
-          ...selectedDriver,
-          ...persistedDriver,
-        }
-      : {
-          ...selectedDriver,
-          status: "En ruta",
-        };
+    const optimisticDriver = {
+      ...selectedDriver,
+      status: "En ruta",
+    };
 
-    setSelectedDriver(updatedDriver);
+    setSelectedDriver(optimisticDriver);
     localStorage.setItem(
       "activeEnterpriseDriverData",
-      JSON.stringify(updatedDriver)
+      JSON.stringify(optimisticDriver)
     );
+
+    try {
+      await persistDriverStatus(driverId, "En ruta");
+    } catch (error) {
+      console.error("No se pudo persistir el estado del conductor:", error);
+    }
   } catch (error) {
     console.error("Error iniciando entrega:", error);
     alert(error.message || "No se pudo iniciar la entrega.");
   }
 };
   const handleFinishDelivery = async (deliveryId) => {
-  try {
-    if (!selectedDriver) return;
+  if (!selectedDriver) return;
 
+  try {
     const driverId = selectedDriver._id || selectedDriver.id;
 
     const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
@@ -831,23 +842,23 @@ const persistDeliveryStatus = async (deliveryId, status) => {
     setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
 
     const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
-    const persistedDriver = await persistDriverStatus(driverId, nextDriverStatus);
 
-    const updatedDriver = persistedDriver
-      ? {
-          ...selectedDriver,
-          ...persistedDriver,
-        }
-      : {
-          ...selectedDriver,
-          status: nextDriverStatus,
-        };
+    const optimisticDriver = {
+      ...selectedDriver,
+      status: nextDriverStatus,
+    };
 
-    setSelectedDriver(updatedDriver);
+    setSelectedDriver(optimisticDriver);
     localStorage.setItem(
       "activeEnterpriseDriverData",
-      JSON.stringify(updatedDriver)
+      JSON.stringify(optimisticDriver)
     );
+
+    try {
+      await persistDriverStatus(driverId, nextDriverStatus);
+    } catch (error) {
+      console.error("No se pudo persistir el estado del conductor:", error);
+    }
   } catch (error) {
     console.error("Error finalizando entrega:", error);
     alert(error.message || "No se pudo finalizar la entrega.");
