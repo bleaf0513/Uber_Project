@@ -18,6 +18,31 @@ module.exports.getEnterpriseDeliveries = async (req, res) => {
     }
 };
 
+module.exports.getMyEnterpriseDeliveries = async (req, res) => {
+    try {
+        const driverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!driverId) {
+            return res.status(401).json({
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        const deliveries = await EnterpriseDelivery.find({
+            assignedDriverId: driverId,
+        })
+            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
+            .sort({ createdAt: -1 });
+
+        return res.status(200).json({ deliveries });
+    } catch (error) {
+        console.error('Error obteniendo entregas del conductor:', error);
+        return res.status(500).json({
+            message: 'Error obteniendo entregas del conductor.',
+        });
+    }
+};
+
 module.exports.createEnterpriseDelivery = async (req, res) => {
     try {
         const {
