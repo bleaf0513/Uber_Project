@@ -1,3 +1,4 @@
+const jwt = require('jsonwebtoken');
 const EnterpriseDriver = require('../models/enterpriseDriver.model');
 
 function normalizeCedula(value) {
@@ -53,6 +54,7 @@ module.exports.createDriver = async (req, res) => {
             currentLocation: {
                 lat: null,
                 lng: null,
+                updatedAt: null,
             },
             active: true,
         });
@@ -125,6 +127,19 @@ module.exports.loginDriverByCedula = async (req, res) => {
             });
         }
 
+        const token = jwt.sign(
+            { _id: driver._id },
+            process.env.JWT_SECRET,
+            { expiresIn: '7d' }
+        );
+
+        res.cookie('enterpriseDriverToken', token, {
+            httpOnly: true,
+            secure: true,
+            sameSite: 'none',
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+
         return res.status(200).json({
             success: true,
             message: 'Ingreso correcto.',
@@ -135,6 +150,73 @@ module.exports.loginDriverByCedula = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'Error interno del servidor.',
+        });
+    }
+};
+
+module.exports.updateDriverLocation = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { lat, lng } = req.body;
+
+        if (!req.driver?._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        if (String(req.driver._id) !== String(id)) {
+            return res.status(403).json({
+                success: false,
+                message: 'No puedes actualizar la ubicación de otro conductor.',
+            });
+        }
+
+        if (
+            lat === undefined ||
+            lng === undefined ||
+            !Number.isFinite(Number(lat)) ||
+            !Number.isFinite(Number(lng))
+        ) {
+            return res.status(400).json({
+                success: false,
+                message: 'Latitud y longitud válidas son obligatorias.',
+            });
+        }
+
+        const updatedDriver = await EnterpriseDriver.findOneAndUpdate(
+            {
+                _id: id,
+                active: true,
+            },
+            {
+                currentLocation: {
+                    lat: Number(lat),
+                    lng: Number(lng),
+                    updatedAt: new Date(),
+                },
+            },
+            { new: true }
+        );
+
+        if (!updatedDriver) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado.',
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Ubicación actualizada correctamente.',
+            driver: updatedDriver,
+        });
+    } catch (error) {
+        console.error('Error en updateDriverLocation:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'No se pudo actualizar la ubicación.',
         });
     }
 };
