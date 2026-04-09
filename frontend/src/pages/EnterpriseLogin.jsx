@@ -1,35 +1,74 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseLogin = () => {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const submitHandler = (e) => {
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(
+          0,
+          150
+        )}`
+      );
+    }
+  };
+
+  const submitHandler = async (e) => {
     e.preventDefault();
 
-    const savedEnterprises = JSON.parse(
-      localStorage.getItem("enterpriseAccounts") || "[]"
-    );
-
-    const matchedEnterprise = savedEnterprises.find(
-      (enterprise) =>
-        enterprise.email.trim().toLowerCase() === email.trim().toLowerCase() &&
-        enterprise.password === password
-    );
-
-    if (!matchedEnterprise) {
-      alert("Correo o contraseña incorrectos.");
+    if (!email.trim() || !password.trim()) {
+      alert("Por favor completa correo y contraseña.");
       return;
     }
 
-    localStorage.setItem(
-      "activeEnterpriseAccount",
-      JSON.stringify(matchedEnterprise)
-    );
+    try {
+      setLoading(true);
 
-    navigate("/enterprise-dashboard");
+      const response = await fetch(`${API_BASE}/enterprise/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          email: email.trim().toLowerCase(),
+          password,
+        }),
+      });
+
+      const data = await parseJsonSafe(response, "POST /enterprise/login");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo iniciar sesión.");
+      }
+
+      if (data.enterprise) {
+        localStorage.setItem(
+          "activeEnterpriseAccount",
+          JSON.stringify(data.enterprise)
+        );
+      }
+
+      navigate("/enterprise-dashboard");
+    } catch (error) {
+      console.error("Error en login empresarial:", error);
+      alert(error.message || "Correo o contraseña incorrectos.");
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -78,9 +117,10 @@ const EnterpriseLogin = () => {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-70"
           >
-            Ingresar
+            {loading ? "Ingresando..." : "Ingresar"}
           </button>
         </form>
 
