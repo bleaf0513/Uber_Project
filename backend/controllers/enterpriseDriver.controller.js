@@ -159,14 +159,16 @@ module.exports.updateDriverLocation = async (req, res) => {
         const { id } = req.params;
         const { lat, lng } = req.body;
 
-        if (!req.driver?._id) {
+        const authDriverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!authDriverId) {
             return res.status(401).json({
                 success: false,
                 message: 'Conductor no autorizado.',
             });
         }
 
-        if (String(req.driver._id) !== String(id)) {
+        if (String(authDriverId) !== String(id)) {
             return res.status(403).json({
                 success: false,
                 message: 'No puedes actualizar la ubicación de otro conductor.',
@@ -217,6 +219,66 @@ module.exports.updateDriverLocation = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'No se pudo actualizar la ubicación.',
+        });
+    }
+};
+
+module.exports.updateDriverStatus = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const authDriverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!authDriverId) {
+            return res.status(401).json({
+                success: false,
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        if (String(authDriverId) !== String(id)) {
+            return res.status(403).json({
+                success: false,
+                message: 'No puedes actualizar el estado de otro conductor.',
+            });
+        }
+
+        if (!['Disponible', 'En ruta'].includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Estado no válido.',
+            });
+        }
+
+        const updatedDriver = await EnterpriseDriver.findOneAndUpdate(
+            {
+                _id: id,
+                active: true,
+            },
+            {
+                status,
+            },
+            { new: true }
+        );
+
+        if (!updatedDriver) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado.',
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            message: 'Estado actualizado correctamente.',
+            driver: updatedDriver,
+        });
+    } catch (error) {
+        console.error('Error en updateDriverStatus:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'No se pudo actualizar el estado.',
         });
     }
 };
