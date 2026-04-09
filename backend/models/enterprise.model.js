@@ -7,6 +7,11 @@ const enterpriseSchema = new mongoose.Schema(
             required: true,
             trim: true,
         },
+        nit: {
+            type: String,
+            required: true,
+            trim: true,
+        },
         email: {
             type: String,
             required: true,
@@ -14,19 +19,14 @@ const enterpriseSchema = new mongoose.Schema(
             trim: true,
             lowercase: true,
         },
-        password: {
-            type: String,
-            required: true,
-        },
         phone: {
             type: String,
             default: '',
             trim: true,
         },
-        address: {
+        password: {
             type: String,
-            default: '',
-            trim: true,
+            required: true,
         },
         active: {
             type: Boolean,
