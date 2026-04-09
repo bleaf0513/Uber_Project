@@ -14,6 +14,7 @@ const EnterpriseLogisticsDriverMap = ({ selectedDriver }) => {
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
   const infoWindowRef = useRef(null);
+  const lastCoordsRef = useRef(null);
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
@@ -43,6 +44,7 @@ const EnterpriseLogisticsDriverMap = ({ selectedDriver }) => {
 
       mapInstanceRef.current.setCenter(DEFAULT_CENTER);
       mapInstanceRef.current.setZoom(12);
+      lastCoordsRef.current = null;
       return;
     }
 
@@ -66,8 +68,17 @@ const EnterpriseLogisticsDriverMap = ({ selectedDriver }) => {
       markerRef.current.setMap(mapInstanceRef.current);
     }
 
-    mapInstanceRef.current.panTo(coords);
-    mapInstanceRef.current.setZoom(15);
+    const last = lastCoordsRef.current;
+    const changed =
+      !last ||
+      last.lat !== coords.lat ||
+      last.lng !== coords.lng;
+
+    if (changed) {
+      mapInstanceRef.current.panTo(coords);
+      mapInstanceRef.current.setZoom(15);
+      lastCoordsRef.current = coords;
+    }
 
     const updatedAtText = selectedDriver.currentLocation.updatedAt
       ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
@@ -157,9 +168,9 @@ const EnterpriseLogistics = () => {
     }
   };
 
-  const fetchDrivers = useCallback(async () => {
+  const fetchDrivers = useCallback(async (silent = false) => {
     try {
-      setLoadingDrivers(true);
+      if (!silent) setLoadingDrivers(true);
 
       const response = await fetch(`${API_BASE}/enterprise-drivers`, {
         method: "GET",
@@ -175,15 +186,17 @@ const EnterpriseLogistics = () => {
       setDrivers(Array.isArray(data.drivers) ? data.drivers : []);
     } catch (error) {
       console.error("Error cargando conductores:", error);
-      alert(error.message || "Error cargando conductores.");
+      if (!silent) {
+        alert(error.message || "Error cargando conductores.");
+      }
     } finally {
-      setLoadingDrivers(false);
+      if (!silent) setLoadingDrivers(false);
     }
   }, []);
 
-  const fetchDeliveries = useCallback(async () => {
+  const fetchDeliveries = useCallback(async (silent = false) => {
     try {
-      setLoadingDeliveries(true);
+      if (!silent) setLoadingDeliveries(true);
 
       const response = await fetch(`${API_BASE}/enterprise-deliveries`, {
         method: "GET",
@@ -199,19 +212,21 @@ const EnterpriseLogistics = () => {
       setDeliveries(Array.isArray(data.deliveries) ? data.deliveries : []);
     } catch (error) {
       console.error("Error cargando entregas:", error);
-      alert(error.message || "Error cargando entregas.");
+      if (!silent) {
+        alert(error.message || "Error cargando entregas.");
+      }
     } finally {
-      setLoadingDeliveries(false);
+      if (!silent) setLoadingDeliveries(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchDrivers();
-    fetchDeliveries();
+    fetchDrivers(false);
+    fetchDeliveries(false);
 
     const interval = setInterval(() => {
-      fetchDrivers();
-      fetchDeliveries();
+      fetchDrivers(true);
+      fetchDeliveries(true);
     }, 4000);
 
     return () => clearInterval(interval);
@@ -392,7 +407,7 @@ const EnterpriseLogistics = () => {
       setAddressSuggestions([]);
       setShowSuggestions(false);
 
-      await fetchDeliveries();
+      await fetchDeliveries(true);
       alert("Entrega guardada y asignada correctamente.");
     } catch (error) {
       console.error("Error guardando la entrega:", error);
@@ -418,7 +433,7 @@ const EnterpriseLogistics = () => {
         throw new Error(data.message || "No se pudo eliminar la entrega.");
       }
 
-      await fetchDeliveries();
+      await fetchDeliveries(true);
     } catch (error) {
       console.error("Error eliminando entrega:", error);
       alert(error.message || "No se pudo eliminar la entrega.");
@@ -829,4 +844,3 @@ const EnterpriseLogistics = () => {
 };
 
 export default EnterpriseLogistics;
-
