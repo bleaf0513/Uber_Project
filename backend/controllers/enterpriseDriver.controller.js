@@ -12,6 +12,13 @@ module.exports.createDriver = async (req, res) => {
     try {
         const { name, cedula, phone, email, vehicle, plate } = req.body;
 
+        if (!req.enterprise?._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Empresa no autorizada.',
+            });
+        }
+
         if (!name || !cedula || !phone || !email || !vehicle || !plate) {
             return res.status(400).json({
                 success: false,
@@ -22,17 +29,20 @@ module.exports.createDriver = async (req, res) => {
         const normalizedCedula = normalizeCedula(cedula);
 
         const existingDriver = await EnterpriseDriver.findOne({
+            enterprise: req.enterprise._id,
             cedula: normalizedCedula,
+            active: true,
         });
 
         if (existingDriver) {
             return res.status(409).json({
                 success: false,
-                message: 'Ya existe un conductor registrado con esa cédula.',
+                message: 'Ya existe un conductor registrado con esa cédula en tu empresa.',
             });
         }
 
         const newDriver = await EnterpriseDriver.create({
+            enterprise: req.enterprise._id,
             name: String(name).trim(),
             cedula: normalizedCedula,
             phone: String(phone).trim(),
@@ -63,7 +73,17 @@ module.exports.createDriver = async (req, res) => {
 
 module.exports.getDrivers = async (req, res) => {
     try {
-        const drivers = await EnterpriseDriver.find({ active: true }).sort({
+        if (!req.enterprise?._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Empresa no autorizada.',
+            });
+        }
+
+        const drivers = await EnterpriseDriver.find({
+            enterprise: req.enterprise._id,
+            active: true,
+        }).sort({
             createdAt: -1,
         });
 
@@ -123,8 +143,18 @@ module.exports.deleteDriver = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const deletedDriver = await EnterpriseDriver.findByIdAndUpdate(
-            id,
+        if (!req.enterprise?._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Empresa no autorizada.',
+            });
+        }
+
+        const deletedDriver = await EnterpriseDriver.findOneAndUpdate(
+            {
+                _id: id,
+                enterprise: req.enterprise._id,
+            },
             { active: false },
             { new: true }
         );
