@@ -65,8 +65,12 @@ const EnterpriseDriverMap = ({
 
     if (activeDelivery?._id || activeDelivery?.id) {
       const activeId = String(activeDelivery._id || activeDelivery.id);
-      const current = base.find((d) => String(d._id || d.id) === activeId);
-      const others = base.filter((d) => String(d._id || d.id) !== activeId);
+      const current = base.find(
+        (d) => String(d._id || d.id) === activeId
+      );
+      const others = base.filter(
+        (d) => String(d._id || d.id) !== activeId
+      );
       return current ? [current, ...others] : [activeDelivery, ...others];
     }
 
@@ -565,31 +569,7 @@ const EnterpriseDriverPanel = () => {
   const [activeCedula, setActiveCedula] = useState("");
   const [activeDeliveryId, setActiveDeliveryId] = useState("");
   const [loadingDriver, setLoadingDriver] = useState(true);
-  const [updatingStatus, setUpdatingStatus] = useState(false);
   const navigate = useNavigate();
-
-  const fetchMyDeliveries = async () => {
-    const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries/me`, {
-      method: "GET",
-      credentials: "include",
-    });
-
-    const deliveriesText = await deliveriesResponse.text();
-    const deliveriesData = JSON.parse(deliveriesText);
-
-    if (!deliveriesResponse.ok) {
-      throw new Error(
-        deliveriesData.message || "No se pudieron cargar los pedidos del conductor."
-      );
-    }
-
-    const apiDeliveries = Array.isArray(deliveriesData?.deliveries)
-      ? deliveriesData.deliveries
-      : [];
-
-    setDeliveries(apiDeliveries);
-    return apiDeliveries;
-  };
 
   useEffect(() => {
     const savedCedula =
@@ -601,120 +581,67 @@ const EnterpriseDriverPanel = () => {
     setActiveCedula(savedCedula);
 
     const loadDriver = async () => {
-      try {
-        setLoadingDriver(true);
+  try {
+    setLoadingDriver(true);
 
-        let currentDriver = null;
+    let currentDriver = null;
 
-        if (savedDriverData) {
-          const parsedDriver = JSON.parse(savedDriverData);
-          setSelectedDriver(parsedDriver);
-          currentDriver = parsedDriver;
-        }
-
-        const apiDeliveries = await fetchMyDeliveries();
-
-        const currentDriverId =
-          savedDriverId || currentDriver?._id || currentDriver?.id || "";
-
-        if (currentDriverId) {
-          const inProgress = apiDeliveries.find((delivery) => {
-            const assignedId =
-              delivery.assignedDriverId?._id ||
-              delivery.assignedDriverId ||
-              delivery.driver?._id ||
-              delivery.driver ||
-              "";
-
-            return (
-              String(assignedId) === String(currentDriverId) &&
-              delivery.status === "En curso"
-            );
-          });
-
-          setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
-        }
-      } catch (error) {
-        console.error("Error cargando panel del conductor:", error);
-      } finally {
-        setLoadingDriver(false);
-      }
-    };
-
-    loadDriver();
-  }, []);
-
-  const assignedDeliveries = useMemo(() => {
-    if (!selectedDriver) return [];
-
-    const currentDriverId = selectedDriver._id || selectedDriver.id;
-
-    return deliveries.filter((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        delivery.driver?._id ||
-        delivery.driver ||
-        "";
-
-      return String(assignedId) === String(currentDriverId);
-    });
-  }, [deliveries, selectedDriver]);
-
-  const activeDelivery = useMemo(() => {
-    return assignedDeliveries.find(
-      (delivery) =>
-        String(delivery._id || delivery.id) === String(activeDeliveryId)
-    );
-  }, [assignedDeliveries, activeDeliveryId]);
-
-  const updateDeliveryStatus = async (deliveryId, status) => {
-    const response = await fetch(
-      `${API_BASE}/enterprise-deliveries/${deliveryId}/status`,
-      {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ status }),
-      }
-    );
-
-    const text = await response.text();
-    const data = JSON.parse(text);
-
-    if (!response.ok) {
-      throw new Error(data.message || "No se pudo actualizar el estado.");
+    if (savedDriverData) {
+      const parsedDriver = JSON.parse(savedDriverData);
+      setSelectedDriver(parsedDriver);
+      currentDriver = parsedDriver;
     }
 
-    return data.delivery;
-  };
+    if (savedDriverId) {
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "GET",
+        credentials: "include",
+      });
 
-  const handleStartDelivery = async (deliveryId) => {
-    if (!selectedDriver || updatingStatus) return;
+      const text = await response.text();
+      const data = JSON.parse(text);
 
-    try {
-      setUpdatingStatus(true);
+      if (response.ok && data?.drivers?.length) {
+        const matched = data.drivers.find(
+          (driver) => String(driver._id) === String(savedDriverId)
+        );
 
-      await updateDeliveryStatus(deliveryId, "En curso");
-      const updatedDeliveries = await fetchMyDeliveries();
+        if (matched) {
+          setSelectedDriver(matched);
+          currentDriver = matched;
+          localStorage.setItem(
+            "activeEnterpriseDriverData",
+            JSON.stringify(matched)
+          );
+        }
+      }
+    }
 
-      setActiveDeliveryId(deliveryId);
+    const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries/me`, {
+  method: "GET",
+  credentials: "include",
+});
 
-      const updatedDriver = {
-        ...selectedDriver,
-        status: "En ruta",
-      };
+const deliveriesText = await deliveriesResponse.text();
+const deliveriesData = JSON.parse(deliveriesText);
 
-      setSelectedDriver(updatedDriver);
-      localStorage.setItem(
-        "activeEnterpriseDriverData",
-        JSON.stringify(updatedDriver)
-      );
+if (!deliveriesResponse.ok) {
+  throw new Error(
+    deliveriesData.message || "No se pudieron cargar los pedidos del conductor."
+  );
+}
 
-      const currentDriverId = selectedDriver._id || selectedDriver.id;
-      const inProgress = updatedDeliveries.find((delivery) => {
+const apiDeliveries = Array.isArray(deliveriesData?.deliveries)
+  ? deliveriesData.deliveries
+  : [];
+
+setDeliveries(apiDeliveries);
+
+    const currentDriverId =
+      savedDriverId || currentDriver?._id || currentDriver?.id || "";
+
+    if (currentDriverId) {
+      const inProgress = apiDeliveries.find((delivery) => {
         const assignedId =
           delivery.assignedDriverId?._id ||
           delivery.assignedDriverId ||
@@ -728,61 +655,133 @@ const EnterpriseDriverPanel = () => {
         );
       });
 
-      setActiveDeliveryId(inProgress?._id || inProgress?.id || deliveryId);
-    } catch (error) {
-      console.error("Error iniciando entrega:", error);
-      alert(error.message || "No se pudo iniciar la entrega.");
-    } finally {
-      setUpdatingStatus(false);
+      setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
     }
+  } catch (error) {
+    console.error("Error cargando panel del conductor:", error);
+  } finally {
+    setLoadingDriver(false);
+  }
+};
+
+    loadDriver();
+  }, []);
+
+  const assignedDeliveries = useMemo(() => {
+  if (!selectedDriver) return [];
+
+  const currentDriverId = selectedDriver._id || selectedDriver.id;
+
+  return deliveries.filter((delivery) => {
+    const assignedId =
+      delivery.assignedDriverId?._id ||
+      delivery.assignedDriverId ||
+      delivery.driver?._id ||
+      delivery.driver ||
+      "";
+
+    return String(assignedId) === String(currentDriverId);
+  });
+}, [deliveries, selectedDriver]);
+
+  const activeDelivery = useMemo(() => {
+    return assignedDeliveries.find(
+      (delivery) =>
+        String(delivery._id || delivery.id) === String(activeDeliveryId)
+    );
+  }, [assignedDeliveries, activeDeliveryId]);
+
+  const updateDeliveriesStorage = (updatedDeliveries) => {
+    setDeliveries(updatedDeliveries);
+    localStorage.setItem(
+      "enterpriseDeliveries",
+      JSON.stringify(updatedDeliveries)
+    );
   };
 
-  const handleFinishDelivery = async (deliveryId) => {
-    if (!selectedDriver || updatingStatus) return;
+  const handleStartDelivery = (deliveryId) => {
+    if (!selectedDriver) return;
 
-    try {
-      setUpdatingStatus(true);
+    const driverId = selectedDriver._id || selectedDriver.id;
 
-      await updateDeliveryStatus(deliveryId, "Finalizada");
-      const updatedDeliveries = await fetchMyDeliveries();
+    const updatedDeliveries = deliveries.map((delivery) => {
+      const currentId = delivery._id || delivery.id;
 
-      const driverId = selectedDriver._id || selectedDriver.id;
+      if (
+        String(delivery.assignedDriverId) === String(driverId) &&
+        delivery.status === "En curso" &&
+        String(currentId) !== String(deliveryId)
+      ) {
+        return {
+          ...delivery,
+          status: "Pendiente",
+        };
+      }
 
-      const remaining = updatedDeliveries.filter((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
+      if (String(currentId) === String(deliveryId)) {
+        return {
+          ...delivery,
+          status: "En curso",
+          startedAt: new Date().toISOString(),
+        };
+      }
 
-        return (
-          String(assignedId) === String(driverId) &&
-          delivery.status !== "Finalizada"
-        );
-      });
+      return delivery;
+    });
 
-      const nextActive = remaining.find(
-        (delivery) => delivery.status === "En curso"
-      );
-      setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
+    updateDeliveriesStorage(updatedDeliveries);
+    setActiveDeliveryId(deliveryId);
 
-      const updatedDriver = {
-        ...selectedDriver,
-        status: remaining.length ? "En ruta" : "Disponible",
-      };
+    const updatedDriver = {
+      ...selectedDriver,
+      status: "En ruta",
+    };
 
-      setSelectedDriver(updatedDriver);
-      localStorage.setItem(
-        "activeEnterpriseDriverData",
-        JSON.stringify(updatedDriver)
-      );
-    } catch (error) {
-      console.error("Error finalizando entrega:", error);
-      alert(error.message || "No se pudo finalizar la entrega.");
-    } finally {
-      setUpdatingStatus(false);
-    }
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
+    );
+  };
+
+  const handleFinishDelivery = (deliveryId) => {
+    if (!selectedDriver) return;
+
+    const driverId = selectedDriver._id || selectedDriver.id;
+
+    const updatedDeliveries = deliveries.map((delivery) => {
+      const currentId = delivery._id || delivery.id;
+
+      return String(currentId) === String(deliveryId)
+        ? {
+            ...delivery,
+            status: "Finalizada",
+            finishedAt: new Date().toISOString(),
+          }
+        : delivery;
+    });
+
+    updateDeliveriesStorage(updatedDeliveries);
+
+    const remaining = updatedDeliveries.filter(
+      (delivery) =>
+        String(delivery.assignedDriverId) === String(driverId) &&
+        delivery.status !== "Finalizada"
+    );
+
+    const nextActive = remaining.find((delivery) => delivery.status === "En curso");
+    setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
+
+    const updatedDriver = {
+      ...selectedDriver,
+      status: remaining.length ? "En ruta" : "Disponible",
+    };
+
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
+    );
   };
 
   const handleLogout = () => {
@@ -952,11 +951,10 @@ const EnterpriseDriverPanel = () => {
                     {delivery.status === "Pendiente" && (
                       <button
                         type="button"
-                        disabled={updatingStatus}
                         onClick={() => handleStartDelivery(delivery._id || delivery.id)}
-                        className="bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold disabled:opacity-60"
+                        className="bg-blue-600 text-white px-4 py-2 rounded-xl font-semibold"
                       >
-                        {updatingStatus ? "Procesando..." : "Iniciar entrega"}
+                        Iniciar entrega
                       </button>
                     )}
 
@@ -964,11 +962,10 @@ const EnterpriseDriverPanel = () => {
                       <>
                         <button
                           type="button"
-                          disabled={updatingStatus}
                           onClick={() => handleFinishDelivery(delivery._id || delivery.id)}
-                          className="bg-green-600 text-white px-4 py-2 rounded-xl font-semibold disabled:opacity-60"
+                          className="bg-green-600 text-white px-4 py-2 rounded-xl font-semibold"
                         >
-                          {updatingStatus ? "Procesando..." : "Finalizar entrega"}
+                          Finalizar entrega
                         </button>
 
                         <span className="inline-flex items-center px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold">
