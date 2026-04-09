@@ -692,37 +692,74 @@ setDeliveries(apiDeliveries);
   }, [assignedDeliveries, activeDeliveryId]);
 
   const updateDeliveriesStorage = (updatedDeliveries) => {
-    setDeliveries(updatedDeliveries);
-    localStorage.setItem(
-      "enterpriseDeliveries",
-      JSON.stringify(updatedDeliveries)
-    );
-  };
+  setDeliveries(updatedDeliveries);
+  localStorage.setItem(
+    "enterpriseDeliveries",
+    JSON.stringify(updatedDeliveries)
+  );
+};
 
-  const handleStartDelivery = (deliveryId) => {
+const persistDriverStatus = async (driverId, status) => {
+  const response = await fetch(`${API_BASE}/enterprise-drivers/${driverId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify({ status }),
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!response.ok) {
+    throw new Error(data.message || "No se pudo actualizar el estado del conductor.");
+  }
+
+  return data.driver || null;
+};
+
+const persistDeliveryStatus = async (deliveryId, status) => {
+  const response = await fetch(`${API_BASE}/enterprise-deliveries/${deliveryId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify({ status }),
+  });
+
+  const text = await response.text();
+  const data = text ? JSON.parse(text) : {};
+
+  if (!response.ok) {
+    throw new Error(data.message || "No se pudo actualizar el estado de la entrega.");
+  }
+
+  return data.delivery || null;
+};
+
+  const handleStartDelivery = async (deliveryId) => {
+  try {
     if (!selectedDriver) return;
 
     const driverId = selectedDriver._id || selectedDriver.id;
+
+    const persistedDelivery = await persistDeliveryStatus(deliveryId, "En curso");
+    const persistedDriver = await persistDriverStatus(driverId, "En ruta");
+
+    const normalizedPersistedDeliveryId =
+      persistedDelivery?._id || persistedDelivery?.id || deliveryId;
 
     const updatedDeliveries = deliveries.map((delivery) => {
       const currentId = delivery._id || delivery.id;
 
       if (
-        String(delivery.assignedDriverId) === String(driverId) &&
-        delivery.status === "En curso" &&
-        String(currentId) !== String(deliveryId)
+        String(currentId) === String(normalizedPersistedDeliveryId)
       ) {
         return {
           ...delivery,
-          status: "Pendiente",
-        };
-      }
-
-      if (String(currentId) === String(deliveryId)) {
-        return {
-          ...delivery,
-          status: "En curso",
-          startedAt: new Date().toISOString(),
+          ...persistedDelivery,
         };
       }
 
@@ -730,66 +767,100 @@ setDeliveries(apiDeliveries);
     });
 
     updateDeliveriesStorage(updatedDeliveries);
-    setActiveDeliveryId(deliveryId);
+    setActiveDeliveryId(String(normalizedPersistedDeliveryId));
 
-    const updatedDriver = {
-      ...selectedDriver,
-      status: "En ruta",
-    };
+    const updatedDriver = persistedDriver
+      ? {
+          ...selectedDriver,
+          ...persistedDriver,
+        }
+      : {
+          ...selectedDriver,
+          status: "En ruta",
+        };
 
     setSelectedDriver(updatedDriver);
     localStorage.setItem(
       "activeEnterpriseDriverData",
       JSON.stringify(updatedDriver)
     );
-  };
-
-  const handleFinishDelivery = (deliveryId) => {
+  } catch (error) {
+    console.error("Error iniciando entrega:", error);
+    alert(error.message || "No se pudo iniciar la entrega.");
+  }
+};
+  const handleFinishDelivery = async (deliveryId) => {
+  try {
     if (!selectedDriver) return;
 
     const driverId = selectedDriver._id || selectedDriver.id;
 
+    const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
+
+    const normalizedPersistedDeliveryId =
+      persistedDelivery?._id || persistedDelivery?.id || deliveryId;
+
     const updatedDeliveries = deliveries.map((delivery) => {
       const currentId = delivery._id || delivery.id;
 
-      return String(currentId) === String(deliveryId)
+      return String(currentId) === String(normalizedPersistedDeliveryId)
         ? {
             ...delivery,
-            status: "Finalizada",
-            finishedAt: new Date().toISOString(),
+            ...persistedDelivery,
           }
         : delivery;
     });
 
     updateDeliveriesStorage(updatedDeliveries);
 
-    const remaining = updatedDeliveries.filter(
-      (delivery) =>
-        String(delivery.assignedDriverId) === String(driverId) &&
+    const remaining = updatedDeliveries.filter((delivery) => {
+      const assignedId =
+        delivery.assignedDriverId?._id ||
+        delivery.assignedDriverId ||
+        delivery.driver?._id ||
+        delivery.driver ||
+        "";
+
+      return (
+        String(assignedId) === String(driverId) &&
         delivery.status !== "Finalizada"
-    );
+      );
+    });
 
     const nextActive = remaining.find((delivery) => delivery.status === "En curso");
     setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
 
-    const updatedDriver = {
-      ...selectedDriver,
-      status: remaining.length ? "En ruta" : "Disponible",
-    };
+    const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
+    const persistedDriver = await persistDriverStatus(driverId, nextDriverStatus);
+
+    const updatedDriver = persistedDriver
+      ? {
+          ...selectedDriver,
+          ...persistedDriver,
+        }
+      : {
+          ...selectedDriver,
+          status: nextDriverStatus,
+        };
 
     setSelectedDriver(updatedDriver);
     localStorage.setItem(
       "activeEnterpriseDriverData",
       JSON.stringify(updatedDriver)
     );
-  };
+  } catch (error) {
+    console.error("Error finalizando entrega:", error);
+    alert(error.message || "No se pudo finalizar la entrega.");
+  }
+};
 
   const handleLogout = () => {
-    localStorage.removeItem("activeEnterpriseDriverCedula");
-    localStorage.removeItem("activeEnterpriseDriverId");
-    localStorage.removeItem("activeEnterpriseDriverData");
-    navigate("/enterprise-driver-login");
-  };
+  localStorage.removeItem("activeEnterpriseDriverCedula");
+  localStorage.removeItem("activeEnterpriseDriverId");
+  localStorage.removeItem("activeEnterpriseDriverData");
+  localStorage.removeItem("enterpriseDeliveries");
+  navigate("/enterprise-driver-login");
+};
 
   if (!activeCedula) {
     return (
