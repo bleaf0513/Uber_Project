@@ -8,8 +8,8 @@ const {
     deleteEnterpriseDelivery,
 } = require('../controllers/enterpriseDelivery.controller');
 
-router.get('/enterprise-deliveries', authEnterprise, getEnterpriseDeliveries);
-router.post('/enterprise-deliveries', authEnterprise, createEnterpriseDelivery);
-router.delete('/enterprise-deliveries/:id', authEnterprise, deleteEnterpriseDelivery);
+router.get('/', authEnterprise, getEnterpriseDeliveries);
+router.post('/', authEnterprise, createEnterpriseDelivery);
+router.delete('/:id', authEnterprise, deleteEnterpriseDelivery);
 
 module.exports = router;
