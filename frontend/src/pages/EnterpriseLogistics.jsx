@@ -4,6 +4,7 @@ import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 
+const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 
 const EnterpriseLogisticsDriverMap = ({ selectedDriver }) => {
@@ -117,6 +118,8 @@ const EnterpriseLogistics = () => {
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
+  const [loadingDrivers, setLoadingDrivers] = useState(true);
+  const [loadingDeliveries, setLoadingDeliveries] = useState(true);
 
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -136,24 +139,83 @@ const EnterpriseLogistics = () => {
     placeId: "",
   });
 
-  useEffect(() => {
-    const loadData = () => {
-      const savedDrivers = JSON.parse(
-        localStorage.getItem("enterpriseDrivers") || "[]"
+  const driverIdValue = (driver) => String(driver?._id || driver?.id || "");
+
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(
+          0,
+          150
+        )}`
       );
-      const savedDeliveries = JSON.parse(
-        localStorage.getItem("enterpriseDeliveries") || "[]"
-      );
+    }
+  };
 
-      setDrivers(savedDrivers);
-      setDeliveries(savedDeliveries);
-    };
+  const fetchDrivers = useCallback(async () => {
+    try {
+      setLoadingDrivers(true);
 
-    loadData();
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "GET",
+        credentials: "include",
+      });
 
-    const interval = setInterval(loadData, 2000);
-    return () => clearInterval(interval);
+      const data = await parseJsonSafe(response, "GET /enterprise-drivers");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar los conductores.");
+      }
+
+      setDrivers(Array.isArray(data.drivers) ? data.drivers : []);
+    } catch (error) {
+      console.error("Error cargando conductores:", error);
+      alert(error.message || "Error cargando conductores.");
+    } finally {
+      setLoadingDrivers(false);
+    }
   }, []);
+
+  const fetchDeliveries = useCallback(async () => {
+    try {
+      setLoadingDeliveries(true);
+
+      const response = await fetch(`${API_BASE}/enterprise-deliveries`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const data = await parseJsonSafe(response, "GET /enterprise-deliveries");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar las entregas.");
+      }
+
+      setDeliveries(Array.isArray(data.deliveries) ? data.deliveries : []);
+    } catch (error) {
+      console.error("Error cargando entregas:", error);
+      alert(error.message || "Error cargando entregas.");
+    } finally {
+      setLoadingDeliveries(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDrivers();
+    fetchDeliveries();
+
+    const interval = setInterval(() => {
+      fetchDrivers();
+      fetchDeliveries();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [fetchDrivers, fetchDeliveries]);
 
   useEffect(() => {
     const handleOutsideClick = (event) => {
@@ -182,13 +244,11 @@ const EnterpriseLogistics = () => {
     const seq = ++suggestionSeqRef.current;
 
     try {
-      const { data } = await axios.get(
-        `${getApiBaseUrl()}/maps/get-suggestions`,
-        {
-          params: { address: query },
-          timeout: 18000,
-        }
-      );
+      const { data } = await axios.get(`${API_BASE}/maps/get-suggestions`, {
+        params: { address: query },
+        timeout: 18000,
+        withCredentials: true,
+      });
 
       if (seq !== suggestionSeqRef.current) return;
 
@@ -260,7 +320,7 @@ const EnterpriseLogistics = () => {
     });
   };
 
-  const handleSaveDelivery = (e) => {
+  const handleSaveDelivery = async (e) => {
     e.preventDefault();
 
     const {
@@ -273,13 +333,7 @@ const EnterpriseLogistics = () => {
       placeId,
     } = formData;
 
-    if (
-      !invoiceNumber ||
-      !clientName ||
-      !address ||
-      !clientPhone ||
-      !assignedDriverId
-    ) {
+    if (!invoiceNumber || !clientName || !address || !clientPhone || !assignedDriverId) {
       alert("Por favor completa todos los campos obligatorios.");
       return;
     }
@@ -290,7 +344,7 @@ const EnterpriseLogistics = () => {
     }
 
     const selectedDriver = drivers.find(
-      (driver) => String(driver.id) === String(assignedDriverId)
+      (driver) => driverIdValue(driver) === String(assignedDriverId)
     );
 
     if (!selectedDriver) {
@@ -301,28 +355,28 @@ const EnterpriseLogistics = () => {
     try {
       setSavingDelivery(true);
 
-      const newDelivery = {
-        id: Date.now(),
-        invoiceNumber,
-        clientName,
-        address,
-        clientPhone,
-        assignedDriverId: selectedDriver.id,
-        assignedDriverName: selectedDriver.name,
-        notes,
-        status: "Pendiente",
-        createdAt: new Date().toISOString(),
-        startedAt: null,
-        finishedAt: null,
-        placeId,
-      };
+      const response = await fetch(`${API_BASE}/enterprise-deliveries`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          invoiceNumber,
+          clientName,
+          address,
+          clientPhone,
+          assignedDriverId,
+          notes,
+          placeId,
+        }),
+      });
 
-      const updatedDeliveries = [...deliveries, newDelivery];
-      setDeliveries(updatedDeliveries);
-      localStorage.setItem(
-        "enterpriseDeliveries",
-        JSON.stringify(updatedDeliveries)
-      );
+      const data = await parseJsonSafe(response, "POST /enterprise-deliveries");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No fue posible guardar la entrega.");
+      }
 
       setFormData({
         invoiceNumber: "",
@@ -338,37 +392,57 @@ const EnterpriseLogistics = () => {
       setAddressSuggestions([]);
       setShowSuggestions(false);
 
+      await fetchDeliveries();
       alert("Entrega guardada y asignada correctamente.");
     } catch (error) {
       console.error("Error guardando la entrega:", error);
-      alert("No fue posible guardar la entrega.");
+      alert(error.message || "No fue posible guardar la entrega.");
     } finally {
       setSavingDelivery(false);
     }
   };
 
-  const handleDeleteDelivery = (id) => {
-    const updatedDeliveries = deliveries.filter((delivery) => delivery.id !== id);
-    setDeliveries(updatedDeliveries);
-    localStorage.setItem(
-      "enterpriseDeliveries",
-      JSON.stringify(updatedDeliveries)
-    );
+  const handleDeleteDelivery = async (id) => {
+    try {
+      const response = await fetch(`${API_BASE}/enterprise-deliveries/${id}`, {
+        method: "DELETE",
+        credentials: "include",
+      });
+
+      const data = await parseJsonSafe(
+        response,
+        "DELETE /enterprise-deliveries/:id"
+      );
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo eliminar la entrega.");
+      }
+
+      await fetchDeliveries();
+    } catch (error) {
+      console.error("Error eliminando entrega:", error);
+      alert(error.message || "No se pudo eliminar la entrega.");
+    }
   };
 
   const selectedDriver = useMemo(() => {
     return drivers.find(
-      (driver) => String(driver.id) === String(selectedDriverFilter)
+      (driver) => driverIdValue(driver) === String(selectedDriverFilter)
     );
   }, [drivers, selectedDriverFilter]);
 
   const filteredDeliveries = useMemo(() => {
     if (!selectedDriverFilter) return deliveries;
 
-    return deliveries.filter(
-      (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriverFilter)
-    );
+    return deliveries.filter((delivery) => {
+      const assignedId =
+        delivery.assignedDriverId?._id ||
+        delivery.assignedDriverId ||
+        delivery.driver?._id ||
+        delivery.driver ||
+        "";
+      return String(assignedId) === String(selectedDriverFilter);
+    });
   }, [deliveries, selectedDriverFilter]);
 
   const stats = useMemo(() => {
@@ -382,11 +456,16 @@ const EnterpriseLogistics = () => {
   const selectedDriverPendingDeliveries = useMemo(() => {
     if (!selectedDriver) return [];
 
-    return deliveries.filter(
-      (delivery) =>
-        String(delivery.assignedDriverId) === String(selectedDriver.id) &&
+    return deliveries.filter((delivery) => {
+      const assignedId =
+        delivery.assignedDriverId?._id ||
+        delivery.assignedDriverId ||
+        "";
+      return (
+        String(assignedId) === String(driverIdValue(selectedDriver)) &&
         delivery.status !== "Finalizada"
-    );
+      );
+    });
   }, [deliveries, selectedDriver]);
 
   const openDriverInGoogleMaps = () => {
@@ -504,10 +583,17 @@ const EnterpriseLogistics = () => {
               value={formData.assignedDriverId}
               onChange={handleChange}
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+              disabled={loadingDrivers}
             >
-              <option value="">Seleccionar conductor</option>
+              <option value="">
+                {loadingDrivers
+                  ? "Cargando conductores..."
+                  : drivers.length === 0
+                  ? "No hay conductores disponibles"
+                  : "Seleccionar conductor"}
+              </option>
               {drivers.map((driver) => (
-                <option key={driver.id} value={driver.id}>
+                <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
                   {driver.name} - CC {driver.cedula} - {driver.vehicle}
                 </option>
               ))}
@@ -544,7 +630,7 @@ const EnterpriseLogistics = () => {
           >
             <option value="">Ver todos los conductores</option>
             {drivers.map((driver) => (
-              <option key={driver.id} value={driver.id}>
+              <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
                 {driver.name} - CC {driver.cedula} - {driver.vehicle}
               </option>
             ))}
@@ -654,78 +740,86 @@ const EnterpriseLogistics = () => {
             Pedidos asignados
           </h2>
 
-          {filteredDeliveries.length === 0 ? (
+          {loadingDeliveries ? (
+            <p className="text-gray-500">Cargando pedidos...</p>
+          ) : filteredDeliveries.length === 0 ? (
             <p className="text-gray-500">No hay pedidos para este filtro.</p>
           ) : (
             <div className="space-y-4">
-              {filteredDeliveries.map((delivery) => (
-                <div key={delivery.id} className="border rounded-xl p-4">
-                  <p className="font-bold text-gray-900">
-                    Factura #{delivery.invoiceNumber}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Cliente: {delivery.clientName}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Dirección: {delivery.address}
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Teléfono: {delivery.clientPhone}
-                  </p>
-                  <p className="text-sm text-blue-600 font-semibold mt-2">
-                    Asignado a: {delivery.assignedDriverName}
-                  </p>
-
-                  {delivery.placeId ? (
-                    <p className="text-xs text-gray-500 mt-1">
-                      placeId: {delivery.placeId}
+              {filteredDeliveries.map((delivery) => {
+                const deliveryId = delivery._id || delivery.id;
+                return (
+                  <div key={deliveryId} className="border rounded-xl p-4">
+                    <p className="font-bold text-gray-900">
+                      Factura #{delivery.invoiceNumber}
                     </p>
-                  ) : null}
-
-                  <p className="text-sm mt-2">
-                    Estado:{" "}
-                    <span
-                      className={
-                        delivery.status === "Finalizada"
-                          ? "text-green-600 font-semibold"
-                          : delivery.status === "En curso"
-                          ? "text-blue-600 font-semibold"
-                          : "text-yellow-600 font-semibold"
-                      }
-                    >
-                      {delivery.status}
-                    </span>
-                  </p>
-
-                  {delivery.startedAt && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Inicio: {new Date(delivery.startedAt).toLocaleString()}
+                    <p className="text-sm text-gray-600">
+                      Cliente: {delivery.clientName}
                     </p>
-                  )}
-
-                  {delivery.finishedAt && (
-                    <p className="text-xs text-gray-500 mt-1">
-                      Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
+                    <p className="text-sm text-gray-600">
+                      Dirección: {delivery.address}
                     </p>
-                  )}
-
-                  {delivery.notes ? (
-                    <p className="text-sm text-gray-500 mt-1">
-                      Observaciones: {delivery.notes}
+                    <p className="text-sm text-gray-600">
+                      Teléfono: {delivery.clientPhone}
                     </p>
-                  ) : null}
+                    <p className="text-sm text-blue-600 font-semibold mt-2">
+                      Asignado a:{" "}
+                      {delivery.assignedDriverName ||
+                        delivery.assignedDriverId?.name ||
+                        "Sin nombre"}
+                    </p>
 
-                  <div className="flex justify-end mt-3">
-                    <button
-                      type="button"
-                      onClick={() => handleDeleteDelivery(delivery.id)}
-                      className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold"
-                    >
-                      Eliminar
-                    </button>
+                    {delivery.placeId ? (
+                      <p className="text-xs text-gray-500 mt-1">
+                        placeId: {delivery.placeId}
+                      </p>
+                    ) : null}
+
+                    <p className="text-sm mt-2">
+                      Estado:{" "}
+                      <span
+                        className={
+                          delivery.status === "Finalizada"
+                            ? "text-green-600 font-semibold"
+                            : delivery.status === "En curso"
+                            ? "text-blue-600 font-semibold"
+                            : "text-yellow-600 font-semibold"
+                        }
+                      >
+                        {delivery.status}
+                      </span>
+                    </p>
+
+                    {delivery.startedAt && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Inicio: {new Date(delivery.startedAt).toLocaleString()}
+                      </p>
+                    )}
+
+                    {delivery.finishedAt && (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
+                      </p>
+                    )}
+
+                    {delivery.notes ? (
+                      <p className="text-sm text-gray-500 mt-1">
+                        Observaciones: {delivery.notes}
+                      </p>
+                    ) : null}
+
+                    <div className="flex justify-end mt-3">
+                      <button
+                        type="button"
+                        onClick={() => handleDeleteDelivery(deliveryId)}
+                        className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold"
+                      >
+                        Eliminar
+                      </button>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
