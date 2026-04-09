@@ -1,5 +1,8 @@
 import React, { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseSignup = () => {
   const [companyName, setCompanyName] = useState("");
@@ -7,9 +10,26 @@ const EnterpriseSignup = () => {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
-  const submitHandler = (e) => {
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(
+          0,
+          150
+        )}`
+      );
+    }
+  };
+
+  const submitHandler = async (e) => {
     e.preventDefault();
 
     if (!companyName || !nit || !email || !phone || !password) {
@@ -17,38 +37,38 @@ const EnterpriseSignup = () => {
       return;
     }
 
-    const savedEnterprises = JSON.parse(
-      localStorage.getItem("enterpriseAccounts") || "[]"
-    );
+    try {
+      setLoading(true);
 
-    const emailExists = savedEnterprises.some(
-      (enterprise) =>
-        enterprise.email.trim().toLowerCase() === email.trim().toLowerCase()
-    );
+      const response = await fetch(`${API_BASE}/enterprise/signup`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          companyName: companyName.trim(),
+          nit: nit.trim(),
+          email: email.trim().toLowerCase(),
+          phone: phone.trim(),
+          password,
+        }),
+      });
 
-    if (emailExists) {
-      alert("Ya existe una empresa registrada con ese correo.");
-      return;
+      const data = await parseJsonSafe(response, "POST /enterprise/signup");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo crear la cuenta.");
+      }
+
+      alert("Cuenta empresarial creada correctamente.");
+      navigate("/enterprise-login");
+    } catch (error) {
+      console.error("Error en registro empresarial:", error);
+      alert(error.message || "No se pudo crear la cuenta.");
+    } finally {
+      setLoading(false);
     }
-
-    const newEnterprise = {
-      id: Date.now(),
-      companyName,
-      nit,
-      email,
-      phone,
-      password,
-      createdAt: new Date().toISOString(),
-    };
-
-    const updatedEnterprises = [...savedEnterprises, newEnterprise];
-    localStorage.setItem(
-      "enterpriseAccounts",
-      JSON.stringify(updatedEnterprises)
-    );
-
-    alert("Cuenta empresarial creada correctamente.");
-    navigate("/enterprise-login");
   };
 
   return (
@@ -118,9 +138,10 @@ const EnterpriseSignup = () => {
 
           <button
             type="submit"
-            className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold"
+            disabled={loading}
+            className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-70"
           >
-            Crear cuenta
+            {loading ? "Creando cuenta..." : "Crear cuenta"}
           </button>
         </form>
 
