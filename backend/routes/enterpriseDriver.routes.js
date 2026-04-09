@@ -9,6 +9,7 @@ const {
   getDrivers,
   loginDriverByCedula,
   updateDriverLocation,
+  updateDriverStatus,
   deleteDriver,
 } = require('../controllers/enterpriseDriver.controller');
 
@@ -21,5 +22,8 @@ router.post('/login', loginDriverByCedula);
 
 // actualizar ubicación del conductor autenticado
 router.patch('/:id/location', authEnterpriseDriver, updateDriverLocation);
+
+// actualizar estado del conductor autenticado
+router.patch('/:id/status', authEnterpriseDriver, updateDriverStatus);
 
 module.exports = router;
