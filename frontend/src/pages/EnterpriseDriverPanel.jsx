@@ -662,13 +662,21 @@ const EnterpriseDriverPanel = () => {
   }, []);
 
   const assignedDeliveries = useMemo(() => {
-    if (!selectedDriver) return [];
-    return deliveries.filter(
-      (delivery) =>
-        String(delivery.assignedDriverId) ===
-        String(selectedDriver._id || selectedDriver.id)
-    );
-  }, [deliveries, selectedDriver]);
+  if (!selectedDriver) return [];
+
+  const currentDriverId = selectedDriver._id || selectedDriver.id;
+
+  return deliveries.filter((delivery) => {
+    const assignedId =
+      delivery.assignedDriverId?._id ||
+      delivery.assignedDriverId ||
+      delivery.driver?._id ||
+      delivery.driver ||
+      "";
+
+    return String(assignedId) === String(currentDriverId);
+  });
+}, [deliveries, selectedDriver]);
 
   const activeDelivery = useMemo(() => {
     return assignedDeliveries.find(
