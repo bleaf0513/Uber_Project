@@ -14,6 +14,7 @@ const captainRoutes = require('./routes/captain.routes');
 const cookieParser = require('cookie-parser');
 const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
+const enterpriseRoutes = require('./routes/enterprise.routes');
 const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
 const enterpriseDeliveryRoutes = require('./routes/enterpriseDelivery.routes');
 
@@ -35,6 +36,7 @@ app.use('/users', userRoutes);
 app.use('/captain', captainRoutes);
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
+app.use('/enterprise', enterpriseRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);
 app.use('/enterprise-deliveries', enterpriseDeliveryRoutes);
 
