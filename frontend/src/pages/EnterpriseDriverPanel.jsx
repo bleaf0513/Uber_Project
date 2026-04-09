@@ -581,61 +581,82 @@ const EnterpriseDriverPanel = () => {
     setActiveCedula(savedCedula);
 
     const loadDriver = async () => {
-      try {
-        setLoadingDriver(true);
+  try {
+    setLoadingDriver(true);
 
-        if (savedDriverData) {
-          const parsedDriver = JSON.parse(savedDriverData);
-          setSelectedDriver(parsedDriver);
-        }
+    let currentDriver = null;
 
-        if (savedDriverId) {
-          const response = await fetch(`${API_BASE}/enterprise-drivers`, {
-            method: "GET",
-            credentials: "include",
-          });
+    if (savedDriverData) {
+      const parsedDriver = JSON.parse(savedDriverData);
+      setSelectedDriver(parsedDriver);
+      currentDriver = parsedDriver;
+    }
 
-          const text = await response.text();
-          const data = JSON.parse(text);
+    if (savedDriverId) {
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "GET",
+        credentials: "include",
+      });
 
-          if (response.ok && data?.drivers?.length) {
-            const matched = data.drivers.find(
-              (driver) => String(driver._id) === String(savedDriverId)
-            );
+      const text = await response.text();
+      const data = JSON.parse(text);
 
-            if (matched) {
-              setSelectedDriver(matched);
-              localStorage.setItem(
-                "activeEnterpriseDriverData",
-                JSON.stringify(matched)
-              );
-            }
-          }
-        }
-
-        const savedDeliveries = JSON.parse(
-          localStorage.getItem("enterpriseDeliveries") || "[]"
+      if (response.ok && data?.drivers?.length) {
+        const matched = data.drivers.find(
+          (driver) => String(driver._id) === String(savedDriverId)
         );
-        setDeliveries(savedDeliveries);
 
-        const parsedDriver = savedDriverData ? JSON.parse(savedDriverData) : null;
-        const currentDriverId = savedDriverId || parsedDriver?._id || "";
-
-        if (currentDriverId) {
-          const inProgress = savedDeliveries.find(
-            (delivery) =>
-              String(delivery.assignedDriverId) === String(currentDriverId) &&
-              delivery.status === "En curso"
+        if (matched) {
+          setSelectedDriver(matched);
+          currentDriver = matched;
+          localStorage.setItem(
+            "activeEnterpriseDriverData",
+            JSON.stringify(matched)
           );
-
-          setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
         }
-      } catch (error) {
-        console.error("Error cargando panel del conductor:", error);
-      } finally {
-        setLoadingDriver(false);
       }
-    };
+    }
+
+    const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries`, {
+      method: "GET",
+      credentials: "include",
+    });
+
+    const deliveriesText = await deliveriesResponse.text();
+    const deliveriesData = JSON.parse(deliveriesText);
+
+    const apiDeliveries = Array.isArray(deliveriesData?.deliveries)
+      ? deliveriesData.deliveries
+      : [];
+
+    setDeliveries(apiDeliveries);
+
+    const currentDriverId =
+      savedDriverId || currentDriver?._id || currentDriver?.id || "";
+
+    if (currentDriverId) {
+      const inProgress = apiDeliveries.find((delivery) => {
+        const assignedId =
+          delivery.assignedDriverId?._id ||
+          delivery.assignedDriverId ||
+          delivery.driver?._id ||
+          delivery.driver ||
+          "";
+
+        return (
+          String(assignedId) === String(currentDriverId) &&
+          delivery.status === "En curso"
+        );
+      });
+
+      setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
+    }
+  } catch (error) {
+    console.error("Error cargando panel del conductor:", error);
+  } finally {
+    setLoadingDriver(false);
+  }
+};
 
     loadDriver();
   }, []);
