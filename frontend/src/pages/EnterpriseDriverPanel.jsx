@@ -617,19 +617,25 @@ const EnterpriseDriverPanel = () => {
       }
     }
 
-    const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries`, {
-      method: "GET",
-      credentials: "include",
-    });
+    const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries/me`, {
+  method: "GET",
+  credentials: "include",
+});
 
-    const deliveriesText = await deliveriesResponse.text();
-    const deliveriesData = JSON.parse(deliveriesText);
+const deliveriesText = await deliveriesResponse.text();
+const deliveriesData = JSON.parse(deliveriesText);
 
-    const apiDeliveries = Array.isArray(deliveriesData?.deliveries)
-      ? deliveriesData.deliveries
-      : [];
+if (!deliveriesResponse.ok) {
+  throw new Error(
+    deliveriesData.message || "No se pudieron cargar los pedidos del conductor."
+  );
+}
 
-    setDeliveries(apiDeliveries);
+const apiDeliveries = Array.isArray(deliveriesData?.deliveries)
+  ? deliveriesData.deliveries
+  : [];
+
+setDeliveries(apiDeliveries);
 
     const currentDriverId =
       savedDriverId || currentDriver?._id || currentDriver?.id || "";
