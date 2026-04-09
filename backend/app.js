@@ -15,6 +15,7 @@ const cookieParser = require('cookie-parser');
 const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
+const enterpriseDeliveryRoutes = require('./routes/enterpriseDelivery.routes');
 
 app.use(
     cors({
@@ -35,5 +36,6 @@ app.use('/captain', captainRoutes);
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);
+app.use('/enterprise-deliveries', enterpriseDeliveryRoutes);
 
 module.exports = app;
