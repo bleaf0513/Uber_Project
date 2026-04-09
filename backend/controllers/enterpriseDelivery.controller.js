@@ -18,6 +18,31 @@ module.exports.getEnterpriseDeliveries = async (req, res) => {
     }
 };
 
+module.exports.getMyEnterpriseDeliveries = async (req, res) => {
+    try {
+        const driverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!driverId) {
+            return res.status(401).json({
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        const deliveries = await EnterpriseDelivery.find({
+            assignedDriverId: driverId,
+        })
+            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
+            .sort({ createdAt: -1 });
+
+        return res.status(200).json({ deliveries });
+    } catch (error) {
+        console.error('Error obteniendo entregas del conductor:', error);
+        return res.status(500).json({
+            message: 'Error obteniendo entregas del conductor.',
+        });
+    }
+};
+
 module.exports.createEnterpriseDelivery = async (req, res) => {
     try {
         const {
@@ -74,6 +99,64 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
         console.error('Error creando entrega:', error);
         return res.status(500).json({
             message: 'Error creando entrega.',
+        });
+    }
+};
+
+module.exports.updateEnterpriseDeliveryStatusByDriver = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { status } = req.body;
+
+        const driverId = req.driver?._id || req.enterpriseDriver?._id;
+
+        if (!driverId) {
+            return res.status(401).json({
+                message: 'Conductor no autorizado.',
+            });
+        }
+
+        if (!['Pendiente', 'En curso', 'Finalizada'].includes(status)) {
+            return res.status(400).json({
+                message: 'Estado no válido.',
+            });
+        }
+
+        const delivery = await EnterpriseDelivery.findOne({
+            _id: id,
+            assignedDriverId: driverId,
+        });
+
+        if (!delivery) {
+            return res.status(404).json({
+                message: 'Entrega no encontrada para este conductor.',
+            });
+        }
+
+        delivery.status = status;
+
+        if (status === 'En curso') {
+            delivery.startedAt = new Date();
+            delivery.finishedAt = undefined;
+        }
+
+        if (status === 'Finalizada') {
+            if (!delivery.startedAt) {
+                delivery.startedAt = new Date();
+            }
+            delivery.finishedAt = new Date();
+        }
+
+        await delivery.save();
+
+        return res.status(200).json({
+            message: 'Estado actualizado correctamente.',
+            delivery,
+        });
+    } catch (error) {
+        console.error('Error actualizando estado de entrega:', error);
+        return res.status(500).json({
+            message: 'Error actualizando estado de entrega.',
         });
     }
 };
