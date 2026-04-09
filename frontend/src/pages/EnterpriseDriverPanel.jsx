@@ -731,24 +731,31 @@ const EnterpriseDriverPanel = () => {
   };
 
   const persistDeliveryStatus = async (deliveryId, status) => {
-    const response = await fetch(`${API_BASE}/enterprise-deliveries/${deliveryId}/status`, {
-      method: "PATCH",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      credentials: "include",
-      body: JSON.stringify({ status }),
-    });
+  const response = await fetch(`${API_BASE}/enterprise-deliveries/${deliveryId}/status`, {
+    method: "PATCH",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    credentials: "include",
+    body: JSON.stringify({ status }),
+  });
 
-    const text = await response.text();
-    const data = text ? JSON.parse(text) : {};
+  const text = await response.text();
+  let data = {};
 
-    if (!response.ok) {
-      throw new Error(data.message || "No se pudo actualizar el estado de la entrega.");
-    }
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (error) {
+    console.error("Respuesta no JSON en persistDeliveryStatus:", text);
+    throw new Error("La API devolvió una respuesta inválida al actualizar la entrega.");
+  }
 
-    return data.delivery || null;
-  };
+  if (!response.ok) {
+    throw new Error(data.message || "No se pudo actualizar el estado de la entrega.");
+  }
+
+  return data.delivery || null;
+};
 
   const handleStartDelivery = async (deliveryId) => {
     if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
@@ -819,106 +826,75 @@ const EnterpriseDriverPanel = () => {
   };
 
   const handleFinishDelivery = async (deliveryId) => {
-    if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
+  if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
 
-    setFinishingDeliveryId(String(deliveryId));
+  setFinishingDeliveryId(String(deliveryId));
+
+  try {
+    const driverId = selectedDriver._id || selectedDriver.id;
+
+    // 1) Primero persistimos en backend.
+    const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
+
+    const normalizedPersistedDeliveryId =
+      persistedDelivery?._id || persistedDelivery?.id || deliveryId;
+
+    const updatedDeliveries = deliveries.map((delivery) => {
+      const currentId = delivery._id || delivery.id;
+
+      return String(currentId) === String(normalizedPersistedDeliveryId)
+        ? {
+            ...delivery,
+            ...persistedDelivery,
+          }
+        : delivery;
+    });
+
+    updateDeliveriesStorage(updatedDeliveries);
+
+    // 2) Ya con backend confirmado, calculamos el siguiente estado real.
+    const remaining = updatedDeliveries.filter((delivery) => {
+      const assignedId =
+        delivery.assignedDriverId?._id ||
+        delivery.assignedDriverId ||
+        delivery.driver?._id ||
+        delivery.driver ||
+        "";
+
+      return (
+        String(assignedId) === String(driverId) &&
+        delivery.status !== "Finalizada"
+      );
+    });
+
+    const nextActive = remaining.find((delivery) => delivery.status === "En curso");
+    setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
+
+    const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
+
+    const updatedDriver = {
+      ...selectedDriver,
+      status: nextDriverStatus,
+    };
+
+    setSelectedDriver(updatedDriver);
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(updatedDriver)
+    );
 
     try {
-      const driverId = selectedDriver._id || selectedDriver.id;
-
-      const optimisticDeliveries = deliveries.map((delivery) => {
-        const currentId = delivery._id || delivery.id;
-
-        return String(currentId) === String(deliveryId)
-          ? {
-              ...delivery,
-              status: "Finalizada",
-              finishedAt: new Date().toISOString(),
-            }
-          : delivery;
-      });
-
-      updateDeliveriesStorage(optimisticDeliveries);
-
-      const remainingOptimistic = optimisticDeliveries.filter((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
-
-        return (
-          String(assignedId) === String(driverId) &&
-          delivery.status !== "Finalizada"
-        );
-      });
-
-      const nextOptimistic = remainingOptimistic.find(
-        (delivery) => delivery.status === "En curso"
-      );
-      setActiveDeliveryId(nextOptimistic?._id || nextOptimistic?.id || "");
-
-      const nextDriverStatus = remainingOptimistic.length ? "En ruta" : "Disponible";
-
-      const optimisticDriver = {
-        ...selectedDriver,
-        status: nextDriverStatus,
-      };
-
-      setSelectedDriver(optimisticDriver);
-      localStorage.setItem(
-        "activeEnterpriseDriverData",
-        JSON.stringify(optimisticDriver)
-      );
-
-      const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
-
-      const normalizedPersistedDeliveryId =
-        persistedDelivery?._id || persistedDelivery?.id || deliveryId;
-
-      const updatedDeliveries = optimisticDeliveries.map((delivery) => {
-        const currentId = delivery._id || delivery.id;
-
-        return String(currentId) === String(normalizedPersistedDeliveryId)
-          ? {
-              ...delivery,
-              ...persistedDelivery,
-            }
-          : delivery;
-      });
-
-      updateDeliveriesStorage(updatedDeliveries);
-
-      const remaining = updatedDeliveries.filter((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
-
-        return (
-          String(assignedId) === String(driverId) &&
-          delivery.status !== "Finalizada"
-        );
-      });
-
-      const nextActive = remaining.find((delivery) => delivery.status === "En curso");
-      setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
-
-      try {
-        await persistDriverStatus(driverId, nextDriverStatus);
-      } catch (error) {
-        console.error("No se pudo persistir el estado del conductor:", error);
-      }
+      await persistDriverStatus(driverId, nextDriverStatus);
     } catch (error) {
-      console.error("Error finalizando entrega:", error);
-      alert(error.message || "No se pudo finalizar la entrega.");
-    } finally {
-      setFinishingDeliveryId("");
+      console.error("No se pudo persistir el estado del conductor:", error);
     }
-  };
+  } catch (error) {
+    console.error("Error finalizando entrega:", error);
+    alert(error.message || "No se pudo finalizar la entrega.");
+  } finally {
+    setFinishingDeliveryId("");
+  }
+};
 
   const handleLogout = () => {
     localStorage.removeItem("activeEnterpriseDriverCedula");
