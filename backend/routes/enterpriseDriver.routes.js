@@ -2,10 +2,13 @@ const express = require('express');
 const router = express.Router();
 
 const authEnterprise = require('../middlewares/authEnterprise');
+const authEnterpriseDriver = require('../middlewares/authEnterpriseDriver');
+
 const {
   createDriver,
   getDrivers,
   loginDriverByCedula,
+  updateDriverLocation,
   deleteDriver,
 } = require('../controllers/enterpriseDriver.controller');
 
@@ -13,7 +16,10 @@ router.get('/', authEnterprise, getDrivers);
 router.post('/', authEnterprise, createDriver);
 router.delete('/:id', authEnterprise, deleteDriver);
 
-// este sí puede quedar sin authEnterprise si es acceso por cédula del conductor
+// login del conductor
 router.post('/login', loginDriverByCedula);
+
+// actualizar ubicación del conductor autenticado
+router.patch('/:id/location', authEnterpriseDriver, updateDriverLocation);
 
 module.exports = router;
