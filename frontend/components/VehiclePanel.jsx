@@ -86,10 +86,89 @@ const VehiclePanel = (props) => {
     );
   }
 
-  const baseDuration = props.distance?.duration?.value || 0;
-  const carPrice = props.prices?.car || 0;
-  const motoPrice = props.prices?.moto || 0;
-  const autoPrice = props.prices?.auto || 0;
+  const baseDuration = Number(props.distance?.duration?.value) || 0;
+
+  const resolvedPrices = {
+    motorcycle:
+      props.prices?.motorcycle ??
+      props.prices?.moto ??
+      0,
+    car:
+      props.prices?.car ??
+      0,
+    light_cargo:
+      props.prices?.light_cargo ??
+      props.prices?.auto ??
+      0,
+    van:
+      props.prices?.van ??
+      0,
+    truck:
+      props.prices?.truck ??
+      0,
+  };
+
+  const vehicleOptions = [
+    {
+      key: "car",
+      image: "car",
+      title: "Carro",
+      seats: "4",
+      subtitle: "Cómodo y espacioso",
+      durationMultiplier: 1,
+      price: resolvedPrices.car,
+      enabled: Number(resolvedPrices.car) > 0,
+    },
+    {
+      key: "motorcycle",
+      image: "moto",
+      title: "Moto",
+      seats: "1",
+      subtitle: "Rápida y económica",
+      durationMultiplier: 0.85,
+      price: resolvedPrices.motorcycle,
+      enabled: Number(resolvedPrices.motorcycle) > 0,
+    },
+    {
+      key: "light_cargo",
+      image: "auto",
+      title: "Carga liviana",
+      seats: "Carga",
+      subtitle: "Ideal para paquetes y bultos pequeños",
+      durationMultiplier: 0.94,
+      price: resolvedPrices.light_cargo,
+      enabled: Number(resolvedPrices.light_cargo) > 0,
+    },
+    {
+      key: "van",
+      image: "van",
+      title: "Furgón / Camioneta",
+      seats: "Carga",
+      subtitle: "Más espacio para mercancía y mudanzas pequeñas",
+      durationMultiplier: 1.08,
+      price: resolvedPrices.van,
+      enabled: Number(resolvedPrices.van) > 0,
+    },
+    {
+      key: "truck",
+      image: "truck",
+      title: "Camión",
+      seats: "Carga",
+      subtitle: "Para carga pesada y trayectos logísticos",
+      durationMultiplier: 1.18,
+      price: resolvedPrices.truck,
+      enabled: Number(resolvedPrices.truck) > 0,
+    },
+  ];
+
+  const handleSelectVehicle = (vehicle) => {
+    if (!vehicle.enabled) return;
+
+    props.setSelectedVehicle(vehicle.key);
+    props.setSelectedPrice(vehicle.price);
+    props.setConfirmRidePanel(true);
+    props.setVehiclePanel(false);
+  };
 
   return (
     <div>
@@ -108,112 +187,66 @@ const VehiclePanel = (props) => {
       </div>
 
       <div className="m-2.5 mt-3">
-        <div
-          onClick={() => {
-            props.setSelectedVehicle("car");
-            props.setSelectedPrice(carPrice);
-            props.setConfirmRidePanel(true);
-            props.setVehiclePanel(false);
-          }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
-        >
-          <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="car" label="Carro" />
-          </div>
+        {vehicleOptions.map((vehicle) => {
+          const adjustedDuration = Math.max(
+            60,
+            Math.round(baseDuration * vehicle.durationMultiplier)
+          );
 
-          <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
-            <div className="flex flex-row justify-start items-center">
-              <h1 className="text-2xl font-semibold">Central Go</h1>
-              <div className="mx-2 flex items-center justify-center">
-                <i className="ri-user-fill ri-sm"></i>
-                <h4>4</h4>
+          return (
+            <div
+              key={vehicle.key}
+              onClick={() => handleSelectVehicle(vehicle)}
+              className={`flex flex-row justify-start w-full min-h-[96px] py-1 rounded-xl my-2 border ${
+                vehicle.enabled
+                  ? "bg-gray-100 border-transparent cursor-pointer"
+                  : "bg-gray-50 border-gray-200 opacity-60 cursor-not-allowed"
+              }`}
+            >
+              <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
+                <VehicleThumb name={vehicle.image} label={vehicle.title} />
+              </div>
+
+              <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
+                <div className="flex flex-row justify-start items-center flex-wrap">
+                  <h1 className="text-xl font-semibold">{vehicle.title}</h1>
+
+                  <div className="mx-2 flex items-center justify-center text-sm text-gray-700">
+                    <i className="ri-user-fill ri-sm"></i>
+                    <h4>{vehicle.seats}</h4>
+                  </div>
+                </div>
+
+                <h2 className="text-sm font-light text-gray-700">
+                  {formatDuration(adjustedDuration)} |{" "}
+                  {formatArrivalTime(adjustedDuration)}
+                </h2>
+
+                <h2 className="text-sm font-light text-gray-700">
+                  {vehicle.subtitle}
+                </h2>
+
+                {!vehicle.enabled ? (
+                  <p className="text-xs text-orange-600 mt-1">
+                    Próximamente disponible
+                  </p>
+                ) : null}
+              </div>
+
+              <div className="shrink-0 w-[28%] text-lg py-2 flex flex-col justify-center items-center pr-2">
+                {vehicle.enabled ? (
+                  <h2 className="text-xl font-semibold text-center">
+                    {formatCOP(vehicle.price)}
+                  </h2>
+                ) : (
+                  <h2 className="text-sm font-semibold text-center text-gray-500">
+                    Sin tarifa
+                  </h2>
+                )}
               </div>
             </div>
-
-            <h2 className="text-sm font-light">
-              {formatDuration(baseDuration)} | {formatArrivalTime(baseDuration)}
-            </h2>
-            <h2 className="text-sm font-light">Cómodo y espacioso</h2>
-          </div>
-
-          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
-            <h2 className="text-2xl font-semibold pt-0.5">
-              {formatCOP(carPrice)}
-            </h2>
-          </div>
-        </div>
-
-        <div
-          onClick={() => {
-            props.setSelectedVehicle("moto");
-            props.setSelectedPrice(motoPrice);
-            props.setConfirmRidePanel(true);
-            props.setVehiclePanel(false);
-          }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
-        >
-          <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="moto" label="Moto" />
-          </div>
-
-          <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
-            <div className="flex flex-row justify-start items-center">
-              <h1 className="text-2xl font-semibold">Moto</h1>
-              <div className="mx-2 flex items-center justify-center">
-                <i className="ri-user-fill ri-sm"></i>
-                <h4>2</h4>
-              </div>
-            </div>
-
-            <h2 className="text-sm font-light">
-              {formatDuration(baseDuration * 0.85)} |{" "}
-              {formatArrivalTime(baseDuration * 0.85)}
-            </h2>
-            <h2 className="text-sm font-light">Económica y rápida</h2>
-          </div>
-
-          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
-            <h2 className="text-2xl font-semibold pt-0.5">
-              {formatCOP(motoPrice)}
-            </h2>
-          </div>
-        </div>
-
-        <div
-          onClick={() => {
-            props.setSelectedVehicle("auto");
-            props.setSelectedPrice(autoPrice);
-            props.setConfirmRidePanel(true);
-            props.setVehiclePanel(false);
-          }}
-          className="bg-gray-100 flex flex-row justify-start w-[100%] h-23 py-1 rounded-xl my-2"
-        >
-          <div className="w-[30%] shrink-0 flex items-center justify-center px-1.5 py-1">
-            <VehicleThumb name="auto" label="Auto" />
-          </div>
-
-          <div className="flex-1 min-w-0 flex flex-col justify-center items-start py-2 px-1">
-            <div className="flex flex-row justify-start items-center">
-              <h1 className="text-2xl font-semibold">Auto</h1>
-              <div className="mx-2 flex items-center justify-center">
-                <i className="ri-user-fill ri-sm"></i>
-                <h4>3</h4>
-              </div>
-            </div>
-
-            <h2 className="text-sm font-light">
-              {formatDuration(baseDuration * 0.94)} |{" "}
-              {formatArrivalTime(baseDuration * 0.94)}
-            </h2>
-            <h2 className="text-sm font-light">Económico y compacto</h2>
-          </div>
-
-          <div className="shrink-0 w-[26%] text-xl py-2 flex flex-col justify-start items-center pr-2">
-            <h2 className="text-2xl font-semibold pt-0.5">
-              {formatCOP(autoPrice)}
-            </h2>
-          </div>
-        </div>
+          );
+        })}
       </div>
     </div>
   );
