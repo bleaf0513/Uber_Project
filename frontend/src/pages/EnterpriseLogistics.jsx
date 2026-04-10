@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
+import EnterpriseDeliveryChat from "./EnterpriseDeliveryChat";
 
 const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
@@ -731,6 +732,8 @@ const EnterpriseLogistics = () => {
   const activeOrLastDelivery =
     selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
 
+  const selectedDriverChatDelivery = activeOrLastDelivery;
+
   const openDriverInGoogleMaps = () => {
     if (!selectedDriver?.currentLocation?.lat || !selectedDriver?.currentLocation?.lng) {
       return;
@@ -1063,6 +1066,16 @@ const EnterpriseLogistics = () => {
                 </p>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {selectedDriver ? (
+          <div className="mb-5">
+            <EnterpriseDeliveryChat
+              delivery={selectedDriverChatDelivery}
+              selectedDriver={selectedDriver}
+              logisticsName="Logística"
+            />
           </div>
         ) : null}
 
