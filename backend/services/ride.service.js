@@ -207,10 +207,35 @@ const endRide = async ({ rideId, captain }) => {
     return ride;
 };
 
+const cancelRide = async ({ rideId, user }) => {
+    if (!rideId) {
+        throw new Error("rideId is required");
+    }
+
+    const ride = await rideModel.findOne({
+        _id: rideId,
+        user: user._id || user,
+    }).populate("user").populate("captain");
+
+    if (!ride) {
+        throw new Error("Ride not found");
+    }
+
+    if (ride.status !== "pending") {
+        throw new Error("Only pending rides can be cancelled");
+    }
+
+    ride.status = "rejected";
+    await ride.save();
+
+    return ride;
+};
+
 module.exports = {
     getFare,
     createRide,
     confirmRide,
     startRide,
     endRide,
+    cancelRide,
 };
