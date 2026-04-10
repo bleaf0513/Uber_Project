@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
@@ -44,6 +44,10 @@ const EnterpriseDriverMap = ({
   const watchIdRef = useRef(null);
   const lastSignatureRef = useRef("");
   const routeBuildIdRef = useRef(0);
+  const selectedDriverRef = useRef(selectedDriver);
+  const trackingStartedRef = useRef(false);
+  const lastSentCoordsRef = useRef(null);
+  const sendingLocationRef = useRef(false);
 
   const [geoError, setGeoError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
@@ -53,6 +57,10 @@ const EnterpriseDriverMap = ({
     totalDistanceText: "",
     totalDurationText: "",
   });
+
+  useEffect(() => {
+    selectedDriverRef.current = selectedDriver;
+  }, [selectedDriver]);
 
   const pendingStops = useMemo(() => {
     const base = assignedDeliveries.filter(
@@ -73,55 +81,100 @@ const EnterpriseDriverMap = ({
     return base;
   }, [assignedDeliveries, activeDelivery]);
 
-  const persistDriverLocation = async (coords) => {
-    if (!selectedDriver?._id) return;
+  const persistDriverLocation = useCallback(
+    async (coords) => {
+      const currentDriver = selectedDriverRef.current;
 
-    const updatedDriver = {
-      ...selectedDriver,
-      currentLocation: {
-        lat: Number(coords.lat),
-        lng: Number(coords.lng),
-        updatedAt: new Date().toISOString(),
-      },
-    };
+      if (!currentDriver?._id) return false;
+      if (sendingLocationRef.current) return false;
 
-    setSelectedDriver(updatedDriver);
-    localStorage.setItem(
-      "activeEnterpriseDriverData",
-      JSON.stringify(updatedDriver)
-    );
+      const roundedCoords = {
+        lat: Number(Number(coords.lat).toFixed(6)),
+        lng: Number(Number(coords.lng).toFixed(6)),
+      };
 
-    try {
-      await fetch(
-        `${API_BASE}/enterprise-drivers/${selectedDriver._id}/location`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          credentials: "include",
-          body: JSON.stringify({
-            lat: Number(coords.lat),
-            lng: Number(coords.lng),
-          }),
+      const last = lastSentCoordsRef.current;
+      if (last && last.lat === roundedCoords.lat && last.lng === roundedCoords.lng) {
+        return true;
+      }
+
+      sendingLocationRef.current = true;
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/enterprise-drivers/${currentDriver._id}/location`,
+          {
+            method: "PATCH",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            credentials: "include",
+            body: JSON.stringify(roundedCoords),
+          }
+        );
+
+        const text = await response.text();
+        let data = {};
+
+        try {
+          data = text ? JSON.parse(text) : {};
+        } catch (error) {
+          throw new Error(`Respuesta inválida del backend: ${text}`);
         }
-      );
-    } catch (error) {
-      console.error("No se pudo persistir la ubicación en backend:", error);
-    }
-  };
+
+        if (!response.ok) {
+          throw new Error(
+            data.message || "No se pudo guardar la ubicación en backend."
+          );
+        }
+
+        const persistedDriver = data.driver || {
+          ...currentDriver,
+          currentLocation: {
+            lat: roundedCoords.lat,
+            lng: roundedCoords.lng,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+
+        setSelectedDriver(persistedDriver);
+        localStorage.setItem(
+          "activeEnterpriseDriverData",
+          JSON.stringify(persistedDriver)
+        );
+
+        selectedDriverRef.current = persistedDriver;
+        lastSentCoordsRef.current = roundedCoords;
+        setGeoError("");
+
+        return true;
+      } catch (error) {
+        console.error("No se pudo persistir la ubicación en backend:", error);
+        setGeoError(
+          error.message || "No se pudo guardar la ubicación en tiempo real."
+        );
+        return false;
+      } finally {
+        sendingLocationRef.current = false;
+      }
+    },
+    [setSelectedDriver]
+  );
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
 
     if (!mapInstanceRef.current) {
-      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
-        center: selectedDriver?.currentLocation
+      const initialCoords =
+        selectedDriver?.currentLocation?.lat && selectedDriver?.currentLocation?.lng
           ? {
               lat: Number(selectedDriver.currentLocation.lat),
               lng: Number(selectedDriver.currentLocation.lng),
             }
-          : DEFAULT_CENTER,
+          : DEFAULT_CENTER;
+
+      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+        center: initialCoords,
         zoom: 13,
         mapTypeControl: false,
         streetViewControl: false,
@@ -137,6 +190,20 @@ const EnterpriseDriverMap = ({
       });
 
       directionsRendererRef.current.setMap(mapInstanceRef.current);
+
+      if (selectedDriver?.currentLocation?.lat && selectedDriver?.currentLocation?.lng) {
+        driverMarkerRef.current = new window.google.maps.Marker({
+          map: mapInstanceRef.current,
+          position: {
+            lat: Number(selectedDriver.currentLocation.lat),
+            lng: Number(selectedDriver.currentLocation.lng),
+          },
+          title: `Conductor: ${selectedDriver?.name || "Conductor"}`,
+          icon: {
+            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+          },
+        });
+      }
     }
 
     if (directionsRendererRef.current && directionsPanelRef.current) {
@@ -149,37 +216,45 @@ const EnterpriseDriverMap = ({
       !mapsApiLoaded ||
       !window.google?.maps ||
       !mapInstanceRef.current ||
-      !selectedDriver
+      !selectedDriver?._id
     ) {
       return;
     }
+
+    if (trackingStartedRef.current) return;
 
     if (!navigator.geolocation) {
       setGeoError("Este dispositivo no soporta geolocalización.");
       return;
     }
 
-    const updatePosition = (position) => {
+    trackingStartedRef.current = true;
+
+    const updatePosition = async (position) => {
       const coords = {
         lat: Number(position.coords.latitude),
         lng: Number(position.coords.longitude),
       };
 
-      setGeoError("");
       setIsTracking(true);
-      persistDriverLocation(coords);
+
+      const saved = await persistDriverLocation(coords);
+      if (!saved) return;
 
       if (!driverMarkerRef.current) {
         driverMarkerRef.current = new window.google.maps.Marker({
           map: mapInstanceRef.current,
           position: coords,
-          title: `Conductor: ${selectedDriver.name}`,
+          title: `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`,
           icon: {
             url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
           },
         });
       } else {
         driverMarkerRef.current.setPosition(coords);
+        driverMarkerRef.current.setTitle(
+          `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`
+        );
       }
 
       if (!pendingStops.length) {
@@ -208,22 +283,48 @@ const EnterpriseDriverMap = ({
       maximumAge: 0,
     });
 
-    watchIdRef.current = navigator.geolocation.watchPosition(
-      updatePosition,
-      onError,
-      {
-        enableHighAccuracy: true,
-        timeout: 20000,
-        maximumAge: 5000,
-      }
-    );
+    watchIdRef.current = navigator.geolocation.watchPosition(updatePosition, onError, {
+      enableHighAccuracy: true,
+      timeout: 20000,
+      maximumAge: 3000,
+    });
 
     return () => {
       if (watchIdRef.current) {
         navigator.geolocation.clearWatch(watchIdRef.current);
+        watchIdRef.current = null;
       }
+      trackingStartedRef.current = false;
     };
-  }, [mapsApiLoaded, selectedDriver, pendingStops.length]);
+  }, [mapsApiLoaded, selectedDriver?._id, persistDriverLocation, pendingStops.length]);
+
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
+
+    const driverLocation = selectedDriver?.currentLocation;
+    if (!driverLocation?.lat || !driverLocation?.lng) return;
+
+    const coords = {
+      lat: Number(driverLocation.lat),
+      lng: Number(driverLocation.lng),
+    };
+
+    if (!driverMarkerRef.current) {
+      driverMarkerRef.current = new window.google.maps.Marker({
+        map: mapInstanceRef.current,
+        position: coords,
+        title: `Conductor: ${selectedDriver?.name || "Conductor"}`,
+        icon: {
+          url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+        },
+      });
+    } else {
+      driverMarkerRef.current.setPosition(coords);
+      driverMarkerRef.current.setTitle(
+        `Conductor: ${selectedDriver?.name || "Conductor"}`
+      );
+    }
+  }, [mapsApiLoaded, selectedDriver?.currentLocation, selectedDriver?.name]);
 
   useEffect(() => {
     if (
@@ -295,6 +396,7 @@ const EnterpriseDriverMap = ({
             return {
               ...delivery,
               coords,
+              formattedAddress: coords.formattedAddress,
             };
           })
         );
@@ -346,7 +448,9 @@ const EnterpriseDriverMap = ({
             if (status === "OK" && result) {
               directionsRendererRef.current.setDirections(result);
 
-              const legs = result.routes?.[0]?.legs || [];
+              const route = result.routes?.[0];
+              const legs = route?.legs || [];
+
               const totalDistanceMeters = legs.reduce(
                 (sum, leg) => sum + (leg.distance?.value || 0),
                 0
@@ -359,9 +463,24 @@ const EnterpriseDriverMap = ({
               const totalKm = (totalDistanceMeters / 1000).toFixed(1);
               const totalMin = Math.round(totalDurationSeconds / 60);
 
+              let orderedStopsFromRoute = orderedStops;
+
+              if (
+                route?.waypoint_order &&
+                Array.isArray(route.waypoint_order) &&
+                orderedStops.length > 1 &&
+                !(activeDelivery?._id || activeDelivery?.id)
+              ) {
+                const reorderedIntermediate = route.waypoint_order.map(
+                  (idx) => orderedStops[idx]
+                );
+                const finalDestination = orderedStops[orderedStops.length - 1];
+                orderedStopsFromRoute = [...reorderedIntermediate, finalDestination];
+              }
+
               setRouteInfo({
-                orderedStops,
-                totalStops: orderedStops.length,
+                orderedStops: orderedStopsFromRoute,
+                totalStops: orderedStopsFromRoute.length,
                 totalDistanceText: `${totalKm} km`,
                 totalDurationText:
                   totalMin >= 60
@@ -391,7 +510,7 @@ const EnterpriseDriverMap = ({
     };
 
     buildRoute();
-  }, [mapsApiLoaded, selectedDriver, pendingStops, activeDelivery]);
+  }, [mapsApiLoaded, selectedDriver?.currentLocation, pendingStops, activeDelivery]);
 
   const openExternalGoogleMaps = () => {
     const driverLocation = selectedDriver?.currentLocation;
@@ -407,13 +526,15 @@ const EnterpriseDriverMap = ({
     if (!stopsForNavigation.length) return;
 
     const origin = `${driverLocation.lat},${driverLocation.lng}`;
-    const destination = stopsForNavigation[stopsForNavigation.length - 1].address;
+    const destination =
+      stopsForNavigation[stopsForNavigation.length - 1].formattedAddress ||
+      stopsForNavigation[stopsForNavigation.length - 1].address;
 
     const waypoints =
       stopsForNavigation.length > 1
         ? stopsForNavigation
             .slice(0, -1)
-            .map((stop) => encodeURIComponent(stop.address))
+            .map((stop) => encodeURIComponent(stop.formattedAddress || stop.address))
             .join("|")
         : "";
 
@@ -585,9 +706,13 @@ const EnterpriseDriverPanel = () => {
         let currentDriver = null;
 
         if (savedDriverData) {
-          const parsedDriver = JSON.parse(savedDriverData);
-          setSelectedDriver(parsedDriver);
-          currentDriver = parsedDriver;
+          try {
+            const parsedDriver = JSON.parse(savedDriverData);
+            setSelectedDriver(parsedDriver);
+            currentDriver = parsedDriver;
+          } catch (error) {
+            console.error("No se pudo parsear activeEnterpriseDriverData:", error);
+          }
         }
 
         if (savedDriverId) {
@@ -597,7 +722,7 @@ const EnterpriseDriverPanel = () => {
           });
 
           const text = await response.text();
-          const data = JSON.parse(text);
+          const data = text ? JSON.parse(text) : {};
 
           if (response.ok && data?.drivers?.length) {
             const matched = data.drivers.find(
@@ -615,17 +740,21 @@ const EnterpriseDriverPanel = () => {
           }
         }
 
-        const deliveriesResponse = await fetch(`${API_BASE}/enterprise-deliveries/me`, {
-          method: "GET",
-          credentials: "include",
-        });
+        const deliveriesResponse = await fetch(
+          `${API_BASE}/enterprise-deliveries/me`,
+          {
+            method: "GET",
+            credentials: "include",
+          }
+        );
 
         const deliveriesText = await deliveriesResponse.text();
-        const deliveriesData = JSON.parse(deliveriesText);
+        const deliveriesData = deliveriesText ? JSON.parse(deliveriesText) : {};
 
         if (!deliveriesResponse.ok) {
           throw new Error(
-            deliveriesData.message || "No se pudieron cargar los pedidos del conductor."
+            deliveriesData.message ||
+              "No se pudieron cargar los pedidos del conductor."
           );
         }
 
@@ -699,14 +828,17 @@ const EnterpriseDriverPanel = () => {
 
   const persistDriverStatus = async (driverId, status) => {
     try {
-      const response = await fetch(`${API_BASE}/enterprise-drivers/${driverId}/status`, {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        credentials: "include",
-        body: JSON.stringify({ status }),
-      });
+      const response = await fetch(
+        `${API_BASE}/enterprise-drivers/${driverId}/status`,
+        {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          credentials: "include",
+          body: JSON.stringify({ status }),
+        }
+      );
 
       const text = await response.text();
       let data = {};
@@ -719,7 +851,10 @@ const EnterpriseDriverPanel = () => {
       }
 
       if (!response.ok) {
-        console.error("Error actualizando estado del conductor:", data.message || text);
+        console.error(
+          "Error actualizando estado del conductor:",
+          data.message || text
+        );
         return null;
       }
 
@@ -731,31 +866,38 @@ const EnterpriseDriverPanel = () => {
   };
 
   const persistDeliveryStatus = async (deliveryId, status) => {
-  const response = await fetch(`${API_BASE}/enterprise-deliveries/${deliveryId}/status`, {
-    method: "PATCH",
-    headers: {
-      "Content-Type": "application/json",
-    },
-    credentials: "include",
-    body: JSON.stringify({ status }),
-  });
+    const response = await fetch(
+      `${API_BASE}/enterprise-deliveries/${deliveryId}/status`,
+      {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({ status }),
+      }
+    );
 
-  const text = await response.text();
-  let data = {};
+    const text = await response.text();
+    let data = {};
 
-  try {
-    data = text ? JSON.parse(text) : {};
-  } catch (error) {
-    console.error("Respuesta no JSON en persistDeliveryStatus:", text);
-    throw new Error("La API devolvió una respuesta inválida al actualizar la entrega.");
-  }
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (error) {
+      console.error("Respuesta no JSON en persistDeliveryStatus:", text);
+      throw new Error(
+        "La API devolvió una respuesta inválida al actualizar la entrega."
+      );
+    }
 
-  if (!response.ok) {
-    throw new Error(data.message || "No se pudo actualizar el estado de la entrega.");
-  }
+    if (!response.ok) {
+      throw new Error(
+        data.message || "No se pudo actualizar el estado de la entrega."
+      );
+    }
 
-  return data.delivery || null;
-};
+    return data.delivery || null;
+  };
 
   const handleStartDelivery = async (deliveryId) => {
     if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
@@ -813,7 +955,14 @@ const EnterpriseDriverPanel = () => {
       setActiveDeliveryId(String(normalizedPersistedDeliveryId));
 
       try {
-        await persistDriverStatus(driverId, "En ruta");
+        const persistedDriver = await persistDriverStatus(driverId, "En ruta");
+        if (persistedDriver) {
+          setSelectedDriver(persistedDriver);
+          localStorage.setItem(
+            "activeEnterpriseDriverData",
+            JSON.stringify(persistedDriver)
+          );
+        }
       } catch (error) {
         console.error("No se pudo persistir el estado del conductor:", error);
       }
@@ -826,75 +975,80 @@ const EnterpriseDriverPanel = () => {
   };
 
   const handleFinishDelivery = async (deliveryId) => {
-  if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
+    if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
 
-  setFinishingDeliveryId(String(deliveryId));
-
-  try {
-    const driverId = selectedDriver._id || selectedDriver.id;
-
-    // 1) Primero persistimos en backend.
-    const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
-
-    const normalizedPersistedDeliveryId =
-      persistedDelivery?._id || persistedDelivery?.id || deliveryId;
-
-    const updatedDeliveries = deliveries.map((delivery) => {
-      const currentId = delivery._id || delivery.id;
-
-      return String(currentId) === String(normalizedPersistedDeliveryId)
-        ? {
-            ...delivery,
-            ...persistedDelivery,
-          }
-        : delivery;
-    });
-
-    updateDeliveriesStorage(updatedDeliveries);
-
-    // 2) Ya con backend confirmado, calculamos el siguiente estado real.
-    const remaining = updatedDeliveries.filter((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        delivery.driver?._id ||
-        delivery.driver ||
-        "";
-
-      return (
-        String(assignedId) === String(driverId) &&
-        delivery.status !== "Finalizada"
-      );
-    });
-
-    const nextActive = remaining.find((delivery) => delivery.status === "En curso");
-    setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
-
-    const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
-
-    const updatedDriver = {
-      ...selectedDriver,
-      status: nextDriverStatus,
-    };
-
-    setSelectedDriver(updatedDriver);
-    localStorage.setItem(
-      "activeEnterpriseDriverData",
-      JSON.stringify(updatedDriver)
-    );
+    setFinishingDeliveryId(String(deliveryId));
 
     try {
-      await persistDriverStatus(driverId, nextDriverStatus);
+      const driverId = selectedDriver._id || selectedDriver.id;
+
+      const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
+
+      const normalizedPersistedDeliveryId =
+        persistedDelivery?._id || persistedDelivery?.id || deliveryId;
+
+      const updatedDeliveries = deliveries.map((delivery) => {
+        const currentId = delivery._id || delivery.id;
+
+        return String(currentId) === String(normalizedPersistedDeliveryId)
+          ? {
+              ...delivery,
+              ...persistedDelivery,
+            }
+          : delivery;
+      });
+
+      updateDeliveriesStorage(updatedDeliveries);
+
+      const remaining = updatedDeliveries.filter((delivery) => {
+        const assignedId =
+          delivery.assignedDriverId?._id ||
+          delivery.assignedDriverId ||
+          delivery.driver?._id ||
+          delivery.driver ||
+          "";
+
+        return (
+          String(assignedId) === String(driverId) &&
+          delivery.status !== "Finalizada"
+        );
+      });
+
+      const nextActive = remaining.find((delivery) => delivery.status === "En curso");
+      setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
+
+      const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
+
+      const updatedDriver = {
+        ...selectedDriver,
+        status: nextDriverStatus,
+      };
+
+      setSelectedDriver(updatedDriver);
+      localStorage.setItem(
+        "activeEnterpriseDriverData",
+        JSON.stringify(updatedDriver)
+      );
+
+      try {
+        const persistedDriver = await persistDriverStatus(driverId, nextDriverStatus);
+        if (persistedDriver) {
+          setSelectedDriver(persistedDriver);
+          localStorage.setItem(
+            "activeEnterpriseDriverData",
+            JSON.stringify(persistedDriver)
+          );
+        }
+      } catch (error) {
+        console.error("No se pudo persistir el estado del conductor:", error);
+      }
     } catch (error) {
-      console.error("No se pudo persistir el estado del conductor:", error);
+      console.error("Error finalizando entrega:", error);
+      alert(error.message || "No se pudo finalizar la entrega.");
+    } finally {
+      setFinishingDeliveryId("");
     }
-  } catch (error) {
-    console.error("Error finalizando entrega:", error);
-    alert(error.message || "No se pudo finalizar la entrega.");
-  } finally {
-    setFinishingDeliveryId("");
-  }
-};
+  };
 
   const handleLogout = () => {
     localStorage.removeItem("activeEnterpriseDriverCedula");
@@ -995,9 +1149,15 @@ const EnterpriseDriverPanel = () => {
             </p>
             <p className="text-sm text-gray-600">
               Ubicación:{" "}
-              {selectedDriver.currentLocation
+              {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
                 ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
                 : "Aún no reportada"}
+            </p>
+            <p className="text-sm text-gray-600">
+              Última actualización:{" "}
+              {selectedDriver.currentLocation?.updatedAt
+                ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+                : "Sin actualización"}
             </p>
           </div>
         </div>
@@ -1031,7 +1191,10 @@ const EnterpriseDriverPanel = () => {
                 const isBusy = !!startingDeliveryId || !!finishingDeliveryId;
 
                 return (
-                  <div key={delivery._id || delivery.id} className="border rounded-xl p-4">
+                  <div
+                    key={delivery._id || delivery.id}
+                    className="border rounded-xl p-4"
+                  >
                     <p className="font-bold text-gray-900">
                       Factura #{delivery.invoiceNumber}
                     </p>
@@ -1071,7 +1234,9 @@ const EnterpriseDriverPanel = () => {
                         <button
                           type="button"
                           disabled={isBusy}
-                          onClick={() => handleStartDelivery(delivery._id || delivery.id)}
+                          onClick={() =>
+                            handleStartDelivery(delivery._id || delivery.id)
+                          }
                           className={`px-4 py-2 rounded-xl font-semibold text-white ${
                             isBusy
                               ? "bg-blue-300 cursor-not-allowed"
@@ -1087,7 +1252,9 @@ const EnterpriseDriverPanel = () => {
                           <button
                             type="button"
                             disabled={isBusy}
-                            onClick={() => handleFinishDelivery(delivery._id || delivery.id)}
+                            onClick={() =>
+                              handleFinishDelivery(delivery._id || delivery.id)
+                            }
                             className={`px-4 py-2 rounded-xl font-semibold text-white ${
                               isBusy
                                 ? "bg-green-300 cursor-not-allowed"
