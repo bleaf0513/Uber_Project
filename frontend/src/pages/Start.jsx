@@ -5,14 +5,26 @@ const accessCards = [
   {
     title: "Cliente",
     description:
-      "Solicita un carro o servicio de transporte de forma rápida y segura.",
+      "Solicita moto, carro o servicios de transporte de forma rápida, segura y con tarifas flexibles.",
     buttonText: "Entrar como cliente",
     to: "/login",
-    badge: "Viajes",
-    buttonClass: "bg-black text-white",
+    badge: "Usuarios",
+    buttonClass: "bg-black text-white hover:bg-gray-900",
     cardAccent: "border-black/10",
     iconBg: "bg-gray-100",
     emoji: "🙋",
+  },
+  {
+    title: "Transportador",
+    description:
+      "Accede como conductor o transportador para recibir servicios, gestionar rutas y oportunidades de carga.",
+    buttonText: "Entrar como transportador",
+    to: "/captain-login",
+    badge: "Conductores",
+    buttonClass: "bg-emerald-600 text-white hover:bg-emerald-700",
+    cardAccent: "border-emerald-200",
+    iconBg: "bg-emerald-100",
+    emoji: "🚚",
   },
   {
     title: "Logística empresarial",
@@ -21,7 +33,7 @@ const accessCards = [
     buttonText: "Entrar a logística empresarial",
     to: "/enterprise-access",
     badge: "Empresas",
-    buttonClass: "bg-blue-600 text-white",
+    buttonClass: "bg-blue-600 text-white hover:bg-blue-700",
     cardAccent: "border-blue-200",
     iconBg: "bg-blue-100",
     emoji: "🏢",
@@ -100,6 +112,19 @@ const Start = () => {
               </div>
             </div>
           ))}
+        </div>
+
+        <div className="max-w-2xl mx-auto mt-8">
+          <div className="bg-slate-50 border border-slate-200 rounded-3xl p-5">
+            <h3 className="text-lg font-bold text-slate-900">
+              Central Go conecta personas, transportadores y empresas
+            </h3>
+            <p className="text-sm text-slate-600 mt-2 leading-relaxed">
+              Muy pronto podrás solicitar transporte, negociar tarifas, mover
+              carga, aprovechar espacio disponible en rutas y acceder a más
+              soluciones logísticas desde una sola plataforma.
+            </p>
+          </div>
         </div>
       </div>
     </div>
