@@ -22,6 +22,15 @@ const TRUCK_SVG = `
 
 const TRUCK_ICON_URL = `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(TRUCK_SVG)}`;
 
+const areCoordsMeaningfullyDifferent = (a, b, threshold = 0.0003) => {
+  if (!a || !b) return true;
+
+  return (
+    Math.abs(Number(a.lat) - Number(b.lat)) > threshold ||
+    Math.abs(Number(a.lng) - Number(b.lng)) > threshold
+  );
+};
+
 const EnterpriseLogisticsDriverMap = ({
   selectedDriver,
   activeOrLastDelivery,
@@ -36,6 +45,7 @@ const EnterpriseLogisticsDriverMap = ({
   const directionsRendererRef = useRef(null);
   const lastCoordsRef = useRef(null);
   const routeSignatureRef = useRef("");
+  const infoWindowSignatureRef = useRef("");
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
@@ -82,10 +92,15 @@ const EnterpriseLogisticsDriverMap = ({
         directionsRendererRef.current.set("directions", null);
       }
 
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+      }
+
       mapInstanceRef.current.setCenter(DEFAULT_CENTER);
       mapInstanceRef.current.setZoom(12);
       lastCoordsRef.current = null;
       routeSignatureRef.current = "";
+      infoWindowSignatureRef.current = "";
       return;
     }
 
@@ -109,12 +124,9 @@ const EnterpriseLogisticsDriverMap = ({
     }
 
     const last = lastCoordsRef.current;
-    const changed =
-      !last ||
-      Number(last.lat) !== Number(coords.lat) ||
-      Number(last.lng) !== Number(coords.lng);
+    const movedEnough = areCoordsMeaningfullyDifferent(last, coords, 0.0003);
 
-    if (changed) {
+    if (movedEnough) {
       mapInstanceRef.current.panTo(coords);
       mapInstanceRef.current.setZoom(15);
       lastCoordsRef.current = coords;
@@ -150,12 +162,25 @@ const EnterpriseLogisticsDriverMap = ({
       </div>
     `;
 
-    if (infoWindowRef.current) {
+    const nextInfoSignature = JSON.stringify({
+      id: selectedDriver?._id || selectedDriver?.id || "",
+      name: selectedDriver?.name || "",
+      status: selectedDriver?.status || "",
+      vehicle: selectedDriver?.vehicle || "",
+      plate: selectedDriver?.plate || "",
+      lat: Number(coords.lat).toFixed(6),
+      lng: Number(coords.lng).toFixed(6),
+      updatedAt: selectedDriver?.currentLocation?.updatedAt || "",
+      pending: driverPendingDeliveriesCount,
+    });
+
+    if (infoWindowRef.current && infoWindowSignatureRef.current !== nextInfoSignature) {
       infoWindowRef.current.setContent(content);
       infoWindowRef.current.open({
         anchor: markerRef.current,
         map: mapInstanceRef.current,
       });
+      infoWindowSignatureRef.current = nextInfoSignature;
     }
   }, [
     mapsApiLoaded,
@@ -191,8 +216,8 @@ const EnterpriseLogisticsDriverMap = ({
     }
 
     const signature = JSON.stringify({
-      lat: Number(lat).toFixed(6),
-      lng: Number(lng).toFixed(6),
+      lat: Number(lat).toFixed(5),
+      lng: Number(lng).toFixed(5),
       address: destinationAddress,
       deliveryId: activeOrLastDelivery?._id || activeOrLastDelivery?.id || "",
       status: activeOrLastDelivery?.status || "",
@@ -333,6 +358,41 @@ const EnterpriseLogistics = () => {
     });
   };
 
+  const areDeliveriesEquivalent = (prev, next) => {
+    if (!Array.isArray(prev) || !Array.isArray(next)) return false;
+    if (prev.length !== next.length) return false;
+
+    for (let i = 0; i < prev.length; i += 1) {
+      const a = prev[i];
+      const b = next[i];
+
+      const aId = String(a?._id || a?.id || "");
+      const bId = String(b?._id || b?.id || "");
+
+      const aDriverId =
+        a?.assignedDriverId?._id || a?.assignedDriverId || a?.driver?._id || a?.driver || "";
+      const bDriverId =
+        b?.assignedDriverId?._id || b?.assignedDriverId || b?.driver?._id || b?.driver || "";
+
+      if (
+        aId !== bId ||
+        String(a?.status || "") !== String(b?.status || "") ||
+        String(a?.startedAt || "") !== String(b?.startedAt || "") ||
+        String(a?.finishedAt || "") !== String(b?.finishedAt || "") ||
+        String(a?.updatedAt || "") !== String(b?.updatedAt || "") ||
+        String(a?.address || "") !== String(b?.address || "") ||
+        String(a?.clientName || "") !== String(b?.clientName || "") ||
+        String(a?.clientPhone || "") !== String(b?.clientPhone || "") ||
+        String(a?.invoiceNumber || "") !== String(b?.invoiceNumber || "") ||
+        String(aDriverId) !== String(bDriverId)
+      ) {
+        return false;
+      }
+    }
+
+    return true;
+  };
+
   const fetchDrivers = useCallback(async (silent = false) => {
     if (silent && driversPollingBusyRef.current) return;
 
@@ -401,7 +461,14 @@ const EnterpriseLogistics = () => {
         throw new Error(data.message || "No se pudieron cargar las entregas.");
       }
 
-      setDeliveries(Array.isArray(data.deliveries) ? data.deliveries : []);
+      const incomingDeliveries = Array.isArray(data.deliveries) ? data.deliveries : [];
+
+      setDeliveries((prev) => {
+        if (areDeliveriesEquivalent(prev, incomingDeliveries)) {
+          return prev;
+        }
+        return incomingDeliveries;
+      });
     } catch (error) {
       console.error("Error cargando entregas:", error);
       if (!silent) {
@@ -423,7 +490,7 @@ const EnterpriseLogistics = () => {
     const interval = setInterval(() => {
       fetchDrivers(true);
       fetchDeliveries(true);
-    }, 9000);
+    }, 8000);
 
     return () => clearInterval(interval);
   }, [fetchDrivers, fetchDeliveries]);
@@ -688,19 +755,21 @@ const EnterpriseLogistics = () => {
   const selectedDriverActiveDelivery = useMemo(() => {
     if (!selectedDriver) return null;
 
-    return deliveries.find((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        delivery.driver?._id ||
-        delivery.driver ||
-        "";
+    return (
+      deliveries.find((delivery) => {
+        const assignedId =
+          delivery.assignedDriverId?._id ||
+          delivery.assignedDriverId ||
+          delivery.driver?._id ||
+          delivery.driver ||
+          "";
 
-      return (
-        String(assignedId) === String(driverIdValue(selectedDriver)) &&
-        delivery.status === "En curso"
-      );
-    }) || null;
+        return (
+          String(assignedId) === String(driverIdValue(selectedDriver)) &&
+          delivery.status === "En curso"
+        );
+      }) || null
+    );
   }, [deliveries, selectedDriver]);
 
   const selectedDriverLastFinishedDelivery = useMemo(() => {
@@ -732,7 +801,10 @@ const EnterpriseLogistics = () => {
   const activeOrLastDelivery =
     selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
 
-  const selectedDriverChatDelivery = activeOrLastDelivery;
+  const selectedDriverChatDelivery = useMemo(() => {
+    if (!activeOrLastDelivery) return null;
+    return activeOrLastDelivery;
+  }, [activeOrLastDelivery]);
 
   const openDriverInGoogleMaps = () => {
     if (!selectedDriver?.currentLocation?.lat || !selectedDriver?.currentLocation?.lng) {
