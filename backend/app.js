@@ -19,6 +19,7 @@ const rideRoutes = require('./routes/ride.routes');
 const enterpriseRoutes = require('./routes/enterprise.routes');
 const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
 const enterpriseDeliveryRoutes = require('./routes/enterpriseDelivery.routes');
+const enterpriseChatRoutes = require('./routes/enterpriseChat.routes');
 
 app.use(
     cors({
@@ -42,5 +43,6 @@ app.use('/rides', rideRoutes);
 app.use('/enterprise', enterpriseRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);
 app.use('/enterprise-deliveries', enterpriseDeliveryRoutes);
+app.use('/', enterpriseChatRoutes);
 
 module.exports = app;
