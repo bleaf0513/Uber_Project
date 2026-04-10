@@ -1,5 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { getApiBaseUrl } from "../apiBase";
+
+const API_BASE = getApiBaseUrl();
 
 const EnterpriseDeliveryHistory = () => {
   const [drivers, setDrivers] = useState([]);
@@ -11,24 +14,68 @@ const EnterpriseDeliveryHistory = () => {
   const [searchDate, setSearchDate] = useState("");
   const [searchStatus, setSearchStatus] = useState("");
 
-  useEffect(() => {
-    const loadData = () => {
-      const savedDrivers = JSON.parse(
-        localStorage.getItem("enterpriseDrivers") || "[]"
+  const parseJsonSafe = async (response, label = "API") => {
+    const text = await response.text();
+    console.log(`${label} raw response:`, text);
+
+    try {
+      return JSON.parse(text);
+    } catch (error) {
+      throw new Error(
+        `La API no devolvió JSON. Respuesta: ${text.slice(0, 150)}`
       );
-      const savedDeliveries = JSON.parse(
-        localStorage.getItem("enterpriseDeliveries") || "[]"
-      );
+    }
+  };
 
-      setDrivers(savedDrivers);
-      setDeliveries(savedDeliveries);
-    };
+  const fetchDrivers = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+        method: "GET",
+        credentials: "include",
+      });
 
-    loadData();
+      const data = await parseJsonSafe(response, "GET /enterprise-drivers");
 
-    const interval = setInterval(loadData, 2000);
-    return () => clearInterval(interval);
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar los conductores.");
+      }
+
+      setDrivers(Array.isArray(data.drivers) ? data.drivers : []);
+    } catch (error) {
+      console.error("Error cargando conductores en historial:", error);
+    }
   }, []);
+
+  const fetchDeliveries = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE}/enterprise-deliveries`, {
+        method: "GET",
+        credentials: "include",
+      });
+
+      const data = await parseJsonSafe(response, "GET /enterprise-deliveries");
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar las entregas.");
+      }
+
+      setDeliveries(Array.isArray(data.deliveries) ? data.deliveries : []);
+    } catch (error) {
+      console.error("Error cargando entregas en historial:", error);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchDrivers();
+    fetchDeliveries();
+
+    const interval = setInterval(() => {
+      fetchDrivers();
+      fetchDeliveries();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [fetchDrivers, fetchDeliveries]);
 
   const hasActiveFilters = useMemo(() => {
     return (
@@ -44,6 +91,12 @@ const EnterpriseDeliveryHistory = () => {
     if (!hasActiveFilters) return [];
 
     return deliveries.filter((delivery) => {
+      const assignedDriverText =
+        delivery.assignedDriverName ||
+        delivery.assignedDriverId?.name ||
+        delivery.driver?.name ||
+        "";
+
       const invoiceMatch = String(delivery.invoiceNumber || "")
         .toLowerCase()
         .includes(searchInvoice.toLowerCase());
@@ -52,7 +105,7 @@ const EnterpriseDeliveryHistory = () => {
         .toLowerCase()
         .includes(searchClient.toLowerCase());
 
-      const driverMatch = String(delivery.assignedDriverName || "")
+      const driverMatch = String(assignedDriverText || "")
         .toLowerCase()
         .includes(searchDriver.toLowerCase());
 
@@ -214,14 +267,21 @@ const EnterpriseDeliveryHistory = () => {
                   return timeB - timeA;
                 })
                 .map((delivery) => {
+                  const assignedId =
+                    delivery.assignedDriverId?._id ||
+                    delivery.assignedDriverId ||
+                    delivery.driver?._id ||
+                    delivery.driver ||
+                    "";
+
                   const assignedDriver = drivers.find(
                     (driver) =>
-                      String(driver.id) === String(delivery.assignedDriverId)
+                      String(driver._id || driver.id || "") === String(assignedId)
                   );
 
                   return (
                     <div
-                      key={delivery.id}
+                      key={delivery._id || delivery.id}
                       className="border rounded-2xl p-4 bg-gray-50"
                     >
                       <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
@@ -261,21 +321,31 @@ const EnterpriseDeliveryHistory = () => {
                             Conductor asignado
                           </p>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {delivery.assignedDriverName || "Sin asignar"}
+                            {delivery.assignedDriverName ||
+                              delivery.assignedDriverId?.name ||
+                              delivery.driver?.name ||
+                              assignedDriver?.name ||
+                              "Sin asignar"}
                           </p>
                         </div>
 
                         <div className="bg-white rounded-xl p-3">
                           <p className="text-xs text-gray-500">Vehículo</p>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {assignedDriver?.vehicle || "No registrado"}
+                            {delivery.assignedDriverId?.vehicle ||
+                              delivery.driver?.vehicle ||
+                              assignedDriver?.vehicle ||
+                              "No registrado"}
                           </p>
                         </div>
 
                         <div className="bg-white rounded-xl p-3">
                           <p className="text-xs text-gray-500">Placa</p>
                           <p className="text-sm font-bold text-gray-900 mt-1">
-                            {assignedDriver?.plate || "No registrada"}
+                            {delivery.assignedDriverId?.plate ||
+                              delivery.driver?.plate ||
+                              assignedDriver?.plate ||
+                              "No registrada"}
                           </p>
                         </div>
 
