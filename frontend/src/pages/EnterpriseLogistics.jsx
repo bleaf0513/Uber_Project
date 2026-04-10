@@ -469,19 +469,22 @@ const EnterpriseLogistics = () => {
   }, [filteredDeliveries]);
 
   const selectedDriverPendingDeliveries = useMemo(() => {
-    if (!selectedDriver) return [];
+  if (!selectedDriver) return [];
 
-    return deliveries.filter((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        "";
-      return (
-        String(assignedId) === String(driverIdValue(selectedDriver)) &&
-        delivery.status !== "Finalizada"
-      );
-    });
-  }, [deliveries, selectedDriver]);
+  return deliveries.filter((delivery) => {
+    const assignedId =
+      delivery.assignedDriverId?._id ||
+      delivery.assignedDriverId ||
+      delivery.driver?._id ||
+      delivery.driver ||
+      "";
+
+    return (
+      String(assignedId) === String(driverIdValue(selectedDriver)) &&
+      delivery.status !== "Finalizada"
+    );
+  });
+}, [deliveries, selectedDriver]);
 
   const openDriverInGoogleMaps = () => {
     if (!selectedDriver?.currentLocation?.lat || !selectedDriver?.currentLocation?.lng) {
