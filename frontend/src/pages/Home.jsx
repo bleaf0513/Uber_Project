@@ -1,6 +1,6 @@
 import React, { useEffect, useContext, useState, useRef, useCallback } from "react";
 import { useGSAP } from "@gsap/react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import LocationSearchPanel from "../../components/LocationSearchPanel";
@@ -11,49 +11,46 @@ import DriverSelected from "../../components/DriverSelected";
 import axios from "axios";
 import { SocketContext } from "../context/SocketContext";
 import { UserDataContext } from "../context/UserContext";
-import { useNavigate } from "react-router-dom";
 import LiveTracking from "../../components/LiveTracking";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
 
 function Home() {
-  const sumbitHandler = (e) => {
+  const submitHandler = (e) => {
     e.preventDefault();
   };
-  const [pickup, setPickup] = React.useState("");
-  const [destination, setDestination] = React.useState("");
-  const [panelOpen, setPanelOpen] = React.useState(false);
-  const panelRef = React.useRef(null);
-  const titleRef = React.useRef(null);
-  const serachRef = React.useRef(null);
-  const vehicleRef = React.useRef(null);
-  const arrowRef = React.useRef(null);
-  const vehicleFoundRef = React.useRef(null);
-  const driverSelectedRef = React.useRef(null);
-  const confirmRidePanelRef = React.useRef(null);
-  const [vehiclePanel, setVehiclePanel] = React.useState(false);
-  const [confirmRidePanel, setConfirmRidePanel] = React.useState(false);
-  const [vehicleFound, setVehicleFound] = React.useState(false);
-  const [driverSelected, setDriverSelected] = React.useState(false);
-  const [suggestions, setSuggestions] = React.useState([]); // Initialize as empty array
-  const [activeInput, setActiveInput] = React.useState(null); // 'pickup' or 'destination'
-  const [prices, setPrices] = React.useState(null);
-  const [distance, setDistance] = React.useState(null);
-  const [pricingError, setPricingError] = React.useState(null);
-  const [selectedVehicle, setSelectedVehicle] = React.useState(null);
-  const [selectedPrice, setSelectedPrice] = React.useState(null);
+
+  const [pickup, setPickup] = useState("");
+  const [destination, setDestination] = useState("");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [vehiclePanel, setVehiclePanel] = useState(false);
+  const [confirmRidePanel, setConfirmRidePanel] = useState(false);
+  const [vehicleFound, setVehicleFound] = useState(false);
+  const [driverSelected, setDriverSelected] = useState(false);
+  const [suggestions, setSuggestions] = useState([]);
+  const [activeInput, setActiveInput] = useState(null);
+  const [prices, setPrices] = useState(null);
+  const [distance, setDistance] = useState(null);
+  const [pricingError, setPricingError] = useState(null);
+  const [selectedVehicle, setSelectedVehicle] = useState(null);
+  const [selectedPrice, setSelectedPrice] = useState(null);
   const [ride, setRide] = useState(null);
+
+  const panelRef = useRef(null);
+  const titleRef = useRef(null);
+  const searchRef = useRef(null);
+  const vehicleRef = useRef(null);
+  const arrowRef = useRef(null);
+  const vehicleFoundRef = useRef(null);
+  const driverSelectedRef = useRef(null);
+  const confirmRidePanelRef = useRef(null);
+  const suggestionTimerRef = useRef(null);
+  const suggestionSeqRef = useRef(0);
 
   const { socket } = useContext(SocketContext);
   const { user } = useContext(UserDataContext);
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const navigate = useNavigate();
-  const suggestionTimerRef = useRef(null);
-  const suggestionSeqRef = useRef(0);
-
-  // const socket = io(`${import.meta.env.VITE_BASE_URL}`);
-
-  // console.log(user._id);
 
   useEffect(() => {
     if (!user?._id) return;
@@ -61,17 +58,20 @@ function Home() {
   }, [user?._id, socket]);
 
   useEffect(() => {
-    const onRideStarted = (ride) => {
+    const onRideStarted = (rideData) => {
       setDriverSelected(false);
-      navigate("/riding", { state: { ride } });
+      navigate("/riding", { state: { ride: rideData } });
     };
-    const onRideConfirmed = (ride) => {
+
+    const onRideConfirmed = (rideData) => {
       setVehicleFound(false);
       setDriverSelected(true);
-      setRide(ride);
+      setRide(rideData);
     };
+
     socket.on("ride-started", onRideStarted);
     socket.on("ride-confirmed", onRideConfirmed);
+
     return () => {
       socket.off("ride-started", onRideStarted);
       socket.off("ride-confirmed", onRideConfirmed);
@@ -88,64 +88,64 @@ function Home() {
           "",
         place_id: row.place_id || "",
       }))
-      .filter((r) => r.description);
+      .filter((item) => item.description);
 
   const runFetchSuggestions = useCallback(
     async (query) => {
       const seq = ++suggestionSeqRef.current;
 
-      // 1) Google Places (browser) when the Maps JS SDK loaded — best UX when key + Places work.
       if (mapsApiLoaded && window.google?.maps) {
         try {
-          const { AutocompleteSuggestion } = await google.maps.importLibrary(
-            "places"
-          );
+          const { AutocompleteSuggestion } = await google.maps.importLibrary("places");
           const { suggestions: raw } =
             await AutocompleteSuggestion.fetchAutocompleteSuggestions({
               input: query,
             });
+
           const mapped = (raw ?? [])
             .map((item) => item.placePrediction)
             .filter(Boolean)
-            .map((p) => {
+            .map((prediction) => {
               const description =
-                p.text?.text ??
-                [p.mainText?.text, p.secondaryText?.text]
+                prediction.text?.text ??
+                [prediction.mainText?.text, prediction.secondaryText?.text]
                   .filter(Boolean)
                   .join(", ");
+
               return {
                 description: description || "",
-                place_id: p.placeId,
+                place_id: prediction.placeId,
               };
             })
-            .filter((row) => row.description);
+            .filter((item) => item.description);
+
           if (seq !== suggestionSeqRef.current) return;
+
           if (mapped.length > 0) {
             setSuggestions(mapped);
             return;
           }
         } catch (error) {
           console.warn(
-            "Places autocomplete failed, using server:",
+            "Places autocomplete failed, using server fallback:",
             error?.message || error
           );
         }
       }
 
-      // 2) Server: Google Autocomplete (if server key) or Photon — works without VITE_GOOGLE_MAPS_API.
       try {
-        const { data } = await axios.get(
-          `${getApiBaseUrl()}/maps/get-suggestions`,
-          {
-            params: { address: query },
-            timeout: 18000,
-          }
-        );
+        const { data } = await axios.get(`${getApiBaseUrl()}/maps/get-suggestions`, {
+          params: { address: query },
+          timeout: 18000,
+        });
+
         if (seq !== suggestionSeqRef.current) return;
         setSuggestions(normalizeSuggestionRows(data));
       } catch (error) {
         console.error("Error fetching suggestions:", error);
-        if (seq === suggestionSeqRef.current) setSuggestions([]);
+        if (seq === suggestionSeqRef.current) {
+          setSuggestions([]);
+        }
       }
     },
     [mapsApiLoaded]
@@ -160,7 +160,11 @@ function Home() {
       setSuggestions([]);
       return;
     }
-    if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+
+    if (suggestionTimerRef.current) {
+      clearTimeout(suggestionTimerRef.current);
+    }
+
     suggestionTimerRef.current = setTimeout(() => {
       suggestionTimerRef.current = null;
       runFetchSuggestions(query);
@@ -169,7 +173,9 @@ function Home() {
 
   useEffect(() => {
     return () => {
-      if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+      if (suggestionTimerRef.current) {
+        clearTimeout(suggestionTimerRef.current);
+      }
     };
   }, []);
 
@@ -177,24 +183,24 @@ function Home() {
     setPrices(null);
     setDistance(null);
     setPricingError(null);
+    setSelectedVehicle(null);
+    setSelectedPrice(null);
   }, [pickup, destination]);
 
   useEffect(() => {
-    if (
-      !vehiclePanel ||
-      pickup === "" ||
-      destination === "" ||
-      prices != null
-    ) {
+    if (!vehiclePanel || !pickup || !destination || prices != null) {
       return;
     }
+
     const token = localStorage.getItem("token");
     if (!token) return;
 
     let cancelled = false;
+
     (async () => {
       try {
         setPricingError(null);
+
         const [pricesRes, distRes] = await Promise.all([
           axios.get(`${getApiBaseUrl()}/maps/get-prices`, {
             params: { origin: pickup, destination },
@@ -205,6 +211,7 @@ function Home() {
             headers: { Authorization: `Bearer ${token}` },
           }),
         ]);
+
         if (!cancelled) {
           setPrices(pricesRes.data ?? null);
           setDistance(distRes.data ?? null);
@@ -217,6 +224,7 @@ function Home() {
             typeof apiMsg === "string" && apiMsg.trim()
               ? apiMsg
               : error?.message || "No se pudieron cargar los precios para esta ruta.";
+
           console.error("Error fetching fare or distance:", detail, error);
           setPrices(null);
           setDistance(null);
@@ -234,12 +242,12 @@ function Home() {
     try {
       const token = localStorage.getItem("token");
       await axios.get(`${getApiBaseUrl()}/users/logout`, {
-        params: { origin: pickup, destination: destination },
+        params: { origin: pickup, destination },
         headers: { Authorization: `Bearer ${token}` },
       });
       navigate("/login");
     } catch (error) {
-      console.error("Error Logging out :", error);
+      console.error("Error logging out:", error);
     }
   };
 
@@ -249,10 +257,10 @@ function Home() {
     } else {
       setDestination(suggestion);
     }
+
     setSuggestions([]);
     setPanelOpen(false);
 
-    // Only show vehicle panel if both fields are filled
     if (activeInput === "pickup" && destination !== "") {
       setVehiclePanel(true);
     } else if (activeInput === "destination" && pickup !== "") {
@@ -260,8 +268,14 @@ function Home() {
     }
   };
 
-  async function createRide() {
+  const createRide = async () => {
     const token = localStorage.getItem("token");
+
+    if (!selectedVehicle) {
+      console.error("No vehicle selected");
+      return;
+    }
+
     await axios.post(
       `${getApiBaseUrl()}/rides/create`,
       {
@@ -273,20 +287,18 @@ function Home() {
         headers: { Authorization: `Bearer ${token}` },
       }
     );
-  }
+  };
 
   useGSAP(
-    function () {
+    () => {
       if (vehiclePanel) {
         gsap.to(vehicleRef.current, {
           y: "0%",
           delay: 0.3,
-          // transform: "translateY(0%)",
         });
       } else {
         gsap.to(vehicleRef.current, {
           y: "100%",
-          // transform: "translateY(100%)",
         });
       }
     },
@@ -294,17 +306,15 @@ function Home() {
   );
 
   useGSAP(
-    function () {
+    () => {
       if (driverSelected) {
         gsap.to(driverSelectedRef.current, {
           y: "0%",
           delay: 0.3,
-          // transform: "translateY(0%)",
         });
       } else {
         gsap.to(driverSelectedRef.current, {
           y: "100%",
-          // transform: "translateY(100%)",
         });
       }
     },
@@ -312,17 +322,15 @@ function Home() {
   );
 
   useGSAP(
-    function () {
+    () => {
       if (vehicleFound) {
         gsap.to(vehicleFoundRef.current, {
           y: "0%",
           delay: 0.3,
-          // transform: "translateY(0%)",
         });
       } else {
         gsap.to(vehicleFoundRef.current, {
           y: "100%",
-          // transform: "translateY(100%)",
         });
       }
     },
@@ -330,17 +338,15 @@ function Home() {
   );
 
   useGSAP(
-    function () {
+    () => {
       if (confirmRidePanel) {
         gsap.to(confirmRidePanelRef.current, {
           y: "0%",
           delay: 0.3,
-          // transform: "translateY(0%)",
         });
       } else {
         gsap.to(confirmRidePanelRef.current, {
           y: "100%",
-          // transform: "translateY(100%)",
         });
       }
     },
@@ -348,7 +354,7 @@ function Home() {
   );
 
   useGSAP(
-    function () {
+    () => {
       if (panelOpen) {
         gsap.to(titleRef.current, {
           display: "none",
@@ -390,6 +396,7 @@ function Home() {
 
   useEffect(() => {
     if (!user?._id || !navigator.geolocation) return;
+
     const watchId = navigator.geolocation.watchPosition((position) => {
       socket.emit("update-location-user", {
         userId: user._id,
@@ -399,6 +406,7 @@ function Home() {
         },
       });
     });
+
     return () => navigator.geolocation.clearWatch(watchId);
   }, [user?._id, socket]);
 
@@ -406,11 +414,12 @@ function Home() {
     <div className="h-screen position-relative w-screen">
       <div>
         <img
-  className="absolute w-20 ml-7 pt-7 z-30"
-  src="/logo-centralgo.png"
-  alt="Central Go"
-/>
+          className="absolute w-20 ml-7 pt-7 z-30"
+          src="/logo-centralgo.png"
+          alt="Central Go"
+        />
       </div>
+
       <Link
         onClick={logoutUser}
         className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black flex items-center justify-center z-50"
@@ -420,17 +429,7 @@ function Home() {
           className="ri-logout-box-line ri-xl mb mr-0.5"
         ></i>
       </Link>
-      {/* <div> */}
-      {/* <img
-          onClick={() => {
-            setVehiclePanel(false);
-            setPanelOpen(false);
-          }}
-          className=""
-          src={mapBanner}
-          alt="mapBanner"
-        />
-      </div> */}
+
       <div
         className="absolute w-screen h-[100%] top-0 z-20"
         onClick={() => {
@@ -440,14 +439,16 @@ function Home() {
       >
         <LiveTracking />
       </div>
+
       <div
-        ref={serachRef}
+        ref={searchRef}
         className="absolute flex flex-col justify-end top-0 h-screen w-full rounded-t-lg"
       >
         <div className="h-[32%] bg-white p-5 flex flex-col justify-around z-50">
           <h4 ref={titleRef} className="text-3xl font-semibold ml-1">
-            Buscar un viaje
+            Buscar un servicio
           </h4>
+
           <i
             onClick={() => {
               setPanelOpen(false);
@@ -455,11 +456,13 @@ function Home() {
             ref={arrowRef}
             className="ri-arrow-down-s-line text-2xl hidden"
           ></i>
-          <form className="relative" action="" onSubmit={sumbitHandler}>
+
+          <form className="relative" onSubmit={submitHandler}>
             <div className="line absolute self-center h-[51%] w-1 bottom-1/4 ml-8 bg-black rounded-3xl">
               <div className="circle absolute h-3 w-3 bg-black rounded-full top-0 ml-[-4px]"></div>
               <div className="circle absolute h-3 w-3 bg-black rounded-full bottom-0 ml-[-4px]"></div>
             </div>
+
             <input
               value={pickup}
               onClick={() => {
@@ -474,6 +477,7 @@ function Home() {
               type="text"
               placeholder="Agregar punto de recogida"
             />
+
             <input
               value={destination}
               onClick={() => {
@@ -490,6 +494,7 @@ function Home() {
             />
           </form>
         </div>
+
         <div
           ref={panelRef}
           className="opacity-0 bg-white flex flex-col justify-start pl-5 pr-2 z-50"
@@ -505,9 +510,10 @@ function Home() {
           />
         </div>
       </div>
+
       <div
         ref={vehicleRef}
-        className="fixed  min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-lg bg-white overflow-auto z-50"
+        className="fixed min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-lg bg-white overflow-auto z-50"
       >
         <VehiclePanel
           setVehiclePanel={setVehiclePanel}
@@ -519,11 +525,10 @@ function Home() {
           setSelectedVehicle={setSelectedVehicle}
         />
       </div>
-      {/*Confirm ride panel below*/}
 
       <div
         ref={confirmRidePanelRef}
-        className="fixed bottom-0 w-screen translate-y-full  rounded-t-lg bg-white overflow-hidden z-50"
+        className="fixed bottom-0 w-screen translate-y-full rounded-t-lg bg-white overflow-hidden z-50"
       >
         <ConfirmedRide
           setConfirmRidePanel={setConfirmRidePanel}
@@ -536,8 +541,6 @@ function Home() {
           createRide={createRide}
         />
       </div>
-
-      {/*Looking for a driver*/}
 
       <div
         ref={vehicleFoundRef}
