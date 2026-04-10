@@ -75,20 +75,97 @@ const getFare = async (pickup, destination) => {
     };
 };
 
-const createRide = async ({ user, pickup, destination, vehicleType }) => {
-    if (!user || !pickup || !destination || !vehicleType) {
+const createRide = async ({ user, pickup, destination, vehicle }) => {
+    if (!user || !pickup || !destination || !vehicle) {
         throw new Error("All fields are required");
     }
 
-    const fare = await getFare(pickup, destination);
+    const latestUser = await userModel.findById(user._id || user);
+
+    if (!latestUser) {
+        throw new Error("User not found");
+    }
+
+    const fares = await getFare(pickup, destination);
 
     const ride = await rideModel.create({
-        user: user._id,
+        user: latestUser._id,
         pickup,
         destination,
         otp: getOtp(6),
-        fare: fare[vehicleType],
+        fare: fares[vehicle],
+        vehicle,
     });
+
+    return ride;
+};
+
+const confirmRide = async ({ rideId, captain }) => {
+    if (!rideId) {
+        throw new Error("rideId is required");
+    }
+
+    await rideModel.findOneAndUpdate(
+        { _id: rideId },
+        {
+            status: "accepted",
+            captain: captain._id,
+        }
+    );
+
+    const ride = await rideModel.findOne({ _id: rideId }).populate("user").populate("captain");
+    if (!ride) {
+        throw new Error("Ride not found");
+    }
+
+    return ride;
+};
+
+const startRide = async ({ rideId, otp, captain }) => {
+    if (!rideId || !otp) {
+        throw new Error("rideId and otp are required");
+    }
+
+    const ride = await rideModel.findOne({
+        _id: rideId,
+        otp: otp,
+        captain: captain._id,
+    }).populate("user").populate("captain");
+
+    if (!ride) {
+        throw new Error("Ride not found");
+    }
+
+    if (ride.status !== "accepted") {
+        throw new Error("Ride not accepted");
+    }
+
+    ride.status = "ongoing";
+    await ride.save();
+
+    return ride;
+};
+
+const endRide = async ({ rideId, captain }) => {
+    if (!rideId) {
+        throw new Error("rideId is required");
+    }
+
+    const ride = await rideModel.findOne({
+        _id: rideId,
+        captain: captain._id,
+    }).populate("user").populate("captain");
+
+    if (!ride) {
+        throw new Error("Ride not found");
+    }
+
+    if (ride.status !== "ongoing") {
+        throw new Error("Ride is not ongoing");
+    }
+
+    ride.status = "completed";
+    await ride.save();
 
     return ride;
 };
@@ -96,4 +173,7 @@ const createRide = async ({ user, pickup, destination, vehicleType }) => {
 module.exports = {
     getFare,
     createRide,
+    confirmRide,
+    startRide,
+    endRide,
 };
