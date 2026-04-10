@@ -210,9 +210,11 @@ const CaptainSignup = () => {
                     <option value="" disabled>
                       Selecciona el tipo
                     </option>
-                    <option value="moto">Moto</option>
-                    <option value="car">Carro</option>
-                    <option value="auto">Vehículo de carga liviana</option>
+                    <option value="motorcycle">Moto</option>
+<option value="car">Carro</option>
+<option value="light_cargo">Carga liviana</option>
+<option value="van">Furgón / camioneta</option>
+<option value="truck">Camión</option>
                   </select>
                 </div>
 
