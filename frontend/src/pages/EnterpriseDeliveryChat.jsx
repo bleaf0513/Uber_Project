@@ -12,11 +12,16 @@ const EnterpriseDeliveryChat = ({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [text, setText] = useState("");
-  const messagesEndRef = useRef(null);
+
+  const chatBodyRef = useRef(null);
+  const pollingBusyRef = useRef(false);
+  const previousMessageIdsRef = useRef([]);
+  const nearBottomRef = useRef(true);
+  const initialLoadDoneRef = useRef(false);
 
   const deliveryId = useMemo(
     () => String(delivery?._id || delivery?.id || ""),
-    [delivery]
+    [delivery?._id, delivery?.id]
   );
 
   const parseJsonSafe = async (response, label = "API") => {
@@ -35,10 +40,42 @@ const EnterpriseDeliveryChat = ({
     }
   };
 
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior: "smooth" });
+  const isNearBottom = () => {
+    const el = chatBodyRef.current;
+    if (!el) return true;
+    return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  };
+
+  const scrollChatToBottom = (behavior = "auto") => {
+    const el = chatBodyRef.current;
+    if (!el) return;
+
+    el.scrollTo({
+      top: el.scrollHeight,
+      behavior,
+    });
+  };
+
+  const sameMessages = (prev, next) => {
+    if (!Array.isArray(prev) || !Array.isArray(next)) return false;
+    if (prev.length !== next.length) return false;
+
+    for (let i = 0; i < prev.length; i += 1) {
+      const a = prev[i];
+      const b = next[i];
+
+      if (
+        String(a?._id || "") !== String(b?._id || "") ||
+        String(a?.text || "") !== String(b?.text || "") ||
+        String(a?.senderType || "") !== String(b?.senderType || "") ||
+        String(a?.senderName || "") !== String(b?.senderName || "") ||
+        String(a?.createdAt || "") !== String(b?.createdAt || "")
+      ) {
+        return false;
+      }
     }
+
+    return true;
   };
 
   const fetchMessages = async (silent = false) => {
@@ -47,8 +84,14 @@ const EnterpriseDeliveryChat = ({
       return;
     }
 
+    if (silent && pollingBusyRef.current) return;
+
     try {
-      if (!silent) setLoadingMessages(true);
+      if (silent) {
+        pollingBusyRef.current = true;
+      } else {
+        setLoadingMessages(true);
+      }
 
       const response = await fetch(`${API_BASE}/enterprise-chat/${deliveryId}`, {
         method: "GET",
@@ -62,21 +105,37 @@ const EnterpriseDeliveryChat = ({
         throw new Error(data.message || "No se pudieron cargar los mensajes.");
       }
 
-      setMessages(Array.isArray(data.messages) ? data.messages : []);
+      const incomingMessages = Array.isArray(data.messages) ? data.messages : [];
+
+      setMessages((prev) => {
+        if (sameMessages(prev, incomingMessages)) {
+          return prev;
+        }
+        return incomingMessages;
+      });
     } catch (error) {
       console.error("Error cargando mensajes:", error);
       if (!silent) {
         alert(error.message || "No se pudieron cargar los mensajes.");
       }
     } finally {
-      if (!silent) setLoadingMessages(false);
+      if (silent) {
+        pollingBusyRef.current = false;
+      } else {
+        setLoadingMessages(false);
+      }
     }
   };
 
   useEffect(() => {
-    fetchMessages(false);
+    if (!deliveryId) {
+      setMessages([]);
+      previousMessageIdsRef.current = [];
+      initialLoadDoneRef.current = false;
+      return;
+    }
 
-    if (!deliveryId) return;
+    fetchMessages(false);
 
     const interval = setInterval(() => {
       fetchMessages(true);
@@ -86,7 +145,39 @@ const EnterpriseDeliveryChat = ({
   }, [deliveryId]);
 
   useEffect(() => {
-    scrollToBottom();
+    const el = chatBodyRef.current;
+    if (!el) return;
+
+    const handleScroll = () => {
+      nearBottomRef.current = isNearBottom();
+    };
+
+    nearBottomRef.current = isNearBottom();
+    el.addEventListener("scroll", handleScroll);
+
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+    };
+  }, [deliveryId]);
+
+  useEffect(() => {
+    const currentIds = messages.map((msg) =>
+      String(msg?._id || `${msg?.senderType}-${msg?.createdAt}-${msg?.text}`)
+    );
+
+    const previousIds = previousMessageIdsRef.current;
+    const hasNewMessage =
+      currentIds.length > previousIds.length &&
+      currentIds.some((id) => !previousIds.includes(id));
+
+    if (!initialLoadDoneRef.current) {
+      scrollChatToBottom("auto");
+      initialLoadDoneRef.current = true;
+    } else if (hasNewMessage && nearBottomRef.current) {
+      scrollChatToBottom("smooth");
+    }
+
+    previousMessageIdsRef.current = currentIds;
   }, [messages]);
 
   const handleSend = async (e) => {
@@ -103,8 +194,27 @@ const EnterpriseDeliveryChat = ({
       return;
     }
 
+    const optimisticMessage = {
+      _id: `temp-${Date.now()}`,
+      senderType: "logistics",
+      senderName: logisticsName,
+      text: cleaned,
+      createdAt: new Date().toISOString(),
+    };
+
+    const previousMessages = messages;
+    const shouldStickToBottom = isNearBottom();
+
     try {
       setSendingMessage(true);
+      setMessages((prev) => [...prev, optimisticMessage]);
+      setText("");
+
+      if (shouldStickToBottom) {
+        requestAnimationFrame(() => {
+          scrollChatToBottom("smooth");
+        });
+      }
 
       const response = await fetch(`${API_BASE}/enterprise-chat/${deliveryId}`, {
         method: "POST",
@@ -126,14 +236,17 @@ const EnterpriseDeliveryChat = ({
 
       const newMessage = data.chatMessage;
       if (newMessage) {
-        setMessages((prev) => [...prev, newMessage]);
+        setMessages((prev) => {
+          const withoutTemp = prev.filter((msg) => msg._id !== optimisticMessage._id);
+          return [...withoutTemp, newMessage];
+        });
       } else {
         await fetchMessages(true);
       }
-
-      setText("");
     } catch (error) {
       console.error("Error enviando mensaje:", error);
+      setMessages(previousMessages);
+      setText(cleaned);
       alert(error.message || "No se pudo enviar el mensaje.");
     } finally {
       setSendingMessage(false);
@@ -173,8 +286,11 @@ const EnterpriseDeliveryChat = ({
         </div>
       </div>
 
-      <div className="bg-gray-50 border rounded-2xl p-4 h-[360px] overflow-y-auto space-y-3">
-        {loadingMessages ? (
+      <div
+        ref={chatBodyRef}
+        className="bg-gray-50 border rounded-2xl p-4 h-[360px] overflow-y-auto space-y-3"
+      >
+        {loadingMessages && messages.length === 0 ? (
           <p className="text-sm text-gray-500">Cargando mensajes...</p>
         ) : messages.length === 0 ? (
           <p className="text-sm text-gray-500">
@@ -222,8 +338,6 @@ const EnterpriseDeliveryChat = ({
             );
           })
         )}
-
-        <div ref={messagesEndRef} />
       </div>
 
       <form onSubmit={handleSend} className="mt-4 flex gap-3">
