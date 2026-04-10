@@ -31,9 +31,13 @@ module.exports.createRide = async (req, res) => {
 
         ride.otp = "";
 
-        const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate('user');
+        const rideWithUser = await rideModel
+            .findOne({ _id: ride._id })
+            .populate('user');
 
-        captainsInRadius.map((captain) => {
+        captainsInRadius.forEach((captain) => {
+            if (!captain?.socketId) return;
+
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
@@ -139,6 +143,30 @@ module.exports.endRide = async (req, res) => {
         return res.status(200).json(ride);
     } catch (err) {
         console.error('Error en endRide:', err);
+        return res.status(500).json({ message: err.message });
+    }
+};
+
+module.exports.cancelRide = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const ride = await rideService.cancelRide({
+            rideId,
+            user: req.user
+        });
+
+        return res.status(200).json({
+            message: 'Solicitud cancelada correctamente',
+            ride
+        });
+    } catch (err) {
+        console.error('Error en cancelRide:', err);
         return res.status(500).json({ message: err.message });
     }
 };
