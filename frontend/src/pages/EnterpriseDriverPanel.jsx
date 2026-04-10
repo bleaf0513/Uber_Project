@@ -1163,20 +1163,29 @@ const EnterpriseDriverPanel = () => {
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Tu ruta</h2>
+  <h2 className="text-xl font-bold text-gray-900 mb-4">Tu ruta</h2>
 
-          <EnterpriseDriverMap
-            selectedDriver={selectedDriver}
-            assignedDeliveries={assignedDeliveries}
-            activeDelivery={activeDelivery}
-            setSelectedDriver={setSelectedDriver}
-          />
-        </div>
+  <EnterpriseDriverMap
+    selectedDriver={selectedDriver}
+    assignedDeliveries={assignedDeliveries}
+    activeDelivery={activeDelivery}
+    setSelectedDriver={setSelectedDriver}
+  />
+</div>
 
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Tus pedidos asignados
-          </h2>
+{selectedDriver ? (
+  <div className="mb-5">
+    <EnterpriseDriverDeliveryChat
+      delivery={activeDelivery}
+      selectedDriver={selectedDriver}
+    />
+  </div>
+) : null}
+
+<div className="bg-white rounded-2xl shadow p-5">
+  <h2 className="text-xl font-bold text-gray-900 mb-4">
+    Tus pedidos asignados
+  </h2>
 
           {assignedDeliveries.length === 0 ? (
             <p className="text-gray-500">
