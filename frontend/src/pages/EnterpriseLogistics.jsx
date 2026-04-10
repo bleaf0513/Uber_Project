@@ -423,7 +423,7 @@ const EnterpriseLogistics = () => {
     const interval = setInterval(() => {
       fetchDrivers(true);
       fetchDeliveries(true);
-    }, 2000);
+    }, 9000);
 
     return () => clearInterval(interval);
   }, [fetchDrivers, fetchDeliveries]);
