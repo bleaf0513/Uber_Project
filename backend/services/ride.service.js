@@ -27,51 +27,71 @@ const getFare = async (pickup, destination) => {
     const durationMin = seconds / 60;
 
     const baseFare = {
+        motorcycle: 2200,
         car: 3500,
-        moto: 2200,
-        auto: 2800,
+        light_cargo: 2800,
+        van: 5500,
+        truck: 9000,
     };
 
     const perKmRate = {
+        motorcycle: 700,
         car: 1200,
-        moto: 700,
-        auto: 900,
+        light_cargo: 900,
+        van: 1800,
+        truck: 2800,
     };
 
     const perMinuteRate = {
+        motorcycle: 100,
         car: 180,
-        moto: 100,
-        auto: 130,
+        light_cargo: 130,
+        van: 220,
+        truck: 320,
     };
 
     const minimumFare = {
+        motorcycle: 3000,
         car: 5500,
-        moto: 3000,
-        auto: 4000,
+        light_cargo: 4000,
+        van: 8000,
+        truck: 15000,
     };
 
     const fares = {
+        motorcycle: Math.round(
+            baseFare.motorcycle +
+            perKmRate.motorcycle * distanceKm +
+            perMinuteRate.motorcycle * durationMin
+        ),
         car: Math.round(
             baseFare.car +
             perKmRate.car * distanceKm +
             perMinuteRate.car * durationMin
         ),
-        moto: Math.round(
-            baseFare.moto +
-            perKmRate.moto * distanceKm +
-            perMinuteRate.moto * durationMin
+        light_cargo: Math.round(
+            baseFare.light_cargo +
+            perKmRate.light_cargo * distanceKm +
+            perMinuteRate.light_cargo * durationMin
         ),
-        auto: Math.round(
-            baseFare.auto +
-            perKmRate.auto * distanceKm +
-            perMinuteRate.auto * durationMin
+        van: Math.round(
+            baseFare.van +
+            perKmRate.van * distanceKm +
+            perMinuteRate.van * durationMin
+        ),
+        truck: Math.round(
+            baseFare.truck +
+            perKmRate.truck * distanceKm +
+            perMinuteRate.truck * durationMin
         ),
     };
 
     return {
+        motorcycle: Math.max(fares.motorcycle, minimumFare.motorcycle),
         car: Math.max(fares.car, minimumFare.car),
-        moto: Math.max(fares.moto, minimumFare.moto),
-        auto: Math.max(fares.auto, minimumFare.auto),
+        light_cargo: Math.max(fares.light_cargo, minimumFare.light_cargo),
+        van: Math.max(fares.van, minimumFare.van),
+        truck: Math.max(fares.truck, minimumFare.truck),
     };
 };
 
@@ -88,13 +108,23 @@ const createRide = async ({ user, pickup, destination, vehicle }) => {
 
     const fares = await getFare(pickup, destination);
 
+    if (!Object.prototype.hasOwnProperty.call(fares, vehicle)) {
+        throw new Error("Invalid vehicle type");
+    }
+
+    const distanceTime = await mapService.getDistance(pickup, destination);
+    const meters = distanceTime?.distance?.value;
+    const seconds = distanceTime?.duration?.value;
+
     const ride = await rideModel.create({
         user: latestUser._id,
         pickup,
         destination,
         otp: getOtp(6),
         fare: fares[vehicle],
-        vehicle,
+        vehicleType: vehicle,
+        distance: Number.isFinite(meters) ? meters : null,
+        duration: Number.isFinite(seconds) ? seconds : null,
     });
 
     return ride;
@@ -113,7 +143,10 @@ const confirmRide = async ({ rideId, captain }) => {
         }
     );
 
-    const ride = await rideModel.findOne({ _id: rideId }).populate("user").populate("captain");
+    const ride = await rideModel.findOne({ _id: rideId })
+        .populate("user")
+        .populate("captain");
+
     if (!ride) {
         throw new Error("Ride not found");
     }
@@ -130,7 +163,9 @@ const startRide = async ({ rideId, otp, captain }) => {
         _id: rideId,
         otp: otp,
         captain: captain._id,
-    }).populate("user").populate("captain");
+    })
+        .populate("user")
+        .populate("captain");
 
     if (!ride) {
         throw new Error("Ride not found");
@@ -154,7 +189,9 @@ const endRide = async ({ rideId, captain }) => {
     const ride = await rideModel.findOne({
         _id: rideId,
         captain: captain._id,
-    }).populate("user").populate("captain");
+    })
+        .populate("user")
+        .populate("captain");
 
     if (!ride) {
         throw new Error("Ride not found");
