@@ -61,13 +61,18 @@ function Home() {
   useEffect(() => {
     const onRideStarted = (rideData) => {
       setDriverSelected(false);
+      setVehicleFound(false);
+      setConfirmRidePanel(false);
+      setVehiclePanel(false);
       navigate("/riding", { state: { ride: rideData } });
     };
 
     const onRideConfirmed = (rideData) => {
       setVehicleFound(false);
+      setConfirmRidePanel(false);
+      setVehiclePanel(false);
       setDriverSelected(true);
-      setRide(rideData);
+      setRide(rideData || null);
     };
 
     socket.on("ride-started", onRideStarted);
@@ -115,7 +120,7 @@ function Home() {
 
               return {
                 description: description || "",
-                place_id: prediction.placeId,
+                place_id: prediction.placeId || "",
               };
             })
             .filter((item) => item.description);
@@ -188,6 +193,9 @@ function Home() {
     setSelectedPrice(null);
     setOfferedPrice(null);
     setRide(null);
+    setVehicleFound(false);
+    setDriverSelected(false);
+    setConfirmRidePanel(false);
   }, [pickup, destination]);
 
   useEffect(() => {
@@ -255,18 +263,27 @@ function Home() {
   };
 
   const handleSuggestionSelect = (suggestion) => {
+    const selectedText =
+      typeof suggestion === "string"
+        ? suggestion
+        : suggestion?.description || "";
+
+    if (!selectedText) return;
+
     if (activeInput === "pickup") {
-      setPickup(suggestion);
+      setPickup(selectedText);
     } else {
-      setDestination(suggestion);
+      setDestination(selectedText);
     }
 
     setSuggestions([]);
     setPanelOpen(false);
 
-    if (activeInput === "pickup" && destination !== "") {
-      setVehiclePanel(true);
-    } else if (activeInput === "destination" && pickup !== "") {
+    const nextPickup = activeInput === "pickup" ? selectedText : pickup;
+    const nextDestination =
+      activeInput === "destination" ? selectedText : destination;
+
+    if (nextPickup && nextDestination) {
       setVehiclePanel(true);
     }
   };
@@ -274,9 +291,17 @@ function Home() {
   const createRide = async (offeredFare) => {
     const token = localStorage.getItem("token");
 
+    if (!token) {
+      throw new Error("No hay sesión activa.");
+    }
+
+    if (!pickup || !destination) {
+      throw new Error("Debes ingresar origen y destino.");
+    }
+
     if (!selectedVehicle) {
       console.error("No vehicle selected");
-      throw new Error("No vehicle selected");
+      throw new Error("No has seleccionado un vehículo.");
     }
 
     try {
@@ -296,14 +321,25 @@ function Home() {
         }
       );
 
-      setOfferedPrice(finalOfferedFare);
-      setRide(response.data);
+      const rideData = response?.data ?? null;
 
-      return response.data;
+      if (!rideData) {
+        throw new Error("El servidor no devolvió la solicitud creada.");
+      }
+
+      setOfferedPrice(finalOfferedFare);
+      setRide(rideData);
+
+      setVehiclePanel(false);
+      setConfirmRidePanel(false);
+      setDriverSelected(false);
+
+      return rideData;
     } catch (error) {
       console.error("Error creating ride:", error);
       alert(
         error?.response?.data?.message ||
+          error?.message ||
           "No se pudo crear la solicitud."
       );
       setVehicleFound(false);
@@ -420,15 +456,25 @@ function Home() {
   useEffect(() => {
     if (!user?._id || !navigator.geolocation) return;
 
-    const watchId = navigator.geolocation.watchPosition((position) => {
-      socket.emit("update-location-user", {
-        userId: user._id,
-        location: {
-          ltd: position.coords.latitude,
-          lng: position.coords.longitude,
-        },
-      });
-    });
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        socket.emit("update-location-user", {
+          userId: user._id,
+          location: {
+            ltd: position.coords.latitude,
+            lng: position.coords.longitude,
+          },
+        });
+      },
+      (error) => {
+        console.warn("No se pudo obtener la ubicación del usuario:", error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 20000,
+      }
+    );
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, [user?._id, socket]);
@@ -456,8 +502,8 @@ function Home() {
       <div
         className="absolute w-screen h-[100%] top-0 z-20"
         onClick={() => {
-          setVehiclePanel(false);
           setPanelOpen(false);
+          setSuggestions([]);
         }}
       >
         <LiveTracking />
