@@ -107,15 +107,13 @@ const FindingDriver = (props) => {
   };
 
   const { firstPart, secondPart } = formatAddress(props?.pickup);
-  const { firstPart: destFirstPart, secondPart: destSecondPart } =
-    formatAddress(props?.destination);
+  const { firstPart: destFirstPart } = formatAddress(props?.destination);
 
   const selectedVehicleKey = VEHICLE_META[props?.selectedVehicle]
     ? props.selectedVehicle
     : "car";
 
   const selectedVehicle = VEHICLE_META[selectedVehicleKey];
-
   const vehicleImg = `${import.meta.env.BASE_URL}vehicles/${selectedVehicle.image}.png`;
 
   const displayedFare =
@@ -125,18 +123,23 @@ const FindingDriver = (props) => {
     0;
 
   return (
-    <div className="bg-white rounded-t-[24px]">
-      <div className="flex flex-col justify-center items-center py-4 px-4">
-        <p className="inline-flex items-center rounded-full bg-blue-50 text-blue-700 px-4 py-2 text-sm font-semibold mb-3">
-          Buscando transportador
-        </p>
+    <div className="bg-white rounded-t-[24px] h-full flex flex-col">
+      <div className="flex items-center justify-center pt-3 pb-2">
+        <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+      </div>
 
-        <div className="flex flex-row justify-center items-center">
-          <h2 className="text-2xl font-semibold text-center">
-            Buscando conductores
-          </h2>
+      <div className="px-4 pb-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-xs font-semibold text-blue-700">
+              Buscando transportador
+            </p>
+            <h2 className="text-xl font-bold text-gray-900">
+              Buscando conductores
+            </h2>
+          </div>
 
-          <div className="mx-2" role="status">
+          <div role="status">
             <svg
               aria-hidden="true"
               className="inline w-6 h-6 text-gray-200 animate-spin fill-blue-600"
@@ -156,125 +159,64 @@ const FindingDriver = (props) => {
             <span className="sr-only">Cargando...</span>
           </div>
         </div>
-
-        <div
-          className="mt-3"
-          style={{
-            background: "linear-gradient(to right, #00dbde, #fc00ff)",
-            height: "3px",
-            width: "80%",
-            borderRadius: "50px",
-            clipPath: "polygon(0% 100%, 0% 55%, 55% 0%, 100% 55%, 100% 100%)",
-          }}
-        ></div>
       </div>
 
-      <div className="flex justify-center items-center px-4">
-        <div className="w-full max-w-sm bg-gray-50 border border-gray-200 rounded-3xl p-4 flex flex-col items-center">
+      <div className="px-4 pb-3">
+        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 flex items-center gap-3">
           <img
-            style={{ width: "56%" }}
-            className="mb-3"
             src={vehicleImg}
             alt={selectedVehicle.label}
+            className="w-20 h-14 object-contain"
           />
 
-          <h3 className="text-xl font-bold text-gray-900">
-            {selectedVehicle.label}
-          </h3>
-
-          <p className="text-sm text-gray-600 mt-1 text-center">
-            {selectedVehicle.description}
-          </p>
-        </div>
-      </div>
-
-      <div className="flex flex-col justify-start items-start mx-3 mt-4">
-        <div
-          className="my-2"
-          style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
-        ></div>
-
-        <div className="flex flex-row justify-start w-full ml-2">
-          <div className="flex items-center justify-center w-[20%]">
-            <i className="ri-map-pin-range-fill ri-xl"></i>
-          </div>
-
-          <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">{firstPart || "Origen"}</h2>
-            <h4 className="text-sm pr-2 text-gray-600">
-              {secondPart.length > 60
-                ? `${secondPart.substring(0, 60)}...`
-                : secondPart || "Punto de recogida"}
-            </h4>
-            <div
-              className="my-2"
-              style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
-            ></div>
-          </div>
-        </div>
-
-        <div className="flex flex-row justify-start w-full ml-2">
-          <div className="flex items-center justify-center w-[20%]">
-            <i className="ri-square-fill"></i>
-          </div>
-
-          <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">
-              {destFirstPart || "Destino"}
-            </h2>
-            <h4 className="text-sm pr-2 text-gray-600">
-              {destSecondPart.length > 60
-                ? `${destSecondPart.substring(0, 60)}...`
-                : destSecondPart || "Destino"}
-            </h4>
-            <div
-              className="my-2"
-              style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
-            ></div>
-          </div>
-        </div>
-
-        <div className="flex flex-row justify-start w-full ml-2">
-          <div className="flex items-center justify-center w-[20%]">
-            <i className="ri-truck-fill ri-xl"></i>
-          </div>
-
-          <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">{selectedVehicle.label}</h2>
-            <h4 className="text-sm text-gray-600">
-              Tipo de servicio seleccionado
-            </h4>
-            <div
-              className="my-2"
-              style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
-            ></div>
-          </div>
-        </div>
-
-        <div className="flex flex-row justify-start w-full ml-2">
-          <div className="flex items-center justify-center w-[20%]">
-            <i className="ri-bank-card-2-fill ri-xl"></i>
-          </div>
-
-          <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">
+          <div className="flex-1 min-w-0">
+            <h3 className="text-lg font-bold text-gray-900">
+              {selectedVehicle.label}
+            </h3>
+            <p className="text-sm text-gray-600 truncate">
+              {firstPart || "Origen"} → {destFirstPart || "Destino"}
+            </p>
+            <p className="text-sm font-semibold text-gray-900 mt-1">
               {formatCOP(displayedFare)}
-            </h2>
-            <h4 className="text-sm text-gray-600">Pago contra servicio</h4>
-            <div
-              className="my-2"
-              style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
-            ></div>
+            </p>
           </div>
         </div>
       </div>
 
-      <div className="px-5 pt-2 pb-6">
+      <div className="px-4 flex-1 overflow-auto">
+        <div className="space-y-3">
+          <div className="flex items-start gap-3">
+            <i className="ri-map-pin-range-fill ri-lg mt-1"></i>
+            <div className="min-w-0">
+              <p className="text-base font-semibold text-gray-900">
+                {firstPart || "Origen"}
+              </p>
+              <p className="text-sm text-gray-600 truncate">
+                {secondPart || "Punto de recogida"}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3">
+            <i className="ri-square-fill ri-lg mt-1"></i>
+            <div className="min-w-0">
+              <p className="text-base font-semibold text-gray-900">
+                {destFirstPart || "Destino"}
+              </p>
+              <p className="text-sm text-gray-600">
+                Servicio {selectedVehicle.label.toLowerCase()}
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 pt-3 pb-4 border-t border-gray-100">
         <button
           type="button"
           onClick={cancelRideRequest}
           disabled={cancelling}
-          className="w-full py-3 text-white text-lg font-semibold rounded-2xl disabled:opacity-60"
+          className="w-full py-3 text-white text-base font-semibold rounded-2xl disabled:opacity-60"
           style={{
             background: "linear-gradient(to right, #cb2d3e, #ef473a)",
           }}
