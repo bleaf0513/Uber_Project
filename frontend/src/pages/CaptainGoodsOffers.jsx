@@ -129,9 +129,53 @@ const CaptainGoodsOffers = () => {
     fetchMyGoodsOffers();
   }, [captain?._id]);
 
+  const validateForm = () => {
+    const productName = form.productName.trim();
+    const origin = form.origin.trim();
+    const destination = form.destination.trim();
+    const quantityAvailable = Number(form.quantityAvailable);
+    const suggestedPrice = Number(form.suggestedPrice);
+
+    if (!productName || productName.length < 2) {
+      return "Debes ingresar un producto válido.";
+    }
+
+    if (!Number.isFinite(quantityAvailable) || quantityAvailable <= 0) {
+      return "La cantidad disponible debe ser mayor que 0.";
+    }
+
+    if (!form.quantityUnit) {
+      return "Debes seleccionar una unidad.";
+    }
+
+    if (!Number.isFinite(suggestedPrice) || suggestedPrice < 0) {
+      return "Debes ingresar un precio válido.";
+    }
+
+    if (!form.priceType) {
+      return "Debes seleccionar el tipo de precio.";
+    }
+
+    if (!origin || origin.length < 3) {
+      return "Debes ingresar un origen válido.";
+    }
+
+    if (!destination || destination.length < 3) {
+      return "Debes ingresar un destino válido.";
+    }
+
+    return "";
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage("");
+
+    const validationError = validateForm();
+    if (validationError) {
+      setMessage(validationError);
+      return;
+    }
 
     try {
       setLoading(true);
@@ -163,13 +207,18 @@ const CaptainGoodsOffers = () => {
 
       setMessage("Oferta de mercancía publicada correctamente.");
       resetForm();
-      fetchMyGoodsOffers();
+      await fetchMyGoodsOffers();
     } catch (error) {
       console.error("Error publicando oferta de mercancía:", error);
-      setMessage(
-        error?.response?.data?.message ||
-          "No se pudo publicar la oferta de mercancía."
-      );
+
+      const apiErrors = error?.response?.data?.errors;
+      const apiMessage = error?.response?.data?.message;
+
+      if (Array.isArray(apiErrors) && apiErrors.length > 0) {
+        setMessage(apiErrors[0]?.msg || "Datos inválidos para publicar.");
+      } else {
+        setMessage(apiMessage || "No se pudo publicar la oferta de mercancía.");
+      }
     } finally {
       setLoading(false);
     }
