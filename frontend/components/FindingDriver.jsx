@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
 
@@ -31,16 +31,23 @@ const VEHICLE_META = {
 };
 
 const FindingDriver = (props) => {
-  const formatAddress = (address = "") => {
-    if (!address) return { firstPart: "", secondPart: "" };
+  const [cancelling, setCancelling] = useState(false);
 
-    const firstCommaIndex = address.indexOf(",");
-    if (firstCommaIndex === -1) {
-      return { firstPart: address, secondPart: "" };
+  const formatAddress = (address = "") => {
+    const safeAddress = String(address || "").trim();
+
+    if (!safeAddress) {
+      return { firstPart: "", secondPart: "" };
     }
 
-    const firstPart = address.substring(0, firstCommaIndex);
-    const secondPart = address.substring(firstCommaIndex + 1).trim();
+    const firstCommaIndex = safeAddress.indexOf(",");
+
+    if (firstCommaIndex === -1) {
+      return { firstPart: safeAddress, secondPart: "" };
+    }
+
+    const firstPart = safeAddress.substring(0, firstCommaIndex).trim();
+    const secondPart = safeAddress.substring(firstCommaIndex + 1).trim();
 
     return { firstPart, secondPart };
   };
@@ -54,13 +61,25 @@ const FindingDriver = (props) => {
     }).format(Math.ceil(number));
   };
 
+  const closePanelsSafely = () => {
+    if (typeof props.setVehicleFound === "function") {
+      props.setVehicleFound(false);
+    }
+
+    if (typeof props.setConfirmRidePanel === "function") {
+      props.setConfirmRidePanel(false);
+    }
+  };
+
   const cancelRideRequest = async () => {
+    if (cancelling) return;
+
     try {
+      setCancelling(true);
       const token = localStorage.getItem("token");
 
-      if (!props.ride?._id) {
-        props.setVehicleFound(false);
-        props.setConfirmRidePanel(false);
+      if (!props?.ride?._id) {
+        closePanelsSafely();
         return;
       }
 
@@ -74,29 +93,36 @@ const FindingDriver = (props) => {
         }
       );
 
-      props.setVehicleFound(false);
-      props.setConfirmRidePanel(false);
+      closePanelsSafely();
     } catch (error) {
       console.error("Error cancelando solicitud:", error);
       alert(
         error?.response?.data?.message ||
+          error?.message ||
           "No se pudo cancelar la solicitud."
       );
+    } finally {
+      setCancelling(false);
     }
   };
 
-  const { firstPart, secondPart } = formatAddress(props.pickup);
+  const { firstPart, secondPart } = formatAddress(props?.pickup);
   const { firstPart: destFirstPart, secondPart: destSecondPart } =
-    formatAddress(props.destination);
+    formatAddress(props?.destination);
 
-  const selectedVehicleKey = VEHICLE_META[props.selectedVehicle]
+  const selectedVehicleKey = VEHICLE_META[props?.selectedVehicle]
     ? props.selectedVehicle
     : "car";
 
   const selectedVehicle = VEHICLE_META[selectedVehicleKey];
+
   const vehicleImg = `${import.meta.env.BASE_URL}vehicles/${selectedVehicle.image}.png`;
 
-  const displayedFare = props.ride?.fare ?? props.selectedPrice;
+  const displayedFare =
+    props?.ride?.offeredFare ??
+    props?.ride?.fare ??
+    props?.selectedPrice ??
+    0;
 
   return (
     <div className="bg-white rounded-t-[24px]">
@@ -155,6 +181,7 @@ const FindingDriver = (props) => {
           <h3 className="text-xl font-bold text-gray-900">
             {selectedVehicle.label}
           </h3>
+
           <p className="text-sm text-gray-600 mt-1 text-center">
             {selectedVehicle.description}
           </p>
@@ -171,8 +198,9 @@ const FindingDriver = (props) => {
           <div className="flex items-center justify-center w-[20%]">
             <i className="ri-map-pin-range-fill ri-xl"></i>
           </div>
+
           <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">{firstPart}</h2>
+            <h2 className="text-xl font-semibold">{firstPart || "Origen"}</h2>
             <h4 className="text-sm pr-2 text-gray-600">
               {secondPart.length > 60
                 ? `${secondPart.substring(0, 60)}...`
@@ -189,8 +217,11 @@ const FindingDriver = (props) => {
           <div className="flex items-center justify-center w-[20%]">
             <i className="ri-square-fill"></i>
           </div>
+
           <div className="flex flex-col justify-start items-start w-full mr-5">
-            <h2 className="text-xl font-semibold">{destFirstPart}</h2>
+            <h2 className="text-xl font-semibold">
+              {destFirstPart || "Destino"}
+            </h2>
             <h4 className="text-sm pr-2 text-gray-600">
               {destSecondPart.length > 60
                 ? `${destSecondPart.substring(0, 60)}...`
@@ -207,6 +238,7 @@ const FindingDriver = (props) => {
           <div className="flex items-center justify-center w-[20%]">
             <i className="ri-truck-fill ri-xl"></i>
           </div>
+
           <div className="flex flex-col justify-start items-start w-full mr-5">
             <h2 className="text-xl font-semibold">{selectedVehicle.label}</h2>
             <h4 className="text-sm text-gray-600">
@@ -223,6 +255,7 @@ const FindingDriver = (props) => {
           <div className="flex items-center justify-center w-[20%]">
             <i className="ri-bank-card-2-fill ri-xl"></i>
           </div>
+
           <div className="flex flex-col justify-start items-start w-full mr-5">
             <h2 className="text-xl font-semibold">
               {formatCOP(displayedFare)}
@@ -240,12 +273,13 @@ const FindingDriver = (props) => {
         <button
           type="button"
           onClick={cancelRideRequest}
-          className="w-full py-3 text-white text-lg font-semibold rounded-2xl"
+          disabled={cancelling}
+          className="w-full py-3 text-white text-lg font-semibold rounded-2xl disabled:opacity-60"
           style={{
             background: "linear-gradient(to right, #cb2d3e, #ef473a)",
           }}
         >
-          Cancelar solicitud
+          {cancelling ? "Cancelando..." : "Cancelar solicitud"}
         </button>
       </div>
     </div>
