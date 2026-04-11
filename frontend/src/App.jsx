@@ -25,6 +25,12 @@ import EnterpriseDeliveryStats from "./pages/EnterpriseDeliveryStats";
 import EnterpriseDeliveryHistory from "./pages/EnterpriseDeliveryHistory";
 import EnterpriseAccess from "./pages/EnterpriseAccess";
 
+// Nuevas páginas del conductor
+import CaptainGoodsOffers from "./pages/CaptainGoodsOffers";
+import CaptainSpaceOffers from "./pages/CaptainSpaceOffers";
+import CaptainSeatOffers from "./pages/CaptainSeatOffers";
+import CaptainReceivedBids from "./pages/CaptainReceivedBids";
+
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
 
@@ -101,6 +107,42 @@ const App = () => {
           element={
             <CaptainProtectedWrapper>
               <CaptainHome />
+            </CaptainProtectedWrapper>
+          }
+        />
+
+        <Route
+          path="/captain/offers/goods"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainGoodsOffers />
+            </CaptainProtectedWrapper>
+          }
+        />
+
+        <Route
+          path="/captain/offers/space"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainSpaceOffers />
+            </CaptainProtectedWrapper>
+          }
+        />
+
+        <Route
+          path="/captain/offers/seats"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainSeatOffers />
+            </CaptainProtectedWrapper>
+          }
+        />
+
+        <Route
+          path="/captain/offers/received"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainReceivedBids />
             </CaptainProtectedWrapper>
           }
         />
