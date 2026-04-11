@@ -11,14 +11,15 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { pickup, destination, vehicle } = req.body;
+    const { pickup, destination, vehicle, offeredFare } = req.body;
 
     try {
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
             destination,
-            vehicle
+            vehicle,
+            offeredFare,
         });
 
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
