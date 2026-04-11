@@ -95,7 +95,22 @@ const getFare = async (pickup, destination) => {
     };
 };
 
-const createRide = async ({ user, pickup, destination, vehicle }) => {
+const getMinOfferByVehicle = (vehicle, suggestedFare) => {
+    const safeSuggested = Number(suggestedFare) || 0;
+
+    const factors = {
+        motorcycle: 0.85,
+        car: 0.85,
+        light_cargo: 0.85,
+        van: 0.9,
+        truck: 0.9,
+    };
+
+    const factor = factors[vehicle] ?? 0.85;
+    return Math.max(1, Math.ceil(safeSuggested * factor));
+};
+
+const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) => {
     if (!user || !pickup || !destination || !vehicle) {
         throw new Error("All fields are required");
     }
@@ -112,6 +127,25 @@ const createRide = async ({ user, pickup, destination, vehicle }) => {
         throw new Error("Invalid vehicle type");
     }
 
+    const suggestedFare = Number(fares[vehicle]) || 0;
+    const minOffer = getMinOfferByVehicle(vehicle, suggestedFare);
+
+    let finalFare = suggestedFare;
+
+    if (offeredFare !== undefined && offeredFare !== null && offeredFare !== "") {
+        const parsedOffer = Number(offeredFare);
+
+        if (!Number.isFinite(parsedOffer) || parsedOffer <= 0) {
+            throw new Error("Invalid offered fare");
+        }
+
+        if (parsedOffer < minOffer) {
+            throw new Error(`La oferta mínima para este servicio es ${minOffer}`);
+        }
+
+        finalFare = Math.ceil(parsedOffer);
+    }
+
     const distanceTime = await mapService.getDistance(pickup, destination);
     const meters = distanceTime?.distance?.value;
     const seconds = distanceTime?.duration?.value;
@@ -121,7 +155,7 @@ const createRide = async ({ user, pickup, destination, vehicle }) => {
         pickup,
         destination,
         otp: getOtp(6),
-        fare: fares[vehicle],
+        fare: finalFare,
         vehicleType: vehicle,
         distance: Number.isFinite(meters) ? meters : null,
         duration: Number.isFinite(seconds) ? seconds : null,
