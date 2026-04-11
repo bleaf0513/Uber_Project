@@ -37,6 +37,9 @@ function Home() {
   const [offeredPrice, setOfferedPrice] = useState(null);
   const [ride, setRide] = useState(null);
 
+  // Aquí luego pondremos los conductores activos reales por socket
+  const [nearbyDrivers] = useState([]);
+
   const panelRef = useRef(null);
   const titleRef = useRef(null);
   const searchRef = useRef(null);
@@ -506,7 +509,11 @@ function Home() {
           setSuggestions([]);
         }}
       >
-        <LiveTracking />
+        <LiveTracking
+          pickup={pickup}
+          nearbyDrivers={nearbyDrivers}
+          showPickupRadar={vehicleFound || driverSelected}
+        />
       </div>
 
       <div
@@ -613,7 +620,7 @@ function Home() {
 
       <div
         ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-lg bg-white overflow-hidden"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[38%] shadow-2xl"
       >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
@@ -629,7 +636,7 @@ function Home() {
 
       <div
         ref={driverSelectedRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-lg bg-white overflow-hidden"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto h-[38%] shadow-2xl"
       >
         <DriverSelected ride={ride} />
       </div>
