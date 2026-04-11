@@ -322,6 +322,19 @@ router.post(
     offerController.respondToBid
 );
 
+router.post(
+    "/bid/customer-respond",
+    authMiddleware.authUser,
+    body("bidId")
+        .isMongoId()
+        .withMessage("Invalid bid id"),
+    body("action")
+        .isString()
+        .isIn(["accepted", "rejected"])
+        .withMessage("Invalid action"),
+    offerController.customerRespondToBid
+);
+
 router.get(
     "/bid/my-received",
     authMiddleware.authCaptain,
