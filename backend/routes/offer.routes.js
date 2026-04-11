@@ -88,10 +88,11 @@ router.post(
 
 router.get(
     "/goods/list",
-    authMiddleware.authUser,
     query("origin").optional().isString(),
     query("destination").optional().isString(),
-    query("status").optional().isIn(["active", "paused", "sold_out", "cancelled", "completed"]),
+    query("status")
+        .optional()
+        .isIn(["active", "paused", "sold_out", "cancelled", "completed"]),
     offerController.listGoodsOffers
 );
 
@@ -178,10 +179,11 @@ router.post(
 
 router.get(
     "/space/list",
-    authMiddleware.authUser,
     query("origin").optional().isString(),
     query("destination").optional().isString(),
-    query("status").optional().isIn(["active", "paused", "reserved", "cancelled", "completed"]),
+    query("status")
+        .optional()
+        .isIn(["active", "paused", "reserved", "cancelled", "completed"]),
     offerController.listSpaceOffers
 );
 
@@ -243,10 +245,11 @@ router.post(
 
 router.get(
     "/seat/list",
-    authMiddleware.authUser,
     query("origin").optional().isString(),
     query("destination").optional().isString(),
-    query("status").optional().isIn(["active", "paused", "full", "cancelled", "completed"]),
+    query("status")
+        .optional()
+        .isIn(["active", "paused", "full", "cancelled", "completed"]),
     offerController.listSeatOffers
 );
 
