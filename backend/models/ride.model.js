@@ -19,7 +19,7 @@ const rideSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["pending", "accepted", "rejected", "completed"],
+            enum: ["pending", "accepted", "rejected", "ongoing", "completed"],
             default: "pending",
         },
         captain: {
@@ -37,6 +37,16 @@ const rideSchema = new mongoose.Schema(
                 "van",
                 "truck",
             ],
+        },
+        suggestedFare: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        offeredFare: {
+            type: Number,
+            required: true,
+            min: 0,
         },
         fare: {
             type: Number,
