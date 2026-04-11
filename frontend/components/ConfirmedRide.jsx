@@ -42,6 +42,8 @@ const OFFER_STEP_BY_VEHICLE = {
 };
 
 const ConfirmedRide = (props) => {
+  const [submitting, setSubmitting] = React.useState(false);
+
   const formatAddress = (address = "") => {
     const firstCommaIndex = address.indexOf(",");
 
@@ -115,10 +117,17 @@ const ConfirmedRide = (props) => {
     applyOffer(offerPrice);
   };
 
-  const handleConfirm = () => {
-    props.setVehicleFound(true);
-    props.setConfirmRidePanel(false);
-    props.createRide(offerPrice);
+  const handleConfirm = async () => {
+    try {
+      setSubmitting(true);
+      await props.createRide(offerPrice);
+      props.setConfirmRidePanel(false);
+      props.setVehicleFound(true);
+    } catch (error) {
+      console.error("Error confirmando servicio:", error);
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const isOfferBelowMin = offerPrice < minOffer;
@@ -250,7 +259,8 @@ const ConfirmedRide = (props) => {
                 <button
                   type="button"
                   onClick={handleDecrease}
-                  className="w-12 h-12 rounded-2xl bg-gray-200 text-xl font-bold"
+                  disabled={submitting}
+                  className="w-12 h-12 rounded-2xl bg-gray-200 text-xl font-bold disabled:opacity-50"
                 >
                   -
                 </button>
@@ -260,14 +270,16 @@ const ConfirmedRide = (props) => {
                   onChange={handleChangeOffer}
                   onBlur={handleBlurOffer}
                   inputMode="numeric"
-                  className="flex-1 h-12 rounded-2xl border border-gray-200 px-4 text-center text-lg font-semibold outline-none focus:ring-2 focus:ring-black"
+                  disabled={submitting}
+                  className="flex-1 h-12 rounded-2xl border border-gray-200 px-4 text-center text-lg font-semibold outline-none focus:ring-2 focus:ring-black disabled:opacity-50"
                   placeholder="Ingresa tu oferta"
                 />
 
                 <button
                   type="button"
                   onClick={handleIncrease}
-                  className="w-12 h-12 rounded-2xl bg-gray-200 text-xl font-bold"
+                  disabled={submitting}
+                  className="w-12 h-12 rounded-2xl bg-gray-200 text-xl font-bold disabled:opacity-50"
                 >
                   +
                 </button>
@@ -277,21 +289,24 @@ const ConfirmedRide = (props) => {
                 <button
                   type="button"
                   onClick={() => applyOffer(offerPrice + step)}
-                  className="px-3 py-2 rounded-2xl bg-gray-100 text-sm font-semibold"
+                  disabled={submitting}
+                  className="px-3 py-2 rounded-2xl bg-gray-100 text-sm font-semibold disabled:opacity-50"
                 >
                   +{formatCOP(step)}
                 </button>
                 <button
                   type="button"
                   onClick={() => applyOffer(offerPrice + step * 2)}
-                  className="px-3 py-2 rounded-2xl bg-gray-100 text-sm font-semibold"
+                  disabled={submitting}
+                  className="px-3 py-2 rounded-2xl bg-gray-100 text-sm font-semibold disabled:opacity-50"
                 >
                   +{formatCOP(step * 2)}
                 </button>
                 <button
                   type="button"
                   onClick={() => applyOffer(suggestedPrice)}
-                  className="px-3 py-2 rounded-2xl bg-black text-white text-sm font-semibold"
+                  disabled={submitting}
+                  className="px-3 py-2 rounded-2xl bg-black text-white text-sm font-semibold disabled:opacity-50"
                 >
                   Usar sugerida
                 </button>
@@ -314,10 +329,10 @@ const ConfirmedRide = (props) => {
       <div className="flex items-center justify-center mt-4 px-4">
         <button
           onClick={handleConfirm}
-          disabled={isOfferBelowMin || !offerPrice}
+          disabled={isOfferBelowMin || !offerPrice || submitting}
           className="bg-black text-white text-xl rounded-2xl mb-5 py-3 px-6 w-full max-w-sm disabled:opacity-50"
         >
-          Confirmar servicio
+          {submitting ? "Enviando solicitud..." : "Confirmar servicio"}
         </button>
       </div>
     </div>
