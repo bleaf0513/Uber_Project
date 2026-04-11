@@ -33,7 +33,9 @@ module.exports.createGoodsOffer = async (req, res) => {
         return res.status(201).json(offer);
     } catch (error) {
         console.error('Error creating goods offer:', error);
-        return res.status(500).json({ message: 'Error creating goods offer.' });
+        return res.status(500).json({
+            message: error?.message || 'Error creating goods offer.',
+        });
     }
 };
 
@@ -58,7 +60,9 @@ module.exports.listGoodsOffers = async (req, res) => {
         return res.status(200).json({ offers });
     } catch (error) {
         console.error('Error listing goods offers:', error);
-        return res.status(500).json({ message: 'Error listing goods offers.' });
+        return res.status(500).json({
+            message: error?.message || 'Error listing goods offers.',
+        });
     }
 };
 
@@ -91,7 +95,9 @@ module.exports.createSpaceOffer = async (req, res) => {
         return res.status(201).json(offer);
     } catch (error) {
         console.error('Error creating space offer:', error);
-        return res.status(500).json({ message: 'Error creating space offer.' });
+        return res.status(500).json({
+            message: error?.message || 'Error creating space offer.',
+        });
     }
 };
 
@@ -116,7 +122,9 @@ module.exports.listSpaceOffers = async (req, res) => {
         return res.status(200).json({ offers });
     } catch (error) {
         console.error('Error listing space offers:', error);
-        return res.status(500).json({ message: 'Error listing space offers.' });
+        return res.status(500).json({
+            message: error?.message || 'Error listing space offers.',
+        });
     }
 };
 
@@ -148,7 +156,9 @@ module.exports.createSeatOffer = async (req, res) => {
         return res.status(201).json(offer);
     } catch (error) {
         console.error('Error creating seat offer:', error);
-        return res.status(500).json({ message: 'Error creating seat offer.' });
+        return res.status(500).json({
+            message: error?.message || 'Error creating seat offer.',
+        });
     }
 };
 
@@ -173,7 +183,9 @@ module.exports.listSeatOffers = async (req, res) => {
         return res.status(200).json({ offers });
     } catch (error) {
         console.error('Error listing seat offers:', error);
-        return res.status(500).json({ message: 'Error listing seat offers.' });
+        return res.status(500).json({
+            message: error?.message || 'Error listing seat offers.',
+        });
     }
 };
 
@@ -184,10 +196,17 @@ module.exports.createBid = async (req, res) => {
             return res.status(400).json({ errors: errors.array() });
         }
 
-        const { listingType, listingId, requestedQuantity, requestedUnit, offeredPrice, message } = req.body;
+        const {
+            listingType,
+            listingId,
+            requestedQuantity,
+            requestedUnit,
+            offeredPrice,
+            message,
+        } = req.body;
 
         let listing = null;
-        let bidPayload = {
+        const bidPayload = {
             listingType,
             customer: req.user._id,
             requestedQuantity,
@@ -228,7 +247,9 @@ module.exports.createBid = async (req, res) => {
         return res.status(201).json(bid);
     } catch (error) {
         console.error('Error creating bid:', error);
-        return res.status(500).json({ message: 'Error creating bid.' });
+        return res.status(500).json({
+            message: error?.message || 'Error creating bid.',
+        });
     }
 };
 
@@ -247,7 +268,9 @@ module.exports.respondToBid = async (req, res) => {
         }
 
         if (String(bid.driver) !== String(req.captain._id)) {
-            return res.status(403).json({ message: 'Not authorized to respond to this bid.' });
+            return res.status(403).json({
+                message: 'Not authorized to respond to this bid.',
+            });
         }
 
         if (action === 'accepted') {
@@ -265,7 +288,52 @@ module.exports.respondToBid = async (req, res) => {
         return res.status(200).json(bid);
     } catch (error) {
         console.error('Error responding to bid:', error);
-        return res.status(500).json({ message: 'Error responding to bid.' });
+        return res.status(500).json({
+            message: error?.message || 'Error responding to bid.',
+        });
+    }
+};
+
+module.exports.customerRespondToBid = async (req, res) => {
+    try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+            return res.status(400).json({ errors: errors.array() });
+        }
+
+        const { bidId, action } = req.body;
+
+        const bid = await OfferBid.findById(bidId);
+        if (!bid) {
+            return res.status(404).json({ message: 'Bid not found.' });
+        }
+
+        if (String(bid.customer) !== String(req.user._id)) {
+            return res.status(403).json({
+                message: 'Not authorized to respond to this counteroffer.',
+            });
+        }
+
+        if (bid.status !== 'countered') {
+            return res.status(400).json({
+                message: 'This bid does not have an active counteroffer.',
+            });
+        }
+
+        if (action === 'accepted') {
+            bid.status = 'accepted';
+        } else if (action === 'rejected') {
+            bid.status = 'rejected';
+        }
+
+        await bid.save();
+
+        return res.status(200).json(bid);
+    } catch (error) {
+        console.error('Error responding to counteroffer:', error);
+        return res.status(500).json({
+            message: error?.message || 'Error responding to counteroffer.',
+        });
     }
 };
 
@@ -281,7 +349,9 @@ module.exports.getMyReceivedBids = async (req, res) => {
         return res.status(200).json({ bids });
     } catch (error) {
         console.error('Error fetching received bids:', error);
-        return res.status(500).json({ message: 'Error fetching received bids.' });
+        return res.status(500).json({
+            message: error?.message || 'Error fetching received bids.',
+        });
     }
 };
 
@@ -297,6 +367,8 @@ module.exports.getMySentBids = async (req, res) => {
         return res.status(200).json({ bids });
     } catch (error) {
         console.error('Error fetching sent bids:', error);
-        return res.status(500).json({ message: 'Error fetching sent bids.' });
+        return res.status(500).json({
+            message: error?.message || 'Error fetching sent bids.',
+        });
     }
 };
