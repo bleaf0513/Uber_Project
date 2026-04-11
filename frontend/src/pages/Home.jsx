@@ -276,7 +276,7 @@ function Home() {
 
     if (!selectedVehicle) {
       console.error("No vehicle selected");
-      return;
+      throw new Error("No vehicle selected");
     }
 
     try {
@@ -298,6 +298,8 @@ function Home() {
 
       setOfferedPrice(finalOfferedFare);
       setRide(response.data);
+
+      return response.data;
     } catch (error) {
       console.error("Error creating ride:", error);
       alert(
@@ -306,6 +308,7 @@ function Home() {
       );
       setVehicleFound(false);
       setConfirmRidePanel(true);
+      throw error;
     }
   };
 
