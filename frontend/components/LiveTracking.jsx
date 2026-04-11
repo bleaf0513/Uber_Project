@@ -17,7 +17,7 @@ const LiveTracking = () => {
   const [currentPosition, setCurrentPosition] = useState(DEFAULT_CENTER);
   const [error, setError] = useState(null);
   const [isGeolocationAvailable, setIsGeolocationAvailable] = useState(true);
-  const [isLoadingLocation, setIsLoadingLocation] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const [map, setMap] = useState(null);
   const advancedMarkerRef = useRef(null);
 
@@ -31,9 +31,9 @@ const LiveTracking = () => {
       gestureHandling: "greedy",
     };
 
-    const rawMapId = import.meta.env.VITE_GOOGLE_MAP_ID?.trim();
-    if (rawMapId) {
-      options.mapId = rawMapId;
+    const mapId = import.meta.env.VITE_GOOGLE_MAP_ID?.trim();
+    if (mapId) {
+      options.mapId = mapId;
     }
 
     return options;
@@ -43,7 +43,7 @@ const LiveTracking = () => {
     if (!navigator.geolocation) {
       setError("Geolocation is not supported by your browser");
       setIsGeolocationAvailable(false);
-      setIsLoadingLocation(false);
+      setIsLoading(false);
       return;
     }
 
@@ -54,20 +54,24 @@ const LiveTracking = () => {
         lng: longitude,
       });
       setError(null);
-      setIsLoadingLocation(false);
+      setIsLoading(false);
     };
 
     const handleError = (err) => {
       console.error("Geolocation error:", err);
       setError(err.message || "No se pudo obtener la ubicación");
-      setIsLoadingLocation(false);
+      setIsLoading(false);
     };
 
-    navigator.geolocation.getCurrentPosition(handlePositionUpdate, handleError, {
-      enableHighAccuracy: true,
-      timeout: 10000,
-      maximumAge: 10000,
-    });
+    navigator.geolocation.getCurrentPosition(
+      handlePositionUpdate,
+      handleError,
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 10000,
+      }
+    );
 
     const watchId = navigator.geolocation.watchPosition(
       handlePositionUpdate,
@@ -91,9 +95,12 @@ const LiveTracking = () => {
 
     let cancelled = false;
 
-    const placeMarker = async () => {
+    (async () => {
       try {
-        const { AdvancedMarkerElement } = await google.maps.importLibrary("marker");
+        const { AdvancedMarkerElement } = await google.maps.importLibrary(
+          "marker"
+        );
+
         if (cancelled) return;
 
         if (!advancedMarkerRef.current) {
@@ -108,9 +115,7 @@ const LiveTracking = () => {
       } catch (e) {
         console.error("Advanced marker error:", e);
       }
-    };
-
-    placeMarker();
+    })();
 
     return () => {
       cancelled = true;
@@ -147,13 +152,13 @@ const LiveTracking = () => {
         </div>
       )}
 
-      {(isLoadingLocation || error || !isGeolocationAvailable) && (
+      {(isLoading || error || !isGeolocationAvailable) && (
         <div className="absolute inset-x-4 top-4 z-10 rounded-2xl bg-white/95 shadow-lg px-4 py-3 text-sm text-gray-700">
-          {isLoadingLocation && <span>Obteniendo tu ubicación...</span>}
-          {!isLoadingLocation && error && (
+          {isLoading && <span>Obteniendo tu ubicación...</span>}
+          {!isLoading && error && (
             <span>Ubicación no disponible. Mostrando mapa general.</span>
           )}
-          {!isLoadingLocation && !isGeolocationAvailable && (
+          {!isLoading && !isGeolocationAvailable && (
             <span>Tu navegador no soporta geolocalización.</span>
           )}
         </div>
