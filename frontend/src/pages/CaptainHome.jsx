@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useContext, useRef } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
@@ -15,6 +15,7 @@ import LiveTracking from "../../components/LiveTracking";
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
   const confirmRidePickupRef = useRef(null);
+  const navigate = useNavigate();
 
   const { captain } = useContext(CaptainDataContext);
   const { socket } = useContext(SocketContext);
@@ -103,6 +104,22 @@ const CaptainHome = () => {
     }
   };
 
+  const goToGoodsOffer = () => {
+    navigate("/captain/offers/goods");
+  };
+
+  const goToSpaceOffer = () => {
+    navigate("/captain/offers/space");
+  };
+
+  const goToSeatOffer = () => {
+    navigate("/captain/offers/seats");
+  };
+
+  const goToReceivedBids = () => {
+    navigate("/captain/offers/received");
+  };
+
   useGSAP(
     () => {
       if (ridePopup) {
@@ -161,7 +178,7 @@ const CaptainHome = () => {
         <LiveTracking />
       </div>
 
-      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl">
+      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[52%]">
         <div className="pt-2">
           <div className="flex justify-center py-2">
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
@@ -174,6 +191,90 @@ const CaptainHome = () => {
           </div>
 
           <CaptainDetails />
+
+          <div className="px-4 pb-5">
+            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">
+                    Oportunidades en ruta
+                  </h3>
+                  <p className="text-sm text-gray-600">
+                    Publica mercancía, espacio libre o cupos disponibles.
+                  </p>
+                </div>
+                <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center">
+                  <i className="ri-road-map-line text-2xl text-violet-700"></i>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={goToGoodsOffer}
+                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-orange-100 flex items-center justify-center mb-2">
+                    <i className="ri-shopping-basket-2-line text-xl text-orange-600"></i>
+                  </div>
+                  <h4 className="text-base font-bold text-gray-900">
+                    Publicar mercancía
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Vende productos que llevas en ruta.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={goToSpaceOffer}
+                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-blue-100 flex items-center justify-center mb-2">
+                    <i className="ri-inbox-archive-line text-xl text-blue-600"></i>
+                  </div>
+                  <h4 className="text-base font-bold text-gray-900">
+                    Publicar espacio
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Ofrece capacidad libre para carga.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={goToSeatOffer}
+                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-emerald-100 flex items-center justify-center mb-2">
+                    <i className="ri-user-3-line text-xl text-emerald-600"></i>
+                  </div>
+                  <h4 className="text-base font-bold text-gray-900">
+                    Publicar cupos
+                  </h4>
+                  <p className="text-xs text-gray-600 mt-1">
+                    Comparte puestos para pasajeros.
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={goToReceivedBids}
+                  className="rounded-2xl bg-black p-4 text-left shadow-sm"
+                >
+                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center mb-2">
+                    <i className="ri-mail-open-line text-xl text-white"></i>
+                  </div>
+                  <h4 className="text-base font-bold text-white">
+                    Ofertas recibidas
+                  </h4>
+                  <p className="text-xs text-white/80 mt-1">
+                    Revisa, acepta o contraoferta.
+                  </p>
+                </button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div
