@@ -31,8 +31,9 @@ import CaptainSpaceOffers from "./pages/CaptainSpaceOffers";
 import CaptainSeatOffers from "./pages/CaptainSeatOffers";
 import CaptainReceivedBids from "./pages/CaptainReceivedBids";
 
-// Nueva página del usuario
+// Nuevas páginas del usuario
 import AvailableOffers from "./pages/AvailableOffers";
+import UserSentBids from "./pages/UserSentBids";
 
 const App = () => {
   const [isMobileView, setIsMobileView] = useState(false);
@@ -164,6 +165,15 @@ const App = () => {
           element={
             <UserProtectedWrapper>
               <AvailableOffers />
+            </UserProtectedWrapper>
+          }
+        />
+
+        <Route
+          path="/my-sent-bids"
+          element={
+            <UserProtectedWrapper>
+              <UserSentBids />
             </UserProtectedWrapper>
           }
         />
