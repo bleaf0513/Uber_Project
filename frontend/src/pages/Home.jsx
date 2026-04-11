@@ -351,6 +351,10 @@ function Home() {
     }
   };
 
+  const goToAvailableOffers = () => {
+    navigate("/available-offers");
+  };
+
   useGSAP(
     () => {
       if (vehiclePanel) {
@@ -520,20 +524,22 @@ function Home() {
         ref={searchRef}
         className="absolute flex flex-col justify-end top-0 h-screen w-full rounded-t-lg"
       >
-        <div className="h-[32%] bg-white p-5 flex flex-col justify-around z-50">
-          <h4 ref={titleRef} className="text-3xl font-semibold ml-1">
-            Buscar un servicio
-          </h4>
+        <div className="h-[40%] bg-white p-5 flex flex-col justify-around z-50">
+          <div>
+            <h4 ref={titleRef} className="text-3xl font-semibold ml-1">
+              Buscar un servicio
+            </h4>
 
-          <i
-            onClick={() => {
-              setPanelOpen(false);
-            }}
-            ref={arrowRef}
-            className="ri-arrow-down-s-line text-2xl hidden"
-          ></i>
+            <i
+              onClick={() => {
+                setPanelOpen(false);
+              }}
+              ref={arrowRef}
+              className="ri-arrow-down-s-line text-2xl hidden"
+            ></i>
+          </div>
 
-          <form className="relative" onSubmit={submitHandler}>
+          <form className="relative mt-2" onSubmit={submitHandler}>
             <div className="line absolute self-center h-[51%] w-1 bottom-1/4 ml-8 bg-black rounded-3xl">
               <div className="circle absolute h-3 w-3 bg-black rounded-full top-0 ml-[-4px]"></div>
               <div className="circle absolute h-3 w-3 bg-black rounded-full bottom-0 ml-[-4px]"></div>
@@ -569,6 +575,29 @@ function Home() {
               placeholder="Ingresa tu destino"
             />
           </form>
+
+          <div className="mt-3">
+            <button
+              type="button"
+              onClick={goToAvailableOffers}
+              className="w-full rounded-[24px] bg-black text-white px-4 py-4 flex items-center justify-between shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                  <i className="ri-fire-line text-xl"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-base font-bold">Ofertas disponibles</p>
+                  <p className="text-xs text-white/80">
+                    Mercancía, espacio y cupos en ruta
+                  </p>
+                </div>
+              </div>
+
+              <i className="ri-arrow-right-line text-xl"></i>
+            </button>
+          </div>
         </div>
 
         <div
