@@ -155,6 +155,8 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         pickup,
         destination,
         otp: getOtp(6),
+        suggestedFare,
+        offeredFare: finalFare,
         fare: finalFare,
         vehicleType: vehicle,
         distance: Number.isFinite(meters) ? meters : null,
