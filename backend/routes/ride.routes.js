@@ -22,6 +22,10 @@ router.post(
         .notEmpty()
         .isIn(['motorcycle', 'car', 'light_cargo', 'van', 'truck'])
         .withMessage('Invalid Vehicle Type'),
+    body('offeredFare')
+        .optional()
+        .isNumeric()
+        .withMessage('Invalid offered fare'),
     rideController.createRide
 );
 
