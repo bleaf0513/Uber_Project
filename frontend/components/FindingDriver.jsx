@@ -1,4 +1,6 @@
 import React from "react";
+import axios from "axios";
+import { getApiBaseUrl } from "../src/apiBase";
 
 const VEHICLE_META = {
   motorcycle: {
@@ -50,6 +52,37 @@ const FindingDriver = (props) => {
       currency: "COP",
       maximumFractionDigits: 0,
     }).format(Math.ceil(number));
+  };
+
+  const cancelRideRequest = async () => {
+    try {
+      const token = localStorage.getItem("token");
+
+      if (!props.ride?._id) {
+        props.setVehicleFound(false);
+        props.setConfirmRidePanel(false);
+        return;
+      }
+
+      await axios.post(
+        `${getApiBaseUrl()}/rides/cancel`,
+        { rideId: props.ride._id },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      props.setVehicleFound(false);
+      props.setConfirmRidePanel(false);
+    } catch (error) {
+      console.error("Error cancelando solicitud:", error);
+      alert(
+        error?.response?.data?.message ||
+          "No se pudo cancelar la solicitud."
+      );
+    }
   };
 
   const { firstPart, secondPart } = formatAddress(props.pickup);
@@ -204,10 +237,7 @@ const FindingDriver = (props) => {
       <div className="px-5 pt-2 pb-6">
         <button
           type="button"
-          onClick={() => {
-            props.setVehicleFound(false);
-            props.setConfirmRidePanel(false);
-          }}
+          onClick={cancelRideRequest}
           className="w-full py-3 text-white text-lg font-semibold rounded-2xl"
           style={{
             background: "linear-gradient(to right, #cb2d3e, #ef473a)",
