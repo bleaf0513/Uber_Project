@@ -96,6 +96,8 @@ const FindingDriver = (props) => {
   const selectedVehicle = VEHICLE_META[selectedVehicleKey];
   const vehicleImg = `${import.meta.env.BASE_URL}vehicles/${selectedVehicle.image}.png`;
 
+  const displayedFare = props.ride?.fare ?? props.selectedPrice;
+
   return (
     <div className="bg-white rounded-t-[24px]">
       <div className="flex flex-col justify-center items-center py-4 px-4">
@@ -223,7 +225,7 @@ const FindingDriver = (props) => {
           </div>
           <div className="flex flex-col justify-start items-start w-full mr-5">
             <h2 className="text-xl font-semibold">
-              {formatCOP(props.selectedPrice)}
+              {formatCOP(displayedFare)}
             </h2>
             <h4 className="text-sm text-gray-600">Pago contra servicio</h4>
             <div
