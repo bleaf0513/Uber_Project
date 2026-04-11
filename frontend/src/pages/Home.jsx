@@ -34,6 +34,7 @@ function Home() {
   const [pricingError, setPricingError] = useState(null);
   const [selectedVehicle, setSelectedVehicle] = useState(null);
   const [selectedPrice, setSelectedPrice] = useState(null);
+  const [offeredPrice, setOfferedPrice] = useState(null);
   const [ride, setRide] = useState(null);
 
   const panelRef = useRef(null);
@@ -185,6 +186,7 @@ function Home() {
     setPricingError(null);
     setSelectedVehicle(null);
     setSelectedPrice(null);
+    setOfferedPrice(null);
     setRide(null);
   }, [pickup, destination]);
 
@@ -278,19 +280,23 @@ function Home() {
     }
 
     try {
+      const finalOfferedFare =
+        Number(offeredFare) || Number(selectedPrice) || 0;
+
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/create`,
         {
           pickup,
           destination,
           vehicle: selectedVehicle,
-          offeredFare,
+          offeredFare: finalOfferedFare,
         },
         {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
 
+      setOfferedPrice(finalOfferedFare);
       setRide(response.data);
     } catch (error) {
       console.error("Error creating ride:", error);
@@ -564,7 +570,7 @@ function Home() {
           setConfirmRidePanel={setConfirmRidePanel}
           setVehicleFound={setVehicleFound}
           vehicleFound={vehicleFound}
-          selectedPrice={selectedPrice}
+          selectedPrice={offeredPrice ?? selectedPrice}
           selectedVehicle={selectedVehicle}
           destination={destination}
           pickup={pickup}
