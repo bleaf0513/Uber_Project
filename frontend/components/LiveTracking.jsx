@@ -7,37 +7,23 @@ const containerStyle = {
   height: "100%",
 };
 
-const DEFAULT_CENTER = {
-  lat: 6.1686,
-  lng: -75.6114,
-};
-
 const LiveTracking = () => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
-  const [currentPosition, setCurrentPosition] = useState(DEFAULT_CENTER);
+  const [currentPosition, setCurrentPosition] = useState(null);
   const [error, setError] = useState(null);
   const [isGeolocationAvailable, setIsGeolocationAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
   const [map, setMap] = useState(null);
   const advancedMarkerRef = useRef(null);
 
-  const mapOptions = useMemo(() => {
-    const options = {
+  const mapOptions = useMemo(
+    () => ({
       mapTypeControl: false,
       fullscreenControl: false,
-      streetViewControl: false,
-      zoomControl: true,
-      clickableIcons: false,
-      gestureHandling: "greedy",
-    };
-
-    const mapId = import.meta.env.VITE_GOOGLE_MAP_ID?.trim();
-    if (mapId) {
-      options.mapId = mapId;
-    }
-
-    return options;
-  }, []);
+      mapId: import.meta.env.VITE_GOOGLE_MAP_ID?.trim() || "DEMO_MAP_ID",
+    }),
+    []
+  );
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -53,14 +39,13 @@ const LiveTracking = () => {
         lat: latitude,
         lng: longitude,
       });
-      setError(null);
       setIsLoading(false);
     };
 
     const handleError = (err) => {
-      console.error("Geolocation error:", err);
-      setError(err.message || "No se pudo obtener la ubicación");
+      setError(err.message);
       setIsLoading(false);
+      console.error("Geolocation error:", err);
     };
 
     navigator.geolocation.getCurrentPosition(
@@ -68,8 +53,8 @@ const LiveTracking = () => {
       handleError,
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 10000,
+        timeout: 5000,
+        maximumAge: 0,
       }
     );
 
@@ -78,8 +63,8 @@ const LiveTracking = () => {
       handleError,
       {
         enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 10000,
+        timeout: 5000,
+        maximumAge: 0,
       }
     );
 
@@ -89,9 +74,7 @@ const LiveTracking = () => {
   }, []);
 
   useEffect(() => {
-    if (!map || !currentPosition || !mapsApiLoaded || !window.google?.maps) {
-      return;
-    }
+    if (!map || !currentPosition || !mapsApiLoaded) return;
 
     let cancelled = false;
 
@@ -100,7 +83,6 @@ const LiveTracking = () => {
         const { AdvancedMarkerElement } = await google.maps.importLibrary(
           "marker"
         );
-
         if (cancelled) return;
 
         if (!advancedMarkerRef.current) {
@@ -110,7 +92,6 @@ const LiveTracking = () => {
           });
         } else {
           advancedMarkerRef.current.position = currentPosition;
-          advancedMarkerRef.current.map = map;
         }
       } catch (e) {
         console.error("Advanced marker error:", e);
@@ -123,11 +104,6 @@ const LiveTracking = () => {
   }, [map, currentPosition, mapsApiLoaded]);
 
   useEffect(() => {
-    if (!map || !currentPosition) return;
-    map.panTo(currentPosition);
-  }, [map, currentPosition]);
-
-  useEffect(() => {
     return () => {
       if (advancedMarkerRef.current) {
         advancedMarkerRef.current.map = null;
@@ -136,34 +112,32 @@ const LiveTracking = () => {
     };
   }, []);
 
-  return (
-    <div className="relative w-full h-full bg-gray-100">
-      {mapsApiLoaded ? (
-        <GoogleMap
-          mapContainerStyle={containerStyle}
-          center={currentPosition}
-          zoom={15}
-          onLoad={(loadedMap) => setMap(loadedMap)}
-          options={mapOptions}
-        />
-      ) : (
-        <div className="w-full h-full flex items-center justify-center text-gray-600 bg-gray-100">
-          Cargando mapa...
-        </div>
-      )}
+  if (!isGeolocationAvailable) {
+    return <div>Error: Geolocation is not supported by your browser.</div>;
+  }
 
-      {(isLoading || error || !isGeolocationAvailable) && (
-        <div className="absolute inset-x-4 top-4 z-10 rounded-2xl bg-white/95 shadow-lg px-4 py-3 text-sm text-gray-700">
-          {isLoading && <span>Obteniendo tu ubicación...</span>}
-          {!isLoading && error && (
-            <span>Ubicación no disponible. Mostrando mapa general.</span>
-          )}
-          {!isLoading && !isGeolocationAvailable && (
-            <span>Tu navegador no soporta geolocalización.</span>
-          )}
-        </div>
-      )}
-    </div>
+  if (error) {
+    return (
+      <div>Error: {error}. Please ensure location permissions are granted.</div>
+    );
+  }
+
+  if (isLoading || !currentPosition) {
+    return <div>Loading map...</div>;
+  }
+
+  if (!mapsApiLoaded) {
+    return <div>Loading map...</div>;
+  }
+
+  return (
+    <GoogleMap
+      mapContainerStyle={containerStyle}
+      center={currentPosition}
+      zoom={15}
+      onLoad={setMap}
+      options={mapOptions}
+    />
   );
 };
 
