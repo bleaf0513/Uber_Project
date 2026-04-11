@@ -185,6 +185,7 @@ function Home() {
     setPricingError(null);
     setSelectedVehicle(null);
     setSelectedPrice(null);
+    setRide(null);
   }, [pickup, destination]);
 
   useEffect(() => {
@@ -268,7 +269,7 @@ function Home() {
     }
   };
 
-  const createRide = async () => {
+  const createRide = async (offeredFare) => {
     const token = localStorage.getItem("token");
 
     if (!selectedVehicle) {
@@ -276,17 +277,30 @@ function Home() {
       return;
     }
 
-    await axios.post(
-      `${getApiBaseUrl()}/rides/create`,
-      {
-        pickup,
-        destination,
-        vehicle: selectedVehicle,
-      },
-      {
-        headers: { Authorization: `Bearer ${token}` },
-      }
-    );
+    try {
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/create`,
+        {
+          pickup,
+          destination,
+          vehicle: selectedVehicle,
+          offeredFare,
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      setRide(response.data);
+    } catch (error) {
+      console.error("Error creating ride:", error);
+      alert(
+        error?.response?.data?.message ||
+          "No se pudo crear la solicitud."
+      );
+      setVehicleFound(false);
+      setConfirmRidePanel(true);
+    }
   };
 
   useGSAP(
@@ -554,6 +568,7 @@ function Home() {
           selectedVehicle={selectedVehicle}
           destination={destination}
           pickup={pickup}
+          ride={ride}
         />
       </div>
 
