@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 
@@ -36,6 +36,8 @@ const getDriverName = (driver) => {
 };
 
 const AvailableOffers = () => {
+  const navigate = useNavigate();
+
   const [activeTab, setActiveTab] = useState("goods");
   const [loading, setLoading] = useState(false);
   const [goodsOffers, setGoodsOffers] = useState([]);
@@ -48,7 +50,7 @@ const AvailableOffers = () => {
   const [bidSuccess, setBidSuccess] = useState("");
 
   const [selectedOffer, setSelectedOffer] = useState(null);
-  const [selectedMode, setSelectedMode] = useState("offer"); // buy | request | reserve | offer
+  const [selectedMode, setSelectedMode] = useState("offer");
 
   const [bidForm, setBidForm] = useState({
     listingType: "",
@@ -267,13 +269,23 @@ const AvailableOffers = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={fetchOffers}
-          className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center"
-        >
-          <i className="ri-refresh-line text-lg"></i>
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={() => navigate("/my-sent-bids")}
+            className="px-3 h-10 rounded-2xl bg-black text-white text-sm font-semibold"
+          >
+            Mis ofertas
+          </button>
+
+          <button
+            type="button"
+            onClick={fetchOffers}
+            className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center"
+          >
+            <i className="ri-refresh-line text-lg"></i>
+          </button>
+        </div>
       </div>
 
       <div className="sticky top-[73px] z-30 bg-gray-100 px-4 pt-4 pb-3">
