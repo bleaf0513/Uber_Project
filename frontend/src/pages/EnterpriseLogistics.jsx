@@ -280,6 +280,9 @@ const EnterpriseLogistics = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressSelected, setAddressSelected] = useState(false);
 
+  const [globalIncomingBanner, setGlobalIncomingBanner] = useState(null);
+  const [driverChatAlerts, setDriverChatAlerts] = useState({});
+
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
   const addressBoxRef = useRef(null);
@@ -288,6 +291,15 @@ const EnterpriseLogistics = () => {
   const deliveriesRequestSeqRef = useRef(0);
   const driversPollingBusyRef = useRef(false);
   const deliveriesPollingBusyRef = useRef(false);
+
+  const chatPollingBusyRef = useRef(false);
+  const knownLastDriverMessageByDeliveryRef = useRef({});
+  const chatMonitorInitializedRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const bannerTimerRef = useRef(null);
+  const originalTitleRef = useRef(
+    typeof document !== "undefined" ? document.title : "Panel de Logística"
+  );
 
   const [formData, setFormData] = useState({
     invoiceNumber: "",
@@ -441,6 +453,124 @@ const EnterpriseLogistics = () => {
     return `${clean}, Colombia`;
   };
 
+  const normalizeSender = (msg) =>
+    String(msg?.senderType || msg?.senderRole || msg?.sender || msg?.role || "")
+      .trim()
+      .toLowerCase();
+
+  const isIncomingForLogistics = (msg) => {
+    const sender = normalizeSender(msg);
+    return sender === "driver" || sender === "conductor";
+  };
+
+  const getAudioContext = () => {
+    if (typeof window === "undefined") return null;
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return null;
+
+    if (!audioContextRef.current) {
+      audioContextRef.current = new AudioCtx();
+    }
+
+    return audioContextRef.current;
+  };
+
+  const playIncomingMessageSound = async () => {
+    try {
+      const ctx = getAudioContext();
+      if (!ctx) return;
+
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
+
+      const now = ctx.currentTime;
+
+      const gain = ctx.createGain();
+      gain.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.0001, now);
+      gain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+
+      const tone1 = ctx.createOscillator();
+      tone1.type = "square";
+      tone1.frequency.setValueAtTime(950, now);
+      tone1.connect(gain);
+      tone1.start(now);
+      tone1.stop(now + 0.16);
+
+      const tone2 = ctx.createOscillator();
+      tone2.type = "square";
+      tone2.frequency.setValueAtTime(1250, now + 0.18);
+      tone2.connect(gain);
+      tone2.start(now + 0.18);
+      tone2.stop(now + 0.36);
+
+      const tone3 = ctx.createOscillator();
+      tone3.type = "triangle";
+      tone3.frequency.setValueAtTime(1450, now + 0.38);
+      tone3.connect(gain);
+      tone3.start(now + 0.38);
+      tone3.stop(now + 0.54);
+    } catch (error) {
+      console.error("No se pudo reproducir el sonido global:", error);
+    }
+  };
+
+  const showBrowserNotification = (driverName, messageText) => {
+    if (typeof window === "undefined" || typeof Notification === "undefined") {
+      return;
+    }
+
+    if (Notification.permission === "granted") {
+      try {
+        const notification = new Notification("Nuevo mensaje para logística", {
+          body: `${driverName}: ${messageText || "Te escribió un conductor"}`,
+          tag: `enterprise-logistics-global-chat`,
+        });
+
+        notification.onclick = () => {
+          window.focus();
+        };
+      } catch (error) {
+        console.error("No se pudo mostrar la notificación del navegador:", error);
+      }
+      return;
+    }
+
+    if (Notification.permission !== "denied") {
+      Notification.requestPermission().catch((error) => {
+        console.error("No se pudo solicitar permiso de notificación:", error);
+      });
+    }
+  };
+
+  const showGlobalIncomingBanner = (payload) => {
+    setGlobalIncomingBanner(payload);
+
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+    }
+
+    bannerTimerRef.current = setTimeout(() => {
+      setGlobalIncomingBanner(null);
+      bannerTimerRef.current = null;
+    }, 5000);
+  };
+
+  const markDriverAlertsAsSeen = useCallback((driverId) => {
+    const key = String(driverId || "");
+    if (!key) return;
+
+    setDriverChatAlerts((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+  }, []);
+
   const fetchDrivers = useCallback(async (silent = false) => {
     if (silent && driversPollingBusyRef.current) return;
 
@@ -531,6 +661,161 @@ const EnterpriseLogistics = () => {
     }
   }, []);
 
+  const scanGlobalChats = useCallback(async () => {
+    if (chatPollingBusyRef.current) return;
+    if (!Array.isArray(deliveries) || deliveries.length === 0) return;
+
+    const candidateDeliveries = [...deliveries]
+      .filter((delivery) => {
+        const status = String(delivery?.status || "");
+        return status === "Pendiente" || status === "En curso" || status === "Finalizada";
+      })
+      .sort((a, b) => {
+        const aTime = new Date(
+          a?.updatedAt || a?.finishedAt || a?.startedAt || a?.createdAt || 0
+        ).getTime();
+        const bTime = new Date(
+          b?.updatedAt || b?.finishedAt || b?.startedAt || b?.createdAt || 0
+        ).getTime();
+        return bTime - aTime;
+      })
+      .slice(0, 20);
+
+    if (candidateDeliveries.length === 0) return;
+
+    chatPollingBusyRef.current = true;
+
+    try {
+      const results = await Promise.all(
+        candidateDeliveries.map(async (delivery) => {
+          const currentDeliveryId = String(delivery?._id || delivery?.id || "");
+          if (!currentDeliveryId) return null;
+
+          try {
+            const response = await fetch(`${API_BASE}/enterprise-chat/${currentDeliveryId}`, {
+              method: "GET",
+              credentials: "include",
+              cache: "no-store",
+            });
+
+            const data = await parseJsonSafe(
+              response,
+              `GET /enterprise-chat/${currentDeliveryId}`
+            );
+
+            if (!response.ok) {
+              return null;
+            }
+
+            const messages = Array.isArray(data.messages) ? data.messages : [];
+            const lastIncoming = [...messages].reverse().find(isIncomingForLogistics);
+
+            return {
+              delivery,
+              lastIncoming,
+            };
+          } catch (error) {
+            console.error("Error revisando chat global:", error);
+            return null;
+          }
+        })
+      );
+
+      const freshAlerts = [];
+      const nextKnown = { ...knownLastDriverMessageByDeliveryRef.current };
+
+      results.forEach((row) => {
+        if (!row?.delivery) return;
+
+        const delivery = row.delivery;
+        const currentDeliveryId = String(delivery?._id || delivery?.id || "");
+        const lastIncoming = row.lastIncoming;
+
+        if (!lastIncoming) {
+          if (!nextKnown[currentDeliveryId]) {
+            nextKnown[currentDeliveryId] = "";
+          }
+          return;
+        }
+
+        const signature = JSON.stringify({
+          id: lastIncoming?._id || "",
+          text: lastIncoming?.text || "",
+          createdAt: lastIncoming?.createdAt || "",
+          sender: normalizeSender(lastIncoming),
+        });
+
+        const previousSignature = nextKnown[currentDeliveryId] || "";
+
+        if (!chatMonitorInitializedRef.current) {
+          nextKnown[currentDeliveryId] = signature;
+          return;
+        }
+
+        if (signature && signature !== previousSignature) {
+          const assignedDriverId = getDeliveryAssignedId(delivery);
+          const assignedDriverName =
+            delivery?.assignedDriverName ||
+            delivery?.assignedDriverId?.name ||
+            drivers.find((d) => driverIdValue(d) === String(assignedDriverId))?.name ||
+            "Conductor";
+
+          freshAlerts.push({
+            driverId: String(assignedDriverId || ""),
+            driverName: assignedDriverName,
+            messageText: lastIncoming?.text || "",
+            createdAt: lastIncoming?.createdAt || new Date().toISOString(),
+            deliveryId: currentDeliveryId,
+            invoiceNumber: delivery?.invoiceNumber || "",
+          });
+        }
+
+        nextKnown[currentDeliveryId] = signature;
+      });
+
+      knownLastDriverMessageByDeliveryRef.current = nextKnown;
+
+      if (!chatMonitorInitializedRef.current) {
+        chatMonitorInitializedRef.current = true;
+        return;
+      }
+
+      if (freshAlerts.length > 0) {
+        const latest = freshAlerts[freshAlerts.length - 1];
+
+        setDriverChatAlerts((prev) => {
+          const next = { ...prev };
+
+          freshAlerts.forEach((alert) => {
+            if (!alert.driverId) return;
+            next[alert.driverId] = {
+              driverName: alert.driverName,
+              messageText: alert.messageText,
+              createdAt: alert.createdAt,
+              deliveryId: alert.deliveryId,
+              invoiceNumber: alert.invoiceNumber,
+            };
+          });
+
+          return next;
+        });
+
+        const currentlyOpenDriver = String(selectedDriverFilter || "");
+        if (!latest.driverId || latest.driverId !== currentlyOpenDriver) {
+          showGlobalIncomingBanner(latest);
+          await playIncomingMessageSound();
+          showBrowserNotification(latest.driverName, latest.messageText);
+
+          if (typeof document !== "undefined" && document.hidden) {
+            document.title = `🔔 ${latest.driverName} escribió`;
+          }
+        }
+      }
+    } finally {
+      chatPollingBusyRef.current = false;
+    }
+  }, [deliveries, drivers, selectedDriverFilter]);
+
   useEffect(() => {
     fetchDrivers(false);
     fetchDeliveries(false);
@@ -552,6 +837,42 @@ const EnterpriseLogistics = () => {
 
     document.addEventListener("mousedown", handleOutsideClick);
     return () => document.removeEventListener("mousedown", handleOutsideClick);
+  }, []);
+
+  useEffect(() => {
+    if (!deliveries.length) return;
+
+    scanGlobalChats();
+    const interval = setInterval(() => {
+      scanGlobalChats();
+    }, 4000);
+
+    return () => clearInterval(interval);
+  }, [deliveries, scanGlobalChats]);
+
+  useEffect(() => {
+    if (selectedDriverFilter) {
+      markDriverAlertsAsSeen(selectedDriverFilter);
+      if (typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+      }
+    }
+  }, [selectedDriverFilter, markDriverAlertsAsSeen]);
+
+  useEffect(() => {
+    const restoreTitle = () => {
+      if (typeof document !== "undefined" && !document.hidden) {
+        document.title = originalTitleRef.current;
+      }
+    };
+
+    window.addEventListener("focus", restoreTitle);
+    document.addEventListener("visibilitychange", restoreTitle);
+
+    return () => {
+      window.removeEventListener("focus", restoreTitle);
+      document.removeEventListener("visibilitychange", restoreTitle);
+    };
   }, []);
 
   const normalizeSuggestionRows = (rows) => {
@@ -629,6 +950,13 @@ const EnterpriseLogistics = () => {
   useEffect(() => {
     return () => {
       if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+      if (bannerTimerRef.current) clearTimeout(bannerTimerRef.current);
+      if (audioContextRef.current && typeof audioContextRef.current.close === "function") {
+        audioContextRef.current.close().catch(() => {});
+      }
+      if (typeof document !== "undefined") {
+        document.title = originalTitleRef.current;
+      }
     };
   }, []);
 
@@ -906,6 +1234,8 @@ const EnterpriseLogistics = () => {
     }
   };
 
+  const totalUnreadDrivers = Object.keys(driverChatAlerts).length;
+
   return (
     <div className="min-h-screen bg-gray-100">
       <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
@@ -927,6 +1257,41 @@ const EnterpriseLogistics = () => {
       </div>
 
       <div className="p-5">
+        {globalIncomingBanner ? (
+          <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 shadow-sm">
+            <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+              <div>
+                <p className="text-sm font-bold text-amber-800">
+                  🔔 Nuevo mensaje para logística
+                </p>
+                <p className="text-sm text-amber-900 mt-1">
+                  <span className="font-semibold">{globalIncomingBanner.driverName}</span>
+                  {globalIncomingBanner.invoiceNumber
+                    ? ` · Factura #${globalIncomingBanner.invoiceNumber}`
+                    : ""}
+                </p>
+                <p className="text-sm text-amber-900 mt-1">
+                  {globalIncomingBanner.messageText || "Te escribió un conductor."}
+                </p>
+              </div>
+
+              {globalIncomingBanner.driverId ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSelectedDriverFilter(globalIncomingBanner.driverId);
+                    markDriverAlertsAsSeen(globalIncomingBanner.driverId);
+                    setGlobalIncomingBanner(null);
+                  }}
+                  className="bg-amber-600 text-white px-4 py-2 rounded-xl font-semibold"
+                >
+                  Abrir conductor
+                </button>
+              ) : null}
+            </div>
+          </div>
+        ) : null}
+
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
           <h2 className="text-xl font-bold text-gray-900 mb-4">
             Crear nueva entrega
@@ -1048,21 +1413,44 @@ const EnterpriseLogistics = () => {
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Supervisar por conductor
-          </h2>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <h2 className="text-xl font-bold text-gray-900">
+              Supervisar por conductor
+            </h2>
+
+            <div className="text-sm">
+              {totalUnreadDrivers > 0 ? (
+                <span className="inline-flex items-center rounded-full bg-red-100 text-red-700 px-3 py-1 font-semibold">
+                  🔔 {totalUnreadDrivers} con mensaje nuevo
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-green-100 text-green-700 px-3 py-1 font-semibold">
+                  Sin mensajes nuevos
+                </span>
+              )}
+            </div>
+          </div>
 
           <select
             value={selectedDriverFilter}
-            onChange={(e) => setSelectedDriverFilter(e.target.value)}
+            onChange={(e) => {
+              setSelectedDriverFilter(e.target.value);
+              markDriverAlertsAsSeen(e.target.value);
+            }}
             className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
           >
             <option value="">Ver todos los conductores</option>
-            {drivers.map((driver) => (
-              <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                {driver.name} - CC {driver.cedula} - {driver.vehicle}
-              </option>
-            ))}
+            {drivers.map((driver) => {
+              const currentId = driverIdValue(driver);
+              const hasUnread = !!driverChatAlerts[currentId];
+
+              return (
+                <option key={currentId} value={currentId}>
+                  {hasUnread ? "• nuevo - " : ""}
+                  {driver.name} - CC {driver.cedula} - {driver.vehicle}
+                </option>
+              );
+            })}
           </select>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
@@ -1325,12 +1713,25 @@ const EnterpriseLogistics = () => {
             <div className="space-y-4">
               {listFilteredDeliveries.map((delivery) => {
                 const deliveryId = delivery._id || delivery.id;
+                const assignedId = getDeliveryAssignedId(delivery);
+                const hasUnread = !!driverChatAlerts[String(assignedId || "")];
+
                 return (
-                  <div key={deliveryId} className="border rounded-xl p-4">
+                  <div
+                    key={deliveryId}
+                    className={`border rounded-xl p-4 ${
+                      hasUnread ? "border-red-300 bg-red-50/40" : ""
+                    }`}
+                  >
                     <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
                       <div>
                         <p className="font-bold text-gray-900">
                           Factura #{delivery.invoiceNumber}
+                          {hasUnread ? (
+                            <span className="ml-2 inline-block bg-red-100 text-red-700 px-2 py-1 rounded-full text-[11px] font-semibold align-middle">
+                              mensaje nuevo
+                            </span>
+                          ) : null}
                         </p>
                         <p className="text-xs text-gray-500 mt-1">
                           Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
@@ -1392,7 +1793,20 @@ const EnterpriseLogistics = () => {
                       </p>
                     ) : null}
 
-                    <div className="flex justify-end mt-3">
+                    <div className="flex justify-end gap-2 mt-3 flex-wrap">
+                      {assignedId ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setSelectedDriverFilter(String(assignedId));
+                            markDriverAlertsAsSeen(String(assignedId));
+                          }}
+                          className="bg-blue-600 text-white px-3 py-1 rounded-lg text-sm font-semibold"
+                        >
+                          Abrir conductor
+                        </button>
+                      ) : null}
+
                       <button
                         type="button"
                         onClick={() => handleDeleteDelivery(deliveryId)}
