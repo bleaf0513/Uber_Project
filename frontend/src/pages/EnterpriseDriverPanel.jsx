@@ -689,6 +689,9 @@ const EnterpriseDriverPanel = () => {
   const [loadingDriver, setLoadingDriver] = useState(true);
   const [startingDeliveryId, setStartingDeliveryId] = useState("");
   const [finishingDeliveryId, setFinishingDeliveryId] = useState("");
+  const [listStatusFilter, setListStatusFilter] = useState("Pendiente");
+  const [listDateFilter, setListDateFilter] = useState("");
+  const [listScopeFilter, setListScopeFilter] = useState("Pendientes");
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -818,6 +821,56 @@ const EnterpriseDriverPanel = () => {
         String(delivery._id || delivery.id) === String(activeDeliveryId)
     );
   }, [assignedDeliveries, activeDeliveryId]);
+
+  const getDeliveryReferenceDate = useCallback((delivery) => {
+    const raw =
+      delivery?.createdAt ||
+      delivery?.startedAt ||
+      delivery?.finishedAt ||
+      delivery?.updatedAt ||
+      "";
+
+    if (!raw) return "";
+
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return "";
+
+    return date.toISOString().slice(0, 10);
+  }, []);
+
+  const filteredAssignedDeliveries = useMemo(() => {
+    return assignedDeliveries
+      .filter((delivery) => {
+        const matchesStatus =
+          listStatusFilter === "Todos" ||
+          String(delivery?.status || "") === String(listStatusFilter);
+
+        const deliveryDate = getDeliveryReferenceDate(delivery);
+
+        const matchesDate =
+          listScopeFilter === "Todos"
+            ? !listDateFilter || deliveryDate === listDateFilter
+            : !listDateFilter || deliveryDate === listDateFilter;
+
+        return matchesStatus && matchesDate;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(
+          a?.createdAt || a?.updatedAt || a?.startedAt || a?.finishedAt || 0
+        ).getTime();
+        const bTime = new Date(
+          b?.createdAt || b?.updatedAt || b?.startedAt || b?.finishedAt || 0
+        ).getTime();
+
+        return bTime - aTime;
+      });
+  }, [
+    assignedDeliveries,
+    listStatusFilter,
+    listDateFilter,
+    listScopeFilter,
+    getDeliveryReferenceDate,
+  ]);
 
   const updateDeliveriesStorage = (updatedDeliveries) => {
     setDeliveries(updatedDeliveries);
@@ -1059,6 +1112,21 @@ const EnterpriseDriverPanel = () => {
     navigate("/enterprise-driver-login");
   };
 
+  const handleScopeChange = (scope) => {
+    setListScopeFilter(scope);
+
+    if (scope === "Pendientes") {
+      setListStatusFilter("Pendiente");
+      setListDateFilter("");
+      return;
+    }
+
+    if (scope === "Hoy") {
+      setListDateFilter(new Date().toISOString().slice(0, 10));
+      return;
+    }
+  };
+
   if (!activeCedula) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
@@ -1184,17 +1252,108 @@ const EnterpriseDriverPanel = () => {
         ) : null}
 
         <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Tus pedidos asignados
-          </h2>
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Tus pedidos asignados
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Por defecto se muestran los pedidos pendientes para evitar una lista muy larga.
+              </p>
+            </div>
+
+            <div className="text-sm text-gray-600 font-medium">
+              Total mostrados: {filteredAssignedDeliveries.length}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => handleScopeChange("Pendientes")}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                listScopeFilter === "Pendientes"
+                  ? "bg-yellow-500 text-white"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Pendientes
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleScopeChange("Hoy")}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                listScopeFilter === "Hoy"
+                  ? "bg-green-600 text-white"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Ver hoy
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleScopeChange("Todos")}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                listScopeFilter === "Todos"
+                  ? "bg-slate-800 text-white"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Ver todos
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+            <input
+              type="date"
+              value={listDateFilter}
+              onChange={(e) => {
+                setListDateFilter(e.target.value);
+                setListScopeFilter("Todos");
+              }}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            />
+
+            <select
+              value={listStatusFilter}
+              onChange={(e) => {
+                setListStatusFilter(e.target.value);
+                setListScopeFilter("Todos");
+              }}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            >
+              <option value="Todos">Todos los estados</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="En curso">En curso</option>
+              <option value="Finalizada">Finalizada</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                setListStatusFilter("Pendiente");
+                setListDateFilter("");
+                setListScopeFilter("Pendientes");
+              }}
+              className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 font-semibold"
+            >
+              Reiniciar filtros
+            </button>
+          </div>
 
           {assignedDeliveries.length === 0 ? (
             <p className="text-gray-500">
               No tienes pedidos asignados en este momento.
             </p>
+          ) : filteredAssignedDeliveries.length === 0 ? (
+            <p className="text-gray-500">
+              No hay pedidos para este filtro.
+            </p>
           ) : (
             <div className="space-y-4">
-              {assignedDeliveries.map((delivery) => {
+              {filteredAssignedDeliveries.map((delivery) => {
                 const deliveryId = String(delivery._id || delivery.id || "");
                 const isStarting = startingDeliveryId === deliveryId;
                 const isFinishing = finishingDeliveryId === deliveryId;
@@ -1205,10 +1364,32 @@ const EnterpriseDriverPanel = () => {
                     key={delivery._id || delivery.id}
                     className="border rounded-xl p-4"
                   >
-                    <p className="font-bold text-gray-900">
-                      Factura #{delivery.invoiceNumber}
-                    </p>
-                    <p className="text-sm text-gray-600">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-gray-900">
+                          Factura #{delivery.invoiceNumber}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <span
+                          className={
+                            delivery.status === "Finalizada"
+                              ? "inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-semibold"
+                              : delivery.status === "En curso"
+                              ? "inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-semibold"
+                              : "inline-block bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-semibold"
+                          }
+                        >
+                          {delivery.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-gray-600 mt-3">
                       Cliente: {delivery.clientName}
                     </p>
                     <p className="text-sm text-gray-600">
@@ -1218,24 +1399,21 @@ const EnterpriseDriverPanel = () => {
                       Teléfono: {delivery.clientPhone}
                     </p>
 
-                    <p className="text-sm mt-2">
-                      Estado:{" "}
-                      <span
-                        className={
-                          delivery.status === "Finalizada"
-                            ? "text-green-600 font-semibold"
-                            : delivery.status === "En curso"
-                            ? "text-blue-600 font-semibold"
-                            : "text-yellow-600 font-semibold"
-                        }
-                      >
-                        {delivery.status}
-                      </span>
-                    </p>
-
                     {delivery.notes ? (
-                      <p className="text-sm text-gray-500 mt-1">
+                      <p className="text-sm text-gray-500 mt-2">
                         Observaciones: {delivery.notes}
+                      </p>
+                    ) : null}
+
+                    {delivery.startedAt ? (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Inicio: {new Date(delivery.startedAt).toLocaleString()}
+                      </p>
+                    ) : null}
+
+                    {delivery.finishedAt ? (
+                      <p className="text-xs text-gray-500 mt-1">
+                        Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
                       </p>
                     ) : null}
 
