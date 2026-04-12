@@ -34,10 +34,12 @@ const EnterpriseDashboard = () => {
         fetch(`${API_BASE}/enterprise-drivers`, {
           method: "GET",
           credentials: "include",
+          cache: "no-store",
         }),
         fetch(`${API_BASE}/enterprise-deliveries`, {
           method: "GET",
           credentials: "include",
+          cache: "no-store",
         }),
       ]);
 
@@ -106,105 +108,179 @@ const EnterpriseDashboard = () => {
     return () => clearInterval(interval);
   }, [loadStats]);
 
+  const statCards = [
+    {
+      title: "Conductores activos",
+      value: loading ? "..." : driversCount,
+      icon: "🚚",
+      tone:
+        "from-blue-600 to-cyan-500 text-white shadow-blue-200 border-blue-400/20",
+      subtitle: "Equipo disponible en la operación",
+    },
+    {
+      title: "Entregas en curso",
+      value: loading ? "..." : deliveriesInProgress,
+      icon: "📍",
+      tone:
+        "from-amber-500 to-orange-500 text-white shadow-orange-200 border-orange-400/20",
+      subtitle: "Operaciones activas en tiempo real",
+    },
+    {
+      title: "Finalizadas hoy",
+      value: loading ? "..." : deliveriesFinishedToday,
+      icon: "✅",
+      tone:
+        "from-emerald-500 to-green-500 text-white shadow-emerald-200 border-emerald-400/20",
+      subtitle: "Entregas cerradas durante el día",
+    },
+  ];
+
+  const modules = [
+    {
+      to: "/enterprise-drivers",
+      title: "Conductores empresariales",
+      description:
+        "Registra, consulta y administra los conductores de tu empresa.",
+      icon: "👨‍✈️",
+      badge: "Gestión",
+    },
+    {
+      to: "/enterprise-logistics",
+      title: "Panel de logística",
+      description:
+        "Crea entregas, asigna conductores y organiza la operación.",
+      icon: "📦",
+      badge: "Operación",
+    },
+    {
+      to: "/enterprise-delivery-stats",
+      title: "Estadísticas de entregas",
+      description:
+        "Consulta el rendimiento por día o por mes y analiza el desempeño general.",
+      icon: "📊",
+      badge: "Analítica",
+    },
+    {
+      to: "/enterprise-delivery-history",
+      title: "Historial de entregas",
+      description:
+        "Busca entregas por factura, cliente, conductor o fecha.",
+      icon: "🗂️",
+      badge: "Historial",
+    },
+  ];
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Central Go Empresas</h1>
-            <p className="text-sm text-blue-100 mt-1">
-              Panel principal de operación empresarial
-            </p>
+    <div className="min-h-screen bg-slate-50">
+      <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-slate-950 via-blue-900 to-blue-700 text-white">
+        <div className="absolute inset-0 opacity-25">
+          <div className="absolute -top-16 -left-10 h-48 w-48 rounded-full bg-cyan-400 blur-3xl" />
+          <div className="absolute top-8 right-0 h-56 w-56 rounded-full bg-indigo-400 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto max-w-7xl px-5 py-8 lg:px-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 backdrop-blur">
+                <span>🏢</span>
+                <span>Central Go Empresas</span>
+              </div>
+
+              <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
+                Panel principal empresarial
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-blue-100 md:text-base">
+                Administra conductores, supervisa entregas y controla toda la
+                operación logística desde un entorno más profesional y claro.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Link
+                to="/"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-blue-800 shadow-lg transition hover:scale-[1.02]"
+              >
+                Salir
+              </Link>
+            </div>
           </div>
 
-          <Link
-            to="/"
-            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
-          >
-            Salir
-          </Link>
+          <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-3">
+            {statCards.map((card) => (
+              <div
+                key={card.title}
+                className={`rounded-3xl border bg-gradient-to-br p-5 shadow-[0_12px_30px_rgba(0,0,0,0.18)] backdrop-blur ${card.tone}`}
+              >
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-white/90">
+                      {card.title}
+                    </p>
+                    <p className="mt-3 text-4xl font-extrabold">{card.value}</p>
+                    <p className="mt-2 text-sm text-white/80">{card.subtitle}</p>
+                  </div>
+
+                  <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-2xl shadow-inner">
+                    {card.icon}
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       </div>
 
-      <div className="p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h3 className="text-gray-500 text-sm font-semibold">
-            Conductores activos
-          </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">
-            {loading ? "..." : driversCount}
-          </p>
+      <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+        <div className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                Centro de control
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Accede rápidamente a los módulos principales del sistema.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
+              Operación en tiempo real
+            </div>
+          </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h3 className="text-gray-500 text-sm font-semibold">
-            Entregas en curso
-          </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">
-            {loading ? "..." : deliveriesInProgress}
-          </p>
+        <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          {modules.map((module) => (
+            <Link
+              key={module.to}
+              to={module.to}
+              className="group overflow-hidden rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-100 to-blue-50 text-2xl">
+                  {module.icon}
+                </div>
+
+                <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                  {module.badge}
+                </div>
+              </div>
+
+              <div className="mt-5">
+                <h3 className="text-xl font-extrabold text-slate-900 transition group-hover:text-blue-700">
+                  {module.title}
+                </h3>
+                <p className="mt-2 text-sm leading-6 text-slate-600">
+                  {module.description}
+                </p>
+              </div>
+
+              <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
+                Abrir módulo
+                <span className="transition group-hover:translate-x-1">→</span>
+              </div>
+            </Link>
+          ))}
         </div>
-
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h3 className="text-gray-500 text-sm font-semibold">
-            Finalizadas hoy
-          </h3>
-          <p className="text-3xl font-bold text-gray-900 mt-3">
-            {loading ? "..." : deliveriesFinishedToday}
-          </p>
-        </div>
-      </div>
-
-      <div className="px-5 pb-5 grid grid-cols-1 md:grid-cols-2 gap-4">
-        <Link
-          to="/enterprise-drivers"
-          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
-        >
-          <h2 className="text-xl font-bold text-gray-900">
-            Conductores empresariales
-          </h2>
-          <p className="text-gray-600 mt-2">
-            Registra, consulta y administra los conductores de tu empresa.
-          </p>
-        </Link>
-
-        <Link
-          to="/enterprise-logistics"
-          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
-        >
-          <h2 className="text-xl font-bold text-gray-900">
-            Panel de logística
-          </h2>
-          <p className="text-gray-600 mt-2">
-            Crea entregas, asigna conductores y organiza la operación.
-          </p>
-        </Link>
-
-        <Link
-          to="/enterprise-delivery-stats"
-          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
-        >
-          <h2 className="text-xl font-bold text-gray-900">
-            Estadísticas de entregas
-          </h2>
-          <p className="text-gray-600 mt-2">
-            Consulta el rendimiento de las entregas por día o por mes y analiza
-            el desempeño general de los conductores.
-          </p>
-        </Link>
-
-        <Link
-          to="/enterprise-delivery-history"
-          className="bg-white rounded-2xl shadow p-5 block hover:shadow-lg transition"
-        >
-          <h2 className="text-xl font-bold text-gray-900">
-            Historial de entregas
-          </h2>
-          <p className="text-gray-600 mt-2">
-            Busca entregas por factura, cliente, conductor o fecha y revisa todo
-            el historial operativo.
-          </p>
-        </Link>
       </div>
     </div>
   );
