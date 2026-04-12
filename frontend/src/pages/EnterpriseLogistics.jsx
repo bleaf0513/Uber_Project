@@ -269,6 +269,10 @@ const EnterpriseLogistics = () => {
   const [loadingDrivers, setLoadingDrivers] = useState(true);
   const [loadingDeliveries, setLoadingDeliveries] = useState(true);
 
+  const [listDriverFilter, setListDriverFilter] = useState("");
+  const [listStatusFilter, setListStatusFilter] = useState("Todos");
+  const [listDateFilter, setListDateFilter] = useState("");
+
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressSelected, setAddressSelected] = useState(false);
@@ -393,6 +397,47 @@ const EnterpriseLogistics = () => {
     return true;
   };
 
+  const getDeliveryAssignedId = (delivery) =>
+    String(
+      delivery?.assignedDriverId?._id ||
+        delivery?.assignedDriverId ||
+        delivery?.driver?._id ||
+        delivery?.driver ||
+        ""
+    );
+
+  const getDeliveryReferenceDate = (delivery) => {
+    const raw =
+      delivery?.createdAt ||
+      delivery?.startedAt ||
+      delivery?.finishedAt ||
+      delivery?.updatedAt ||
+      "";
+    if (!raw) return "";
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return "";
+    return date.toISOString().slice(0, 10);
+  };
+
+  const normalizeAddressQuery = (query) => {
+    const clean = String(query || "").trim();
+    if (!clean) return "";
+
+    const lowered = clean.toLowerCase();
+    if (
+      lowered.includes("colombia") ||
+      lowered.includes("medellín") ||
+      lowered.includes("medellin") ||
+      lowered.includes("itagüí") ||
+      lowered.includes("itagui") ||
+      lowered.includes("antioquia")
+    ) {
+      return clean;
+    }
+
+    return `${clean}, Colombia`;
+  };
+
   const fetchDrivers = useCallback(async (silent = false) => {
     if (silent && driversPollingBusyRef.current) return;
 
@@ -506,8 +551,8 @@ const EnterpriseLogistics = () => {
     return () => document.removeEventListener("mousedown", handleOutsideClick);
   }, []);
 
-  const normalizeSuggestionRows = (rows) =>
-    (Array.isArray(rows) ? rows : [])
+  const normalizeSuggestionRows = (rows) => {
+    const normalized = (Array.isArray(rows) ? rows : [])
       .map((row) => ({
         description:
           row.description ||
@@ -518,12 +563,29 @@ const EnterpriseLogistics = () => {
       }))
       .filter((r) => r.description);
 
+    const priorityMatches = normalized.filter((item) => {
+      const text = item.description.toLowerCase();
+      return (
+        text.includes("colombia") ||
+        text.includes("antioquia") ||
+        text.includes("medellín") ||
+        text.includes("medellin") ||
+        text.includes("itagüí") ||
+        text.includes("itagui")
+      );
+    });
+
+    return priorityMatches.length > 0 ? priorityMatches : normalized;
+  };
+
   const runFetchSuggestions = useCallback(async (query) => {
     const seq = ++suggestionSeqRef.current;
 
     try {
+      const searchQuery = normalizeAddressQuery(query);
+
       const { data } = await axios.get(`${API_BASE}/maps/get-suggestions`, {
-        params: { address: query },
+        params: { address: searchQuery },
         timeout: 18000,
         withCredentials: true,
       });
@@ -716,13 +778,7 @@ const EnterpriseLogistics = () => {
     if (!selectedDriverFilter) return deliveries;
 
     return deliveries.filter((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        delivery.driver?._id ||
-        delivery.driver ||
-        "";
-      return String(assignedId) === String(selectedDriverFilter);
+      return getDeliveryAssignedId(delivery) === String(selectedDriverFilter);
     });
   }, [deliveries, selectedDriverFilter]);
 
@@ -738,15 +794,8 @@ const EnterpriseLogistics = () => {
     if (!selectedDriver) return [];
 
     return deliveries.filter((delivery) => {
-      const assignedId =
-        delivery.assignedDriverId?._id ||
-        delivery.assignedDriverId ||
-        delivery.driver?._id ||
-        delivery.driver ||
-        "";
-
       return (
-        String(assignedId) === String(driverIdValue(selectedDriver)) &&
+        getDeliveryAssignedId(delivery) === String(driverIdValue(selectedDriver)) &&
         delivery.status !== "Finalizada"
       );
     });
@@ -757,15 +806,8 @@ const EnterpriseLogistics = () => {
 
     return (
       deliveries.find((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
-
         return (
-          String(assignedId) === String(driverIdValue(selectedDriver)) &&
+          getDeliveryAssignedId(delivery) === String(driverIdValue(selectedDriver)) &&
           delivery.status === "En curso"
         );
       }) || null
@@ -777,15 +819,8 @@ const EnterpriseLogistics = () => {
 
     const completed = deliveries
       .filter((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
-
         return (
-          String(assignedId) === String(driverIdValue(selectedDriver)) &&
+          getDeliveryAssignedId(delivery) === String(driverIdValue(selectedDriver)) &&
           delivery.status === "Finalizada"
         );
       })
@@ -797,6 +832,21 @@ const EnterpriseLogistics = () => {
 
     return completed[0] || null;
   }, [deliveries, selectedDriver]);
+
+  const listFilteredDeliveries = useMemo(() => {
+    return deliveries.filter((delivery) => {
+      const matchesDriver =
+        !listDriverFilter || getDeliveryAssignedId(delivery) === String(listDriverFilter);
+
+      const matchesStatus =
+        listStatusFilter === "Todos" || String(delivery?.status || "") === String(listStatusFilter);
+
+      const deliveryDate = getDeliveryReferenceDate(delivery);
+      const matchesDate = !listDateFilter || deliveryDate === listDateFilter;
+
+      return matchesDriver && matchesStatus && matchesDate;
+    });
+  }, [deliveries, listDriverFilter, listStatusFilter, listDateFilter]);
 
   const activeOrLastDelivery =
     selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
@@ -880,7 +930,7 @@ const EnterpriseLogistics = () => {
               <input
                 name="address"
                 type="text"
-                placeholder="Dirección de entrega"
+                placeholder="Dirección o lugar de entrega"
                 value={formData.address}
                 onChange={handleChange}
                 onFocus={() => {
@@ -919,7 +969,7 @@ const EnterpriseLogistics = () => {
               </p>
             ) : (
               <p className="text-xs text-orange-600 font-medium">
-                Escribe mínimo 3 letras y selecciona una dirección de la lista.
+                Escribe mínimo 3 letras. La búsqueda prioriza resultados de Colombia.
               </p>
             )}
 
@@ -1152,24 +1202,102 @@ const EnterpriseLogistics = () => {
         ) : null}
 
         <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Pedidos asignados
-          </h2>
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Pedidos asignados
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Filtra por fecha, conductor y estado.
+              </p>
+            </div>
+
+            <div className="text-sm text-gray-600 font-medium">
+              Total mostrados: {listFilteredDeliveries.length}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
+            <input
+              type="date"
+              value={listDateFilter}
+              onChange={(e) => setListDateFilter(e.target.value)}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            />
+
+            <select
+              value={listDriverFilter}
+              onChange={(e) => setListDriverFilter(e.target.value)}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            >
+              <option value="">Todos los conductores</option>
+              {drivers.map((driver) => (
+                <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
+                  {driver.name} - CC {driver.cedula}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={listStatusFilter}
+              onChange={(e) => setListStatusFilter(e.target.value)}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            >
+              <option value="Todos">Todos los estados</option>
+              <option value="Pendiente">Pendiente</option>
+              <option value="En curso">En curso</option>
+              <option value="Finalizada">Finalizada</option>
+            </select>
+
+            <button
+              type="button"
+              onClick={() => {
+                setListDateFilter("");
+                setListDriverFilter("");
+                setListStatusFilter("Todos");
+              }}
+              className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 font-semibold"
+            >
+              Limpiar filtros
+            </button>
+          </div>
 
           {loadingDeliveries ? (
             <p className="text-gray-500">Cargando pedidos...</p>
-          ) : filteredDeliveries.length === 0 ? (
+          ) : listFilteredDeliveries.length === 0 ? (
             <p className="text-gray-500">No hay pedidos para este filtro.</p>
           ) : (
             <div className="space-y-4">
-              {filteredDeliveries.map((delivery) => {
+              {listFilteredDeliveries.map((delivery) => {
                 const deliveryId = delivery._id || delivery.id;
                 return (
                   <div key={deliveryId} className="border rounded-xl p-4">
-                    <p className="font-bold text-gray-900">
-                      Factura #{delivery.invoiceNumber}
-                    </p>
-                    <p className="text-sm text-gray-600">
+                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+                      <div>
+                        <p className="font-bold text-gray-900">
+                          Factura #{delivery.invoiceNumber}
+                        </p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
+                        </p>
+                      </div>
+
+                      <div>
+                        <span
+                          className={
+                            delivery.status === "Finalizada"
+                              ? "inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-semibold"
+                              : delivery.status === "En curso"
+                              ? "inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-semibold"
+                              : "inline-block bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-semibold"
+                          }
+                        >
+                          {delivery.status}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p className="text-sm text-gray-600 mt-3">
                       Cliente: {delivery.clientName}
                     </p>
                     <p className="text-sm text-gray-600">
@@ -1190,21 +1318,6 @@ const EnterpriseLogistics = () => {
                         placeId: {delivery.placeId}
                       </p>
                     ) : null}
-
-                    <p className="text-sm mt-2">
-                      Estado:{" "}
-                      <span
-                        className={
-                          delivery.status === "Finalizada"
-                            ? "text-green-600 font-semibold"
-                            : delivery.status === "En curso"
-                            ? "text-blue-600 font-semibold"
-                            : "text-yellow-600 font-semibold"
-                        }
-                      >
-                        {delivery.status}
-                      </span>
-                    </p>
 
                     {delivery.startedAt && (
                       <p className="text-xs text-gray-500 mt-1">
