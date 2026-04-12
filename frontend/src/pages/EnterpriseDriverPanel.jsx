@@ -28,6 +28,16 @@ const haversineDistanceKm = (a, b) => {
   return R * c;
 };
 
+const getStatusBadgeClass = (status) => {
+  if (status === "Finalizada") {
+    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  }
+  if (status === "En curso") {
+    return "bg-blue-100 text-blue-700 border border-blue-200";
+  }
+  return "bg-amber-100 text-amber-700 border border-amber-200";
+};
+
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
@@ -561,120 +571,153 @@ const EnterpriseDriverMap = ({
       : [];
 
   return (
-    <div>
-      <div
-        ref={mapRef}
-        className="w-full h-[420px] rounded-2xl overflow-hidden border"
-      />
-
-      <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-        <div className="lg:col-span-2 space-y-3">
-          <div className="bg-gray-50 rounded-xl p-3 flex flex-wrap gap-4">
-            <p className="text-sm text-gray-700">
-              Seguimiento en tiempo real:{" "}
-              <span
-                className={`font-semibold ${
-                  isTracking ? "text-green-600" : "text-red-600"
-                }`}
-              >
-                {isTracking ? "Activo" : "Inactivo"}
-              </span>
-            </p>
-
-            <p className="text-sm text-gray-700">
-              Paradas:{" "}
-              <span className="font-semibold text-gray-900">
-                {visibleStops.length}
-              </span>
-            </p>
-
-            <p className="text-sm text-gray-700">
-              Distancia:{" "}
-              <span className="font-semibold text-gray-900">
-                {routeInfo.totalDistanceText || "—"}
-              </span>
-            </p>
-
-            <p className="text-sm text-gray-700">
-              Tiempo estimado:{" "}
-              <span className="font-semibold text-gray-900">
-                {routeInfo.totalDurationText || "—"}
-              </span>
+    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+      <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-green-50 px-5 py-4">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h3 className="text-lg font-extrabold text-slate-900">
+              Mapa y navegación de ruta
+            </h3>
+            <p className="text-sm text-slate-500">
+              Seguimiento en tiempo real, orden de paradas e indicaciones paso a paso.
             </p>
           </div>
 
-          {geoError ? (
-            <p className="text-sm text-red-600 font-medium">{geoError}</p>
-          ) : null}
-
-          {activeDelivery ? (
-            <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-              <p className="text-sm font-bold text-blue-900 mb-1">
-                Entrega en curso
-              </p>
-              <p className="text-sm text-blue-800">
-                {activeDelivery.clientName} — {activeDelivery.address}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="flex flex-wrap gap-3">
-            <button
-              type="button"
-              onClick={openExternalGoogleMaps}
-              disabled={!canNavigate}
-              className={`px-4 py-2 rounded-xl font-semibold ${
-                canNavigate
-                  ? "bg-green-600 text-white"
-                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
-              }`}
-            >
-              Abrir navegación en Google Maps
-            </button>
+          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+            <span className={`rounded-full px-3 py-1 ${isTracking ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+              {isTracking ? "Seguimiento activo" : "Seguimiento inactivo"}
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+              Paradas: {visibleStops.length}
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+              Distancia: {routeInfo.totalDistanceText || "—"}
+            </span>
           </div>
+        </div>
+      </div>
 
-          {visibleStops.length > 0 ? (
-            <div className="bg-gray-50 rounded-xl p-3">
-              <p className="text-sm font-bold text-gray-900 mb-2">
-                Orden de la ruta
-              </p>
+      <div className="p-5">
+        <div
+          ref={mapRef}
+          className="w-full h-[420px] rounded-[24px] overflow-hidden border border-slate-200"
+        />
 
-              <div className="space-y-2">
-                {visibleStops.map((stop, index) => (
-                  <div
-                    key={stop._id || stop.id || index}
-                    className={`text-sm border-b last:border-b-0 pb-2 last:pb-0 ${
-                      String(activeDelivery?._id || activeDelivery?.id) ===
-                      String(stop._id || stop.id)
-                        ? "text-blue-700 font-semibold"
-                        : "text-gray-700"
-                    }`}
-                  >
-                    <span className="font-semibold">{index + 1}.</span>{" "}
-                    {stop.clientName} — {stop.address}
-                  </div>
-                ))}
+        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
+          <div className="lg:col-span-2 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Estado GPS
+                </p>
+                <p className={`mt-2 text-sm font-bold ${isTracking ? "text-emerald-600" : "text-red-600"}`}>
+                  {isTracking ? "Activo" : "Inactivo"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Paradas
+                </p>
+                <p className="mt-2 text-sm font-bold text-slate-900">
+                  {visibleStops.length}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Distancia total
+                </p>
+                <p className="mt-2 text-sm font-bold text-slate-900">
+                  {routeInfo.totalDistanceText || "—"}
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Tiempo estimado
+                </p>
+                <p className="mt-2 text-sm font-bold text-slate-900">
+                  {routeInfo.totalDurationText || "—"}
+                </p>
               </div>
             </div>
-          ) : (
-            <p className="text-sm text-gray-500">
-              Aún no hay direcciones pendientes para dibujar la ruta.
-            </p>
-          )}
-        </div>
 
-        <div className="bg-white border rounded-xl overflow-hidden">
-          <div className="px-4 py-3 border-b bg-gray-50">
-            <p className="font-bold text-gray-900">Indicaciones</p>
-            <p className="text-xs text-gray-500">
-              Paso a paso de la navegación
-            </p>
+            {geoError ? (
+              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
+                {geoError}
+              </div>
+            ) : null}
+
+            {activeDelivery ? (
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm font-bold text-blue-900 mb-1">
+                  Entrega en curso
+                </p>
+                <p className="text-sm text-blue-800">
+                  {activeDelivery.clientName} — {activeDelivery.address}
+                </p>
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={openExternalGoogleMaps}
+                disabled={!canNavigate}
+                className={`px-4 py-2.5 rounded-2xl font-semibold transition ${
+                  canNavigate
+                    ? "bg-green-600 text-white hover:scale-[1.02]"
+                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+                }`}
+              >
+                Abrir navegación en Google Maps
+              </button>
+            </div>
+
+            {visibleStops.length > 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-sm font-bold text-slate-900 mb-3">
+                  Orden de la ruta
+                </p>
+
+                <div className="space-y-2">
+                  {visibleStops.map((stop, index) => (
+                    <div
+                      key={stop._id || stop.id || index}
+                      className={`rounded-xl border px-3 py-3 text-sm ${
+                        String(activeDelivery?._id || activeDelivery?.id) ===
+                        String(stop._id || stop.id)
+                          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      <span className="font-semibold">{index + 1}.</span>{" "}
+                      {stop.clientName} — {stop.address}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                Aún no hay direcciones pendientes para dibujar la ruta.
+              </div>
+            )}
           </div>
 
-          <div
-            ref={directionsPanelRef}
-            className="p-3 text-sm text-gray-700 max-h-[420px] overflow-y-auto"
-          />
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+              <p className="font-bold text-slate-900">Indicaciones</p>
+              <p className="text-xs text-slate-500">
+                Paso a paso de la navegación
+              </p>
+            </div>
+
+            <div
+              ref={directionsPanelRef}
+              className="p-3 text-sm text-slate-700 max-h-[420px] overflow-y-auto"
+            />
+          </div>
         </div>
       </div>
     </div>
@@ -871,6 +914,19 @@ const EnterpriseDriverPanel = () => {
     listScopeFilter,
     getDeliveryReferenceDate,
   ]);
+
+  const stats = useMemo(() => {
+    const pending = assignedDeliveries.filter((d) => d.status === "Pendiente").length;
+    const inProgress = assignedDeliveries.filter((d) => d.status === "En curso").length;
+    const finished = assignedDeliveries.filter((d) => d.status === "Finalizada").length;
+
+    return {
+      total: assignedDeliveries.length,
+      pending,
+      inProgress,
+      finished,
+    };
+  }, [assignedDeliveries]);
 
   const updateDeliveriesStorage = (updatedDeliveries) => {
     setDeliveries(updatedDeliveries);
@@ -1129,15 +1185,15 @@ const EnterpriseDriverPanel = () => {
 
   if (!activeCedula) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
-        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
-          <h2 className="text-2xl font-bold text-gray-900">Sesión no válida</h2>
-          <p className="text-gray-600 mt-3">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+        <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <h2 className="text-2xl font-extrabold text-slate-900">Sesión no válida</h2>
+          <p className="mt-3 text-slate-600">
             Debes ingresar con tu cédula desde el acceso de conductor.
           </p>
           <Link
             to="/enterprise-driver-login"
-            className="inline-block mt-5 bg-green-600 text-white px-5 py-3 rounded-xl font-semibold"
+            className="inline-flex mt-5 rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
           >
             Ir al login del conductor
           </Link>
@@ -1148,10 +1204,10 @@ const EnterpriseDriverPanel = () => {
 
   if (loadingDriver) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
-        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
-          <h2 className="text-2xl font-bold text-gray-900">Cargando panel...</h2>
-          <p className="text-gray-600 mt-3">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+        <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <h2 className="text-2xl font-extrabold text-slate-900">Cargando panel...</h2>
+          <p className="mt-3 text-slate-600">
             Estamos validando la sesión del conductor.
           </p>
         </div>
@@ -1161,17 +1217,17 @@ const EnterpriseDriverPanel = () => {
 
   if (!selectedDriver) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
-        <div className="bg-white rounded-2xl shadow p-6 w-full max-w-md text-center">
-          <h2 className="text-2xl font-bold text-gray-900">
+      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+        <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <h2 className="text-2xl font-extrabold text-slate-900">
             Conductor no encontrado
           </h2>
-          <p className="text-gray-600 mt-3">
+          <p className="mt-3 text-slate-600">
             La cédula ingresada no está asociada a un conductor activo.
           </p>
           <Link
             to="/enterprise-driver-login"
-            className="inline-block mt-5 bg-green-600 text-white px-5 py-3 rounded-xl font-semibold"
+            className="inline-flex mt-5 rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
           >
             Volver al login del conductor
           </Link>
@@ -1181,69 +1237,147 @@ const EnterpriseDriverPanel = () => {
   }
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-green-700 text-white px-6 py-5 shadow-lg">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Panel del Conductor</h1>
-            <p className="text-sm text-green-100 mt-1">
-              Bienvenido, {selectedDriver.name}
-            </p>
+    <div className="min-h-screen bg-slate-50">
+      <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-slate-950 via-green-900 to-green-700 text-white">
+        <div className="absolute inset-0 opacity-25">
+          <div className="absolute -top-16 -left-10 h-48 w-48 rounded-full bg-emerald-400 blur-3xl" />
+          <div className="absolute top-8 right-0 h-56 w-56 rounded-full bg-green-300 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto max-w-7xl px-5 py-8 lg:px-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-green-100 backdrop-blur">
+                <span>🚚</span>
+                <span>Central Go Conductores</span>
+              </div>
+
+              <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
+                Panel del Conductor
+              </h1>
+              <p className="mt-2 text-sm text-green-100 md:text-base">
+                Bienvenido, {selectedDriver.name}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleLogout}
+              className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-green-800 shadow-lg transition hover:scale-[1.02]"
+            >
+              Cerrar sesión
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="bg-white text-green-700 px-4 py-2 rounded-xl font-semibold"
-          >
-            Cerrar sesión
-          </button>
+          <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-green-100">Pedidos pendientes</p>
+              <p className="mt-3 text-3xl font-extrabold">{stats.pending}</p>
+              <p className="mt-1 text-xs text-green-100/80">Por iniciar</p>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-green-100">En curso</p>
+              <p className="mt-3 text-3xl font-extrabold">{stats.inProgress}</p>
+              <p className="mt-1 text-xs text-green-100/80">Ruta activa</p>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-green-100">Finalizadas</p>
+              <p className="mt-3 text-3xl font-extrabold">{stats.finished}</p>
+              <p className="mt-1 text-xs text-green-100/80">Entregas cerradas</p>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-green-100">Total asignadas</p>
+              <p className="mt-3 text-3xl font-extrabold">{stats.total}</p>
+              <p className="mt-1 text-xs text-green-100/80">Historial del conductor</p>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="p-5">
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Tus datos</h2>
+      <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <div className="xl:col-span-4">
+            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+              <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-green-50 px-6 py-5">
+                <h2 className="text-xl font-extrabold text-slate-900">Tus datos</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Información general del conductor y ubicación actual.
+                </p>
+              </div>
 
-          <div className="bg-gray-50 rounded-xl p-4">
-            <p className="font-semibold text-gray-900">{selectedDriver.name}</p>
-            <p className="text-sm text-gray-600">
-              Cédula: {selectedDriver.cedula}
-            </p>
-            <p className="text-sm text-gray-600">
-              Estado: {selectedDriver.status || "Disponible"}
-            </p>
-            <p className="text-sm text-gray-600">
-              Vehículo: {selectedDriver.vehicle} · {selectedDriver.plate}
-            </p>
-            <p className="text-sm text-gray-600">
-              Ubicación:{" "}
-              {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
-                ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
-                : "Aún no reportada"}
-            </p>
-            <p className="text-sm text-gray-600">
-              Última actualización:{" "}
-              {selectedDriver.currentLocation?.updatedAt
-                ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
-                : "Sin actualización"}
-            </p>
+              <div className="p-6">
+                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                  <p className="text-lg font-extrabold text-slate-900">{selectedDriver.name}</p>
+                  <div className="mt-4 grid grid-cols-1 gap-3">
+                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Cédula
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">{selectedDriver.cedula}</p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Estado
+                      </p>
+                      <div className="mt-2">
+                        <span className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${selectedDriver.status === "En ruta" ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+                          {selectedDriver.status || "Disponible"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Vehículo
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {selectedDriver.vehicle} · {selectedDriver.plate}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Ubicación
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
+                          ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
+                          : "Aún no reportada"}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Última actualización
+                      </p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {selectedDriver.currentLocation?.updatedAt
+                          ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+                          : "Sin actualización"}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="xl:col-span-8">
+            <EnterpriseDriverMap
+              selectedDriver={selectedDriver}
+              assignedDeliveries={assignedDeliveries}
+              activeDelivery={activeDelivery}
+              setSelectedDriver={setSelectedDriver}
+            />
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">Tu ruta</h2>
-
-          <EnterpriseDriverMap
-            selectedDriver={selectedDriver}
-            assignedDeliveries={assignedDeliveries}
-            activeDelivery={activeDelivery}
-            setSelectedDriver={setSelectedDriver}
-          />
-        </div>
-
         {selectedDriver ? (
-          <div className="mb-5">
+          <div className="mt-6">
             <EnterpriseDriverDeliveryChat
               delivery={activeDelivery}
               selectedDriver={selectedDriver}
@@ -1251,218 +1385,251 @@ const EnterpriseDriverPanel = () => {
           </div>
         ) : null}
 
-        <div className="bg-white rounded-2xl shadow p-5">
-          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                Tus pedidos asignados
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Por defecto se muestran los pedidos pendientes para evitar una lista muy larga.
-              </p>
+        <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-slate-100 px-6 py-5">
+            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900">
+                  Tus pedidos asignados
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Por defecto se muestran los pedidos pendientes para evitar una lista muy larga.
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200">
+                Total mostrados: {filteredAssignedDeliveries.length}
+              </div>
+            </div>
+          </div>
+
+          <div className="p-6">
+            <div className="flex flex-wrap gap-2 mb-4">
+              <button
+                type="button"
+                onClick={() => handleScopeChange("Pendientes")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "Pendientes"
+                    ? "bg-amber-500 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Pendientes
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleScopeChange("Hoy")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "Hoy"
+                    ? "bg-green-600 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Ver hoy
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleScopeChange("Todos")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "Todos"
+                    ? "bg-slate-800 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Ver todos
+              </button>
             </div>
 
-            <div className="text-sm text-gray-600 font-medium">
-              Total mostrados: {filteredAssignedDeliveries.length}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
+              <input
+                type="date"
+                value={listDateFilter}
+                onChange={(e) => {
+                  setListDateFilter(e.target.value);
+                  setListScopeFilter("Todos");
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-green-400 focus:bg-white focus:ring-4 focus:ring-green-100"
+              />
+
+              <select
+                value={listStatusFilter}
+                onChange={(e) => {
+                  setListStatusFilter(e.target.value);
+                  setListScopeFilter("Todos");
+                }}
+                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-green-400 focus:bg-white focus:ring-4 focus:ring-green-100"
+              >
+                <option value="Todos">Todos los estados</option>
+                <option value="Pendiente">Pendiente</option>
+                <option value="En curso">En curso</option>
+                <option value="Finalizada">Finalizada</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setListStatusFilter("Pendiente");
+                  setListDateFilter("");
+                  setListScopeFilter("Pendientes");
+                }}
+                className="w-full rounded-2xl bg-slate-800 px-4 py-3 font-semibold text-white transition hover:scale-[1.01]"
+              >
+                Reiniciar filtros
+              </button>
             </div>
-          </div>
 
-          <div className="flex flex-wrap gap-2 mb-4">
-            <button
-              type="button"
-              onClick={() => handleScopeChange("Pendientes")}
-              className={`px-4 py-2 rounded-xl font-semibold ${
-                listScopeFilter === "Pendientes"
-                  ? "bg-yellow-500 text-white"
-                  : "bg-gray-100 text-gray-700 border border-gray-200"
-              }`}
-            >
-              Pendientes
-            </button>
+            {assignedDeliveries.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
+                No tienes pedidos asignados en este momento.
+              </div>
+            ) : filteredAssignedDeliveries.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
+                No hay pedidos para este filtro.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {filteredAssignedDeliveries.map((delivery) => {
+                  const deliveryId = String(delivery._id || delivery.id || "");
+                  const isStarting = startingDeliveryId === deliveryId;
+                  const isFinishing = finishingDeliveryId === deliveryId;
+                  const isBusy = !!startingDeliveryId || !!finishingDeliveryId;
 
-            <button
-              type="button"
-              onClick={() => handleScopeChange("Hoy")}
-              className={`px-4 py-2 rounded-xl font-semibold ${
-                listScopeFilter === "Hoy"
-                  ? "bg-green-600 text-white"
-                  : "bg-gray-100 text-gray-700 border border-gray-200"
-              }`}
-            >
-              Ver hoy
-            </button>
-
-            <button
-              type="button"
-              onClick={() => handleScopeChange("Todos")}
-              className={`px-4 py-2 rounded-xl font-semibold ${
-                listScopeFilter === "Todos"
-                  ? "bg-slate-800 text-white"
-                  : "bg-gray-100 text-gray-700 border border-gray-200"
-              }`}
-            >
-              Ver todos
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-            <input
-              type="date"
-              value={listDateFilter}
-              onChange={(e) => {
-                setListDateFilter(e.target.value);
-                setListScopeFilter("Todos");
-              }}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
-
-            <select
-              value={listStatusFilter}
-              onChange={(e) => {
-                setListStatusFilter(e.target.value);
-                setListScopeFilter("Todos");
-              }}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            >
-              <option value="Todos">Todos los estados</option>
-              <option value="Pendiente">Pendiente</option>
-              <option value="En curso">En curso</option>
-              <option value="Finalizada">Finalizada</option>
-            </select>
-
-            <button
-              type="button"
-              onClick={() => {
-                setListStatusFilter("Pendiente");
-                setListDateFilter("");
-                setListScopeFilter("Pendientes");
-              }}
-              className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 font-semibold"
-            >
-              Reiniciar filtros
-            </button>
-          </div>
-
-          {assignedDeliveries.length === 0 ? (
-            <p className="text-gray-500">
-              No tienes pedidos asignados en este momento.
-            </p>
-          ) : filteredAssignedDeliveries.length === 0 ? (
-            <p className="text-gray-500">
-              No hay pedidos para este filtro.
-            </p>
-          ) : (
-            <div className="space-y-4">
-              {filteredAssignedDeliveries.map((delivery) => {
-                const deliveryId = String(delivery._id || delivery.id || "");
-                const isStarting = startingDeliveryId === deliveryId;
-                const isFinishing = finishingDeliveryId === deliveryId;
-                const isBusy = !!startingDeliveryId || !!finishingDeliveryId;
-
-                return (
-                  <div
-                    key={delivery._id || delivery.id}
-                    className="border rounded-xl p-4"
-                  >
-                    <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
-                      <div>
-                        <p className="font-bold text-gray-900">
-                          Factura #{delivery.invoiceNumber}
-                        </p>
-                        <p className="text-xs text-gray-500 mt-1">
-                          Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
-                        </p>
+                  return (
+                    <div
+                      key={delivery._id || delivery.id}
+                      className="rounded-[26px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-lg font-extrabold text-slate-900">
+                              Factura #{delivery.invoiceNumber}
+                            </p>
+                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusBadgeClass(delivery.status)}`}>
+                              {delivery.status}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
+                          </p>
+                        </div>
                       </div>
 
-                      <div>
-                        <span
-                          className={
-                            delivery.status === "Finalizada"
-                              ? "inline-block bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-semibold"
-                              : delivery.status === "En curso"
-                              ? "inline-block bg-blue-100 text-blue-700 px-3 py-1 rounded-full text-xs font-semibold"
-                              : "inline-block bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full text-xs font-semibold"
-                          }
-                        >
-                          {delivery.status}
-                        </span>
+                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Cliente
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.clientName}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Teléfono
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.clientPhone}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200 sm:col-span-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Dirección
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.address}
+                          </p>
+                        </div>
                       </div>
-                    </div>
 
-                    <p className="text-sm text-gray-600 mt-3">
-                      Cliente: {delivery.clientName}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Dirección: {delivery.address}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Teléfono: {delivery.clientPhone}
-                    </p>
+                      {delivery.notes ? (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Observaciones
+                          </p>
+                          <p className="mt-1 text-sm text-slate-700">
+                            {delivery.notes}
+                          </p>
+                        </div>
+                      ) : null}
 
-                    {delivery.notes ? (
-                      <p className="text-sm text-gray-500 mt-2">
-                        Observaciones: {delivery.notes}
-                      </p>
-                    ) : null}
+                      {(delivery.startedAt || delivery.finishedAt) ? (
+                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                          {delivery.startedAt ? (
+                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Inicio
+                              </p>
+                              <p className="mt-1 text-sm font-medium text-slate-800">
+                                {new Date(delivery.startedAt).toLocaleString()}
+                              </p>
+                            </div>
+                          ) : null}
 
-                    {delivery.startedAt ? (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Inicio: {new Date(delivery.startedAt).toLocaleString()}
-                      </p>
-                    ) : null}
+                          {delivery.finishedAt ? (
+                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                                Finalizó
+                              </p>
+                              <p className="mt-1 text-sm font-medium text-slate-800">
+                                {new Date(delivery.finishedAt).toLocaleString()}
+                              </p>
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
 
-                    {delivery.finishedAt ? (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
-                      </p>
-                    ) : null}
-
-                    <div className="flex gap-3 mt-4 flex-wrap">
-                      {delivery.status === "Pendiente" && (
-                        <button
-                          type="button"
-                          disabled={isBusy}
-                          onClick={() =>
-                            handleStartDelivery(delivery._id || delivery.id)
-                          }
-                          className={`px-4 py-2 rounded-xl font-semibold text-white ${
-                            isBusy
-                              ? "bg-blue-300 cursor-not-allowed"
-                              : "bg-blue-600"
-                          }`}
-                        >
-                          {isStarting ? "Iniciando..." : "Iniciar entrega"}
-                        </button>
-                      )}
-
-                      {delivery.status === "En curso" && (
-                        <>
+                      <div className="mt-5 flex gap-3 flex-wrap">
+                        {delivery.status === "Pendiente" && (
                           <button
                             type="button"
                             disabled={isBusy}
                             onClick={() =>
-                              handleFinishDelivery(delivery._id || delivery.id)
+                              handleStartDelivery(delivery._id || delivery.id)
                             }
-                            className={`px-4 py-2 rounded-xl font-semibold text-white ${
+                            className={`px-4 py-2.5 rounded-2xl font-semibold text-white transition ${
                               isBusy
-                                ? "bg-green-300 cursor-not-allowed"
-                                : "bg-green-600"
+                                ? "bg-blue-300 cursor-not-allowed"
+                                : "bg-blue-600 hover:scale-[1.02]"
                             }`}
                           >
-                            {isFinishing ? "Finalizando..." : "Finalizar entrega"}
+                            {isStarting ? "Iniciando..." : "Iniciar entrega"}
                           </button>
+                        )}
 
-                          <span className="inline-flex items-center px-3 py-2 rounded-xl bg-blue-50 text-blue-700 text-sm font-semibold">
-                            Ruta activa en el mapa
-                          </span>
-                        </>
-                      )}
+                        {delivery.status === "En curso" && (
+                          <>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handleFinishDelivery(delivery._id || delivery.id)
+                              }
+                              className={`px-4 py-2.5 rounded-2xl font-semibold text-white transition ${
+                                isBusy
+                                  ? "bg-green-300 cursor-not-allowed"
+                                  : "bg-green-600 hover:scale-[1.02]"
+                              }`}
+                            >
+                              {isFinishing ? "Finalizando..." : "Finalizar entrega"}
+                            </button>
+
+                            <span className="inline-flex items-center rounded-2xl bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 border border-blue-200">
+                              Ruta activa en el mapa
+                            </span>
+                          </>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
