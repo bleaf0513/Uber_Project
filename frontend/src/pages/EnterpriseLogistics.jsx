@@ -261,25 +261,40 @@ const EnterpriseLogisticsDriverMap = ({
   );
 };
 
+const emptyFormData = {
+  invoiceNumber: "",
+  clientId: "",
+  clientName: "",
+  address: "",
+  clientPhone: "",
+  neighborhood: "",
+  reference: "",
+  assignedDriverId: "",
+  invoiceValue: "",
+  paymentMethod: "Efectivo",
+  notes: "",
+  placeId: "",
+};
+
 const EnterpriseLogistics = () => {
   const todayDate = new Date().toISOString().slice(0, 10);
 
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
+  const [clients, setClients] = useState([]);
+
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
   const [savingDelivery, setSavingDelivery] = useState(false);
   const [loadingDrivers, setLoadingDrivers] = useState(true);
   const [loadingDeliveries, setLoadingDeliveries] = useState(true);
+  const [loadingClients, setLoadingClients] = useState(true);
 
   const [listDriverFilter, setListDriverFilter] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState("Todos");
   const [listDateFilter, setListDateFilter] = useState(todayDate);
   const [listScopeFilter, setListScopeFilter] = useState("Hoy");
 
-  const [addressSuggestions, setAddressSuggestions] = useState([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
-  const [addressSelected, setAddressSelected] = useState(false);
-
+  const [clientSearch, setClientSearch] = useState("");
   const [globalIncomingBanner, setGlobalIncomingBanner] = useState(null);
   const [driverChatAlerts, setDriverChatAlerts] = useState({});
 
@@ -289,8 +304,10 @@ const EnterpriseLogistics = () => {
 
   const driversRequestSeqRef = useRef(0);
   const deliveriesRequestSeqRef = useRef(0);
+  const clientsRequestSeqRef = useRef(0);
   const driversPollingBusyRef = useRef(false);
   const deliveriesPollingBusyRef = useRef(false);
+  const clientsPollingBusyRef = useRef(false);
 
   const chatPollingBusyRef = useRef(false);
   const knownLastDriverMessageByDeliveryRef = useRef({});
@@ -301,17 +318,10 @@ const EnterpriseLogistics = () => {
     typeof document !== "undefined" ? document.title : "Panel de Logística"
   );
 
-  const [formData, setFormData] = useState({
-    invoiceNumber: "",
-    clientName: "",
-    address: "",
-    clientPhone: "",
-    assignedDriverId: "",
-    notes: "",
-    placeId: "",
-  });
+  const [formData, setFormData] = useState(emptyFormData);
 
   const driverIdValue = (driver) => String(driver?._id || driver?.id || "");
+  const clientIdValue = (client) => String(client?._id || client?.id || "");
 
   const parseJsonSafe = async (response, label = "API") => {
     const text = await response.text();
@@ -403,6 +413,8 @@ const EnterpriseLogistics = () => {
         String(a?.clientName || "") !== String(b?.clientName || "") ||
         String(a?.clientPhone || "") !== String(b?.clientPhone || "") ||
         String(a?.invoiceNumber || "") !== String(b?.invoiceNumber || "") ||
+        String(a?.invoiceValue || "") !== String(b?.invoiceValue || "") ||
+        String(a?.paymentMethod || "") !== String(b?.paymentMethod || "") ||
         String(aDriverId) !== String(bDriverId)
       ) {
         return false;
@@ -661,6 +673,48 @@ const EnterpriseLogistics = () => {
     }
   }, []);
 
+  const fetchClients = useCallback(async (silent = false) => {
+    if (silent && clientsPollingBusyRef.current) return;
+
+    const seq = ++clientsRequestSeqRef.current;
+
+    try {
+      if (silent) {
+        clientsPollingBusyRef.current = true;
+      } else {
+        setLoadingClients(true);
+      }
+
+      const response = await fetch(`${API_BASE}/enterprise-clients`, {
+        method: "GET",
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      const data = await parseJsonSafe(response, "GET /enterprise-clients");
+
+      if (seq !== clientsRequestSeqRef.current) return;
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar los clientes.");
+      }
+
+      const incomingClients = Array.isArray(data.clients) ? data.clients : [];
+      setClients(incomingClients);
+    } catch (error) {
+      console.error("Error cargando clientes:", error);
+      if (!silent) {
+        alert(error.message || "Error cargando clientes.");
+      }
+    } finally {
+      if (silent) {
+        clientsPollingBusyRef.current = false;
+      } else {
+        setLoadingClients(false);
+      }
+    }
+  }, []);
+
   const scanGlobalChats = useCallback(async () => {
     if (chatPollingBusyRef.current) return;
     if (!Array.isArray(deliveries) || deliveries.length === 0) return;
@@ -819,25 +873,16 @@ const EnterpriseLogistics = () => {
   useEffect(() => {
     fetchDrivers(false);
     fetchDeliveries(false);
+    fetchClients(false);
 
     const interval = setInterval(() => {
       fetchDrivers(true);
       fetchDeliveries(true);
+      fetchClients(true);
     }, 8000);
 
     return () => clearInterval(interval);
-  }, [fetchDrivers, fetchDeliveries]);
-
-  useEffect(() => {
-    const handleOutsideClick = (event) => {
-      if (addressBoxRef.current && !addressBoxRef.current.contains(event.target)) {
-        setShowSuggestions(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleOutsideClick);
-    return () => document.removeEventListener("mousedown", handleOutsideClick);
-  }, []);
+  }, [fetchDrivers, fetchDeliveries, fetchClients]);
 
   useEffect(() => {
     if (!deliveries.length) return;
@@ -875,78 +920,6 @@ const EnterpriseLogistics = () => {
     };
   }, []);
 
-  const normalizeSuggestionRows = (rows) => {
-    const normalized = (Array.isArray(rows) ? rows : [])
-      .map((row) => ({
-        description:
-          row.description ||
-          row.structured_formatting?.main_text ||
-          row.formatted_address ||
-          "",
-        place_id: row.place_id || "",
-      }))
-      .filter((r) => r.description);
-
-    const priorityMatches = normalized.filter((item) => {
-      const text = item.description.toLowerCase();
-      return (
-        text.includes("colombia") ||
-        text.includes("antioquia") ||
-        text.includes("medellín") ||
-        text.includes("medellin") ||
-        text.includes("itagüí") ||
-        text.includes("itagui")
-      );
-    });
-
-    return priorityMatches.length > 0 ? priorityMatches : normalized;
-  };
-
-  const runFetchSuggestions = useCallback(async (query) => {
-    const seq = ++suggestionSeqRef.current;
-
-    try {
-      const searchQuery = normalizeAddressQuery(query);
-
-      const { data } = await axios.get(`${API_BASE}/maps/get-suggestions`, {
-        params: { address: searchQuery },
-        timeout: 18000,
-        withCredentials: true,
-      });
-
-      if (seq !== suggestionSeqRef.current) return;
-
-      const normalized = normalizeSuggestionRows(data);
-      setAddressSuggestions(normalized);
-      setShowSuggestions(true);
-    } catch (error) {
-      console.error("Error fetching address suggestions:", error);
-      if (seq === suggestionSeqRef.current) {
-        setAddressSuggestions([]);
-        setShowSuggestions(false);
-      }
-    }
-  }, []);
-
-  const fetchSuggestions = (query) => {
-    if (query.length < 3) {
-      if (suggestionTimerRef.current) {
-        clearTimeout(suggestionTimerRef.current);
-        suggestionTimerRef.current = null;
-      }
-      setAddressSuggestions([]);
-      setShowSuggestions(false);
-      return;
-    }
-
-    if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
-
-    suggestionTimerRef.current = setTimeout(() => {
-      suggestionTimerRef.current = null;
-      runFetchSuggestions(query);
-    }, 280);
-  };
-
   useEffect(() => {
     return () => {
       if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
@@ -960,35 +933,76 @@ const EnterpriseLogistics = () => {
     };
   }, []);
 
-  const handleAddressSelect = (suggestion) => {
+  const selectedClient = useMemo(() => {
+    if (!formData.clientId) return null;
+    return (
+      clients.find((client) => clientIdValue(client) === String(formData.clientId)) || null
+    );
+  }, [clients, formData.clientId]);
+
+  const filteredClientsForSelect = useMemo(() => {
+    const term = String(clientSearch || "").trim().toLowerCase();
+
+    return clients
+      .filter((client) => Boolean(client?.isActive ?? true))
+      .filter((client) => {
+        if (!term) return true;
+        return (
+          String(client?.name || "").toLowerCase().includes(term) ||
+          String(client?.phone || "").toLowerCase().includes(term) ||
+          String(client?.address || "").toLowerCase().includes(term) ||
+          String(client?.neighborhood || "").toLowerCase().includes(term)
+        );
+      })
+      .sort((a, b) => {
+        const aUpdated = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const bUpdated = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return bUpdated - aUpdated;
+      });
+  }, [clients, clientSearch]);
+
+  const handleClientSelect = (clientId) => {
+    const client =
+      clients.find((item) => clientIdValue(item) === String(clientId || "")) || null;
+
+    if (!client) {
+      setFormData((prev) => ({
+        ...prev,
+        clientId: "",
+        clientName: "",
+        address: "",
+        clientPhone: "",
+        neighborhood: "",
+        reference: "",
+        placeId: "",
+      }));
+      return;
+    }
+
     setFormData((prev) => ({
       ...prev,
-      address: suggestion.description || "",
-      placeId: suggestion.place_id || "",
+      clientId: clientIdValue(client),
+      clientName: client?.name || "",
+      address: client?.address || "",
+      clientPhone: client?.phone || "",
+      neighborhood: client?.neighborhood || "",
+      reference: client?.reference || "",
+      placeId: client?.placeId || "",
     }));
+  };
 
-    setAddressSelected(true);
-    setAddressSuggestions([]);
-    setShowSuggestions(false);
+  const resetDeliveryForm = () => {
+    setFormData(emptyFormData);
+    setClientSearch("");
   };
 
   const handleChange = (e) => {
     const { name, value } = e.target;
 
-    setFormData((prev) => {
-      const next = {
-        ...prev,
-        [name]: value,
-      };
-
-      if (name === "address") {
-        next.placeId = "";
-        setAddressSelected(false);
-        fetchSuggestions(value);
-      }
-
-      return next;
-    });
+    setFormData((prev) => ({
+      ...prev,
+      [name]: value,
+    }));
   };
 
   const handleSaveDelivery = async (e) => {
@@ -996,21 +1010,15 @@ const EnterpriseLogistics = () => {
 
     const {
       invoiceNumber,
-      clientName,
-      address,
-      clientPhone,
+      clientId,
       assignedDriverId,
+      invoiceValue,
+      paymentMethod,
       notes,
-      placeId,
     } = formData;
 
-    if (!invoiceNumber || !clientName || !address || !clientPhone || !assignedDriverId) {
-      alert("Por favor completa todos los campos obligatorios.");
-      return;
-    }
-
-    if (!addressSelected) {
-      alert("Debes escoger la dirección desde la lista de sugerencias.");
+    if (!invoiceNumber || !clientId || !assignedDriverId) {
+      alert("Debes seleccionar cliente, número de factura y conductor.");
       return;
     }
 
@@ -1020,6 +1028,14 @@ const EnterpriseLogistics = () => {
 
     if (!selectedDriver) {
       alert("Debes seleccionar un conductor válido.");
+      return;
+    }
+
+    const currentClient =
+      clients.find((client) => clientIdValue(client) === String(clientId)) || null;
+
+    if (!currentClient) {
+      alert("Debes seleccionar un cliente válido.");
       return;
     }
 
@@ -1034,12 +1050,11 @@ const EnterpriseLogistics = () => {
         credentials: "include",
         body: JSON.stringify({
           invoiceNumber,
-          clientName,
-          address,
-          clientPhone,
+          clientId,
           assignedDriverId,
+          invoiceValue: Number(invoiceValue || 0),
+          paymentMethod: paymentMethod || "Efectivo",
           notes,
-          placeId,
         }),
       });
 
@@ -1049,19 +1064,7 @@ const EnterpriseLogistics = () => {
         throw new Error(data.message || "No fue posible guardar la entrega.");
       }
 
-      setFormData({
-        invoiceNumber: "",
-        clientName: "",
-        address: "",
-        clientPhone: "",
-        assignedDriverId: "",
-        notes: "",
-        placeId: "",
-      });
-
-      setAddressSelected(false);
-      setAddressSuggestions([]);
-      setShowSuggestions(false);
+      resetDeliveryForm();
 
       await fetchDeliveries(true);
       await fetchDrivers(true);
@@ -1247,12 +1250,21 @@ const EnterpriseLogistics = () => {
             </p>
           </div>
 
-          <Link
-            to="/enterprise-dashboard"
-            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
-          >
-            Volver
-          </Link>
+          <div className="flex gap-2 flex-wrap">
+            <Link
+              to="/enterprise-clients"
+              className="bg-blue-900 text-white px-4 py-2 rounded-xl font-semibold"
+            >
+              Clientes
+            </Link>
+
+            <Link
+              to="/enterprise-dashboard"
+              className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
+            >
+              Volver
+            </Link>
+          </div>
         </div>
       </div>
 
@@ -1293,9 +1305,23 @@ const EnterpriseLogistics = () => {
         ) : null}
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Crear nueva entrega
-          </h2>
+          <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">
+                Crear nueva entrega
+              </h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Selecciona un cliente y el sistema autollena la información principal.
+              </p>
+            </div>
+
+            <Link
+              to="/enterprise-clients"
+              className="bg-fuchsia-600 text-white px-4 py-2 rounded-xl font-semibold"
+            >
+              Base de datos de clientes
+            </Link>
+          </div>
 
           <form onSubmit={handleSaveDelivery} className="grid grid-cols-1 gap-4">
             <input
@@ -1308,69 +1334,66 @@ const EnterpriseLogistics = () => {
             />
 
             <input
-              name="clientName"
               type="text"
-              placeholder="Nombre del cliente"
-              value={formData.clientName}
-              onChange={handleChange}
+              placeholder="Buscar cliente por nombre, teléfono o dirección"
+              value={clientSearch}
+              onChange={(e) => setClientSearch(e.target.value)}
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
-            <div className="relative" ref={addressBoxRef}>
-              <input
-                name="address"
-                type="text"
-                placeholder="Dirección o lugar de entrega"
-                value={formData.address}
-                onChange={handleChange}
-                onFocus={() => {
-                  if (addressSuggestions.length > 0) setShowSuggestions(true);
-                }}
-                autoComplete="off"
-                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              />
+            <select
+              name="clientId"
+              value={formData.clientId}
+              onChange={(e) => handleClientSelect(e.target.value)}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+              disabled={loadingClients}
+            >
+              <option value="">
+                {loadingClients
+                  ? "Cargando clientes..."
+                  : filteredClientsForSelect.length === 0
+                  ? "No hay clientes disponibles"
+                  : "Seleccionar cliente"}
+              </option>
+              {filteredClientsForSelect.map((client) => (
+                <option key={clientIdValue(client)} value={clientIdValue(client)}>
+                  {client.name} - {client.phone} - {client.address}
+                </option>
+              ))}
+            </select>
 
-              {showSuggestions && addressSuggestions.length > 0 && (
-                <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-xl max-h-80 overflow-y-auto">
-                  {addressSuggestions.map((suggestion, index) => (
-                    <button
-                      key={`${suggestion.place_id || suggestion.description}-${index}`}
-                      type="button"
-                      onClick={() => handleAddressSelect(suggestion)}
-                      className="w-full text-left px-4 py-4 border-b last:border-b-0 hover:bg-gray-50"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-1 flex-shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
-                          📍
-                        </div>
-                        <div className="text-sm text-gray-800">
-                          {suggestion.description}
-                        </div>
-                      </div>
-                    </button>
-                  ))}
+            {selectedClient ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="bg-blue-50 rounded-xl p-4">
+                  <p className="text-sm text-blue-700 font-semibold">Cliente</p>
+                  <p className="text-sm text-gray-800 mt-1">{formData.clientName || "-"}</p>
                 </div>
-              )}
-            </div>
 
-            {addressSelected ? (
-              <p className="text-xs text-green-600 font-medium">
-                Dirección seleccionada correctamente.
-              </p>
+                <div className="bg-blue-50 rounded-xl p-4">
+                  <p className="text-sm text-blue-700 font-semibold">Teléfono</p>
+                  <p className="text-sm text-gray-800 mt-1">{formData.clientPhone || "-"}</p>
+                </div>
+
+                <div className="bg-indigo-50 rounded-xl p-4 md:col-span-2">
+                  <p className="text-sm text-indigo-700 font-semibold">Dirección</p>
+                  <p className="text-sm text-gray-800 mt-1">{formData.address || "-"}</p>
+                </div>
+
+                <div className="bg-emerald-50 rounded-xl p-4">
+                  <p className="text-sm text-emerald-700 font-semibold">Barrio</p>
+                  <p className="text-sm text-gray-800 mt-1">{formData.neighborhood || "Sin barrio"}</p>
+                </div>
+
+                <div className="bg-purple-50 rounded-xl p-4">
+                  <p className="text-sm text-purple-700 font-semibold">Referencia</p>
+                  <p className="text-sm text-gray-800 mt-1">{formData.reference || "Sin referencia"}</p>
+                </div>
+              </div>
             ) : (
               <p className="text-xs text-orange-600 font-medium">
-                Escribe mínimo 3 letras. La búsqueda prioriza resultados de Colombia.
+                Selecciona un cliente de la base de datos para autollenar la entrega.
               </p>
             )}
-
-            <input
-              name="clientPhone"
-              type="text"
-              placeholder="Teléfono del cliente"
-              value={formData.clientPhone}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
 
             <select
               name="assignedDriverId"
@@ -1391,6 +1414,27 @@ const EnterpriseLogistics = () => {
                   {driver.name} - CC {driver.cedula} - {driver.vehicle}
                 </option>
               ))}
+            </select>
+
+            <input
+              name="invoiceValue"
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="Valor de la factura"
+              value={formData.invoiceValue}
+              onChange={handleChange}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            />
+
+            <select
+              name="paymentMethod"
+              value={formData.paymentMethod}
+              onChange={handleChange}
+              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+            >
+              <option value="Efectivo">Pago en efectivo</option>
+              <option value="Transferencia">Pago por transferencia</option>
             </select>
 
             <textarea
@@ -1762,11 +1806,38 @@ const EnterpriseLogistics = () => {
                     <p className="text-sm text-gray-600">
                       Teléfono: {delivery.clientPhone}
                     </p>
+
+                    {delivery.neighborhood ? (
+                      <p className="text-sm text-gray-600">
+                        Barrio: {delivery.neighborhood}
+                      </p>
+                    ) : null}
+
+                    {delivery.reference ? (
+                      <p className="text-sm text-gray-600">
+                        Referencia: {delivery.reference}
+                      </p>
+                    ) : null}
+
                     <p className="text-sm text-blue-600 font-semibold mt-2">
                       Asignado a:{" "}
                       {delivery.assignedDriverName ||
                         delivery.assignedDriverId?.name ||
                         "Sin nombre"}
+                    </p>
+
+                    <p className="text-sm text-gray-700 mt-1">
+                      Valor factura:{" "}
+                      <span className="font-semibold">
+                        ${Number(delivery.invoiceValue || 0).toLocaleString()}
+                      </span>
+                    </p>
+
+                    <p className="text-sm text-gray-700">
+                      Método de pago:{" "}
+                      <span className="font-semibold">
+                        {delivery.paymentMethod || "Efectivo"}
+                      </span>
                     </p>
 
                     {delivery.placeId ? (
