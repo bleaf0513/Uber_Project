@@ -12,12 +12,16 @@ const EnterpriseDeliveryChat = ({
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [sendingMessage, setSendingMessage] = useState(false);
   const [text, setText] = useState("");
+  const [showIncomingBanner, setShowIncomingBanner] = useState(false);
 
   const chatBodyRef = useRef(null);
   const pollingBusyRef = useRef(false);
   const previousMessageIdsRef = useRef([]);
   const nearBottomRef = useRef(true);
   const initialLoadDoneRef = useRef(false);
+  const audioContextRef = useRef(null);
+  const lastPlayedMessageRef = useRef("");
+  const bannerTimerRef = useRef(null);
 
   const deliveryId = useMemo(
     () => String(delivery?._id || delivery?.id || ""),
@@ -78,6 +82,82 @@ const EnterpriseDeliveryChat = ({
     return true;
   };
 
+  const normalizeSender = (msg) =>
+    String(
+      msg?.senderType ||
+        msg?.senderRole ||
+        msg?.sender ||
+        msg?.role ||
+        ""
+    )
+      .trim()
+      .toLowerCase();
+
+  const isIncomingForLogistics = (msg) => {
+    const sender = normalizeSender(msg);
+    return sender === "driver" || sender === "conductor";
+  };
+
+  const playIncomingMessageSound = () => {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioCtx();
+      }
+
+      const ctx = audioContextRef.current;
+
+      if (ctx.state === "suspended") {
+        ctx.resume().catch(() => {});
+      }
+
+      const now = ctx.currentTime;
+
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+      masterGain.connect(ctx.destination);
+
+      const tone1 = ctx.createOscillator();
+      tone1.type = "square";
+      tone1.frequency.setValueAtTime(950, now);
+      tone1.connect(masterGain);
+      tone1.start(now);
+      tone1.stop(now + 0.16);
+
+      const tone2 = ctx.createOscillator();
+      tone2.type = "square";
+      tone2.frequency.setValueAtTime(1250, now + 0.18);
+      tone2.connect(masterGain);
+      tone2.start(now + 0.18);
+      tone2.stop(now + 0.36);
+
+      const tone3 = ctx.createOscillator();
+      tone3.type = "triangle";
+      tone3.frequency.setValueAtTime(1450, now + 0.38);
+      tone3.connect(masterGain);
+      tone3.start(now + 0.38);
+      tone3.stop(now + 0.54);
+    } catch (error) {
+      console.error("No se pudo reproducir el sonido del mensaje:", error);
+    }
+  };
+
+  const showIncomingNotification = () => {
+    setShowIncomingBanner(true);
+
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+    }
+
+    bannerTimerRef.current = setTimeout(() => {
+      setShowIncomingBanner(false);
+    }, 3000);
+  };
+
   const fetchMessages = async (silent = false) => {
     if (!deliveryId) {
       setMessages([]);
@@ -132,6 +212,8 @@ const EnterpriseDeliveryChat = ({
       setMessages([]);
       previousMessageIdsRef.current = [];
       initialLoadDoneRef.current = false;
+      lastPlayedMessageRef.current = "";
+      setShowIncomingBanner(false);
       return;
     }
 
@@ -179,6 +261,43 @@ const EnterpriseDeliveryChat = ({
 
     previousMessageIdsRef.current = currentIds;
   }, [messages]);
+
+  useEffect(() => {
+    if (!Array.isArray(messages) || messages.length === 0) return;
+    if (!initialLoadDoneRef.current) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (!lastMessage) return;
+
+    const signature = JSON.stringify({
+      id: lastMessage?._id || "",
+      text: lastMessage?.text || "",
+      createdAt: lastMessage?.createdAt || "",
+      sender: normalizeSender(lastMessage),
+    });
+
+    if (signature === lastPlayedMessageRef.current) return;
+
+    const isLogisticsMessage = normalizeSender(lastMessage) === "logistics";
+
+    if (!isLogisticsMessage && isIncomingForLogistics(lastMessage)) {
+      playIncomingMessageSound();
+      showIncomingNotification();
+    }
+
+    lastPlayedMessageRef.current = signature;
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (audioContextRef.current && typeof audioContextRef.current.close === "function") {
+        audioContextRef.current.close().catch(() => {});
+      }
+      if (bannerTimerRef.current) {
+        clearTimeout(bannerTimerRef.current);
+      }
+    };
+  }, []);
 
   const handleSend = async (e) => {
     e.preventDefault();
@@ -286,6 +405,12 @@ const EnterpriseDeliveryChat = ({
         </div>
       </div>
 
+      {showIncomingBanner ? (
+        <div className="mb-4 rounded-2xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-700">
+          Nuevo mensaje del conductor
+        </div>
+      ) : null}
+
       <div
         ref={chatBodyRef}
         className="bg-gray-50 border rounded-2xl p-4 h-[360px] overflow-y-auto space-y-3"
@@ -298,7 +423,7 @@ const EnterpriseDeliveryChat = ({
           </p>
         ) : (
           messages.map((msg) => {
-            const isLogistics = msg.senderType === "logistics";
+            const isLogistics = normalizeSender(msg) === "logistics";
 
             return (
               <div
