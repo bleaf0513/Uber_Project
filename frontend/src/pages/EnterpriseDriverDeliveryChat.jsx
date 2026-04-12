@@ -121,31 +121,32 @@ const EnterpriseDriverDeliveryChat = ({
 
       const now = ctx.currentTime;
 
-      const oscillator1 = ctx.createOscillator();
-      const oscillator2 = ctx.createOscillator();
-      const gainNode = ctx.createGain();
+      const masterGain = ctx.createGain();
+      masterGain.gain.setValueAtTime(0.0001, now);
+      masterGain.gain.exponentialRampToValueAtTime(0.28, now + 0.02);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.58);
+      masterGain.connect(ctx.destination);
 
-      oscillator1.type = "sine";
-      oscillator2.type = "triangle";
+      const tone1 = ctx.createOscillator();
+      tone1.type = "square";
+      tone1.frequency.setValueAtTime(950, now);
+      tone1.connect(masterGain);
+      tone1.start(now);
+      tone1.stop(now + 0.16);
 
-      oscillator1.frequency.setValueAtTime(880, now);
-      oscillator1.frequency.exponentialRampToValueAtTime(740, now + 0.16);
+      const tone2 = ctx.createOscillator();
+      tone2.type = "square";
+      tone2.frequency.setValueAtTime(1250, now + 0.18);
+      tone2.connect(masterGain);
+      tone2.start(now + 0.18);
+      tone2.stop(now + 0.36);
 
-      oscillator2.frequency.setValueAtTime(1320, now);
-      oscillator2.frequency.exponentialRampToValueAtTime(1040, now + 0.16);
-
-      gainNode.gain.setValueAtTime(0.0001, now);
-      gainNode.gain.exponentialRampToValueAtTime(0.14, now + 0.02);
-      gainNode.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
-
-      oscillator1.connect(gainNode);
-      oscillator2.connect(gainNode);
-      gainNode.connect(ctx.destination);
-
-      oscillator1.start(now);
-      oscillator2.start(now);
-      oscillator1.stop(now + 0.26);
-      oscillator2.stop(now + 0.26);
+      const tone3 = ctx.createOscillator();
+      tone3.type = "triangle";
+      tone3.frequency.setValueAtTime(1450, now + 0.38);
+      tone3.connect(masterGain);
+      tone3.start(now + 0.38);
+      tone3.stop(now + 0.54);
     } catch (error) {
       console.error("No se pudo reproducir el sonido del mensaje:", error);
     }
