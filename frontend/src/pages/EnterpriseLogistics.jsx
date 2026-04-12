@@ -31,6 +31,26 @@ const areCoordsMeaningfullyDifferent = (a, b, threshold = 0.0003) => {
   );
 };
 
+const statusBadgeClass = (status) => {
+  if (status === "Finalizada") {
+    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  }
+  if (status === "En curso") {
+    return "bg-blue-100 text-blue-700 border border-blue-200";
+  }
+  return "bg-amber-100 text-amber-700 border border-amber-200";
+};
+
+const statusCardClass = (status) => {
+  if (status === "Finalizada") {
+    return "from-emerald-50 to-white border-emerald-100";
+  }
+  if (status === "En curso") {
+    return "from-blue-50 to-white border-blue-100";
+  }
+  return "from-amber-50 to-white border-amber-100";
+};
+
 const EnterpriseLogisticsDriverMap = ({
   selectedDriver,
   activeOrLastDelivery,
@@ -254,10 +274,24 @@ const EnterpriseLogisticsDriverMap = ({
   ]);
 
   return (
-    <div
-      ref={mapRef}
-      className="w-full h-[480px] rounded-2xl overflow-hidden border border-gray-200"
-    />
+    <div className="relative overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_10px_35px_rgba(15,23,42,0.08)]">
+      <div className="flex items-center justify-between border-b border-slate-100 bg-gradient-to-r from-slate-50 via-white to-blue-50 px-5 py-4">
+        <div>
+          <h3 className="text-base font-bold text-slate-900">Mapa en tiempo real</h3>
+          <p className="text-sm text-slate-500">
+            Ubicación del conductor y ruta hacia el destino activo
+          </p>
+        </div>
+        <div className="rounded-full bg-blue-50 px-3 py-1 text-xs font-semibold text-blue-700 border border-blue-100">
+          Seguimiento activo
+        </div>
+      </div>
+
+      <div
+        ref={mapRef}
+        className="w-full h-[500px] rounded-b-[28px] overflow-hidden"
+      />
+    </div>
   );
 };
 
@@ -832,317 +866,457 @@ const EnterpriseLogistics = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Panel de Logística</h1>
-            <p className="text-sm text-blue-100 mt-1">
-              Asigna pedidos y supervisa conductores en operación
-            </p>
+    <div className="min-h-screen bg-slate-50">
+      <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-slate-950 via-blue-900 to-blue-700 text-white">
+        <div className="absolute inset-0 opacity-20">
+          <div className="absolute -top-16 -left-10 h-48 w-48 rounded-full bg-cyan-400 blur-3xl" />
+          <div className="absolute top-10 right-0 h-56 w-56 rounded-full bg-indigo-400 blur-3xl" />
+        </div>
+
+        <div className="relative mx-auto max-w-7xl px-5 py-8 lg:px-8">
+          <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 backdrop-blur">
+                <span>🚚</span>
+                <span>Central Go Empresas</span>
+              </div>
+
+              <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
+                Panel de Logística Empresarial
+              </h1>
+              <p className="mt-2 max-w-2xl text-sm text-blue-100 md:text-base">
+                Asigna entregas, supervisa conductores, consulta rutas en tiempo real
+                y controla toda la operación desde un solo lugar.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-3">
+              <Link
+                to="/enterprise-dashboard"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-blue-800 shadow-lg transition hover:scale-[1.02]"
+              >
+                Volver al dashboard
+              </Link>
+            </div>
           </div>
 
-          <Link
-            to="/enterprise-dashboard"
-            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
-          >
-            Volver
-          </Link>
+          <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-blue-100">Conductores registrados</p>
+              <div className="mt-3 flex items-end justify-between">
+                <p className="text-3xl font-extrabold">{drivers.length}</p>
+                <span className="rounded-full bg-white/10 px-3 py-1 text-xs font-semibold text-white">
+                  Equipo
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-blue-100">Entregas pendientes</p>
+              <div className="mt-3 flex items-end justify-between">
+                <p className="text-3xl font-extrabold">{stats.pending}</p>
+                <span className="rounded-full bg-amber-400/20 px-3 py-1 text-xs font-semibold text-amber-100">
+                  Pendiente
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-blue-100">Entregas en curso</p>
+              <div className="mt-3 flex items-end justify-between">
+                <p className="text-3xl font-extrabold">{stats.inProgress}</p>
+                <span className="rounded-full bg-cyan-400/20 px-3 py-1 text-xs font-semibold text-cyan-100">
+                  Activa
+                </span>
+              </div>
+            </div>
+
+            <div className="rounded-3xl border border-white/15 bg-white/10 p-5 shadow-[0_10px_30px_rgba(0,0,0,0.15)] backdrop-blur">
+              <p className="text-sm text-blue-100">Entregas finalizadas</p>
+              <div className="mt-3 flex items-end justify-between">
+                <p className="text-3xl font-extrabold">{stats.finished}</p>
+                <span className="rounded-full bg-emerald-400/20 px-3 py-1 text-xs font-semibold text-emerald-100">
+                  Cerrada
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
-      <div className="p-5">
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Crear nueva entrega
-          </h2>
+      <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
+          <div className="xl:col-span-5">
+            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+              <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-blue-50 px-6 py-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <h2 className="text-xl font-extrabold text-slate-900">
+                      Crear nueva entrega
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Registra la factura, selecciona la dirección y asigna el conductor.
+                    </p>
+                  </div>
+                  <div className="rounded-2xl bg-blue-50 px-3 py-2 text-xs font-semibold text-blue-700 border border-blue-100">
+                    Nueva operación
+                  </div>
+                </div>
+              </div>
 
-          <form onSubmit={handleSaveDelivery} className="grid grid-cols-1 gap-4">
-            <input
-              name="invoiceNumber"
-              type="text"
-              placeholder="Número de factura"
-              value={formData.invoiceNumber}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
+              <div className="p-6">
+                <form onSubmit={handleSaveDelivery} className="grid grid-cols-1 gap-4">
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Número de factura
+                    </label>
+                    <input
+                      name="invoiceNumber"
+                      type="text"
+                      placeholder="Ej. FAC-10245"
+                      value={formData.invoiceNumber}
+                      onChange={handleChange}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    />
+                  </div>
 
-            <input
-              name="clientName"
-              type="text"
-              placeholder="Nombre del cliente"
-              value={formData.clientName}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Nombre del cliente
+                    </label>
+                    <input
+                      name="clientName"
+                      type="text"
+                      placeholder="Nombre del cliente"
+                      value={formData.clientName}
+                      onChange={handleChange}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    />
+                  </div>
 
-            <div className="relative" ref={addressBoxRef}>
-              <input
-                name="address"
-                type="text"
-                placeholder="Dirección de entrega"
-                value={formData.address}
-                onChange={handleChange}
-                onFocus={() => {
-                  if (addressSuggestions.length > 0) setShowSuggestions(true);
-                }}
-                autoComplete="off"
-                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              />
+                  <div className="relative" ref={addressBoxRef}>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Dirección de entrega
+                    </label>
+                    <input
+                      name="address"
+                      type="text"
+                      placeholder="Escribe la dirección"
+                      value={formData.address}
+                      onChange={handleChange}
+                      onFocus={() => {
+                        if (addressSuggestions.length > 0) setShowSuggestions(true);
+                      }}
+                      autoComplete="off"
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    />
 
-              {showSuggestions && addressSuggestions.length > 0 && (
-                <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-xl max-h-80 overflow-y-auto">
-                  {addressSuggestions.map((suggestion, index) => (
-                    <button
-                      key={`${suggestion.place_id || suggestion.description}-${index}`}
-                      type="button"
-                      onClick={() => handleAddressSelect(suggestion)}
-                      className="w-full text-left px-4 py-4 border-b last:border-b-0 hover:bg-gray-50"
-                    >
-                      <div className="flex items-start gap-3">
-                        <div className="mt-1 flex-shrink-0 w-9 h-9 rounded-full bg-gray-100 flex items-center justify-center">
-                          📍
-                        </div>
-                        <div className="text-sm text-gray-800">
-                          {suggestion.description}
+                    {showSuggestions && addressSuggestions.length > 0 && (
+                      <div className="absolute z-50 mt-2 w-full overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-2xl">
+                        <div className="max-h-80 overflow-y-auto">
+                          {addressSuggestions.map((suggestion, index) => (
+                            <button
+                              key={`${suggestion.place_id || suggestion.description}-${index}`}
+                              type="button"
+                              onClick={() => handleAddressSelect(suggestion)}
+                              className="w-full border-b border-slate-100 px-4 py-4 text-left transition last:border-b-0 hover:bg-slate-50"
+                            >
+                              <div className="flex items-start gap-3">
+                                <div className="mt-0.5 flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-full bg-blue-50 text-base">
+                                  📍
+                                </div>
+                                <div className="text-sm text-slate-800">
+                                  {suggestion.description}
+                                </div>
+                              </div>
+                            </button>
+                          ))}
                         </div>
                       </div>
-                    </button>
-                  ))}
+                    )}
+                  </div>
+
+                  {addressSelected ? (
+                    <div className="rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700">
+                      Dirección seleccionada correctamente.
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700">
+                      Escribe mínimo 3 letras y selecciona una dirección de la lista.
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Teléfono del cliente
+                    </label>
+                    <input
+                      name="clientPhone"
+                      type="text"
+                      placeholder="Teléfono del cliente"
+                      value={formData.clientPhone}
+                      onChange={handleChange}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Conductor asignado
+                    </label>
+                    <select
+                      name="assignedDriverId"
+                      value={formData.assignedDriverId}
+                      onChange={handleChange}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                      disabled={loadingDrivers}
+                    >
+                      <option value="">
+                        {loadingDrivers
+                          ? "Cargando conductores..."
+                          : drivers.length === 0
+                          ? "No hay conductores disponibles"
+                          : "Seleccionar conductor"}
+                      </option>
+                      {drivers.map((driver) => (
+                        <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
+                          {driver.name} - CC {driver.cedula} - {driver.vehicle}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="mb-2 block text-sm font-semibold text-slate-700">
+                      Observaciones
+                    </label>
+                    <textarea
+                      name="notes"
+                      placeholder="Información adicional para la entrega"
+                      value={formData.notes}
+                      onChange={handleChange}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                      rows="4"
+                    ></textarea>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={savingDelivery}
+                    className="mt-2 inline-flex w-full items-center justify-center rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 px-5 py-3.5 text-base font-bold text-white shadow-lg shadow-blue-200 transition hover:scale-[1.01] disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {savingDelivery ? "Guardando..." : "Guardar y asignar entrega"}
+                  </button>
+                </form>
+              </div>
+            </div>
+          </div>
+
+          <div className="xl:col-span-7">
+            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+              <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-cyan-50 px-6 py-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <h2 className="text-xl font-extrabold text-slate-900">
+                      Supervisar por conductor
+                    </h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      Consulta desempeño, estado actual y operaciones por conductor.
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200">
+                    Monitoreo operativo
+                  </div>
                 </div>
-              )}
-            </div>
+              </div>
 
-            {addressSelected ? (
-              <p className="text-xs text-green-600 font-medium">
-                Dirección seleccionada correctamente.
-              </p>
-            ) : (
-              <p className="text-xs text-orange-600 font-medium">
-                Escribe mínimo 3 letras y selecciona una dirección de la lista.
-              </p>
-            )}
+              <div className="p-6">
+                <select
+                  value={selectedDriverFilter}
+                  onChange={(e) => setSelectedDriverFilter(e.target.value)}
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-blue-400 focus:bg-white focus:ring-4 focus:ring-blue-100"
+                >
+                  <option value="">Ver todos los conductores</option>
+                  {drivers.map((driver) => (
+                    <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
+                      {driver.name} - CC {driver.cedula} - {driver.vehicle}
+                    </option>
+                  ))}
+                </select>
 
-            <input
-              name="clientPhone"
-              type="text"
-              placeholder="Teléfono del cliente"
-              value={formData.clientPhone}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
+                <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-3">
+                  <div className="rounded-3xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white p-5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-600">Pendientes</p>
+                      <span className="text-xl">🕒</span>
+                    </div>
+                    <p className="mt-3 text-3xl font-extrabold text-amber-600">
+                      {stats.pending}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">Entregas por iniciar</p>
+                  </div>
 
-            <select
-              name="assignedDriverId"
-              value={formData.assignedDriverId}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              disabled={loadingDrivers}
-            >
-              <option value="">
-                {loadingDrivers
-                  ? "Cargando conductores..."
-                  : drivers.length === 0
-                  ? "No hay conductores disponibles"
-                  : "Seleccionar conductor"}
-              </option>
-              {drivers.map((driver) => (
-                <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                  {driver.name} - CC {driver.cedula} - {driver.vehicle}
-                </option>
-              ))}
-            </select>
+                  <div className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-600">En curso</p>
+                      <span className="text-xl">🚚</span>
+                    </div>
+                    <p className="mt-3 text-3xl font-extrabold text-blue-600">
+                      {stats.inProgress}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">Entregas activas</p>
+                  </div>
 
-            <textarea
-              name="notes"
-              placeholder="Observaciones"
-              value={formData.notes}
-              onChange={handleChange}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              rows="4"
-            ></textarea>
-
-            <button
-              type="submit"
-              disabled={savingDelivery}
-              className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-60"
-            >
-              {savingDelivery ? "Guardando..." : "Guardar y asignar entrega"}
-            </button>
-          </form>
-        </div>
-
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Supervisar por conductor
-          </h2>
-
-          <select
-            value={selectedDriverFilter}
-            onChange={(e) => setSelectedDriverFilter(e.target.value)}
-            className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-          >
-            <option value="">Ver todos los conductores</option>
-            {drivers.map((driver) => (
-              <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                {driver.name} - CC {driver.cedula} - {driver.vehicle}
-              </option>
-            ))}
-          </select>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
-            <div className="bg-yellow-50 rounded-xl p-4 text-center">
-              <p className="text-sm text-gray-500">Pendientes</p>
-              <p className="text-2xl font-bold text-yellow-600">
-                {stats.pending}
-              </p>
-            </div>
-
-            <div className="bg-blue-50 rounded-xl p-4 text-center">
-              <p className="text-sm text-gray-500">En curso</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {stats.inProgress}
-              </p>
-            </div>
-
-            <div className="bg-green-50 rounded-xl p-4 text-center">
-              <p className="text-sm text-gray-500">Finalizadas</p>
-              <p className="text-2xl font-bold text-green-600">
-                {stats.finished}
-              </p>
+                  <div className="rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
+                    <div className="flex items-center justify-between">
+                      <p className="text-sm font-semibold text-slate-600">Finalizadas</p>
+                      <span className="text-xl">✅</span>
+                    </div>
+                    <p className="mt-3 text-3xl font-extrabold text-emerald-600">
+                      {stats.finished}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500">Entregas cerradas</p>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
         {selectedDriver ? (
-          <div className="bg-white rounded-2xl shadow p-5 mb-5">
-            <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
-              <div>
-                <h2 className="text-xl font-bold text-gray-900">
-                  Seguimiento del conductor
-                </h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Ubicación actual, destino activo y última operación registrada
-                </p>
-              </div>
+          <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+            <div className="border-b border-slate-100 bg-gradient-to-r from-slate-950 via-slate-900 to-blue-950 px-6 py-5 text-white">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <h2 className="text-xl font-extrabold">Seguimiento del conductor</h2>
+                  <p className="mt-1 text-sm text-slate-300">
+                    Ubicación actual, destino activo y última operación registrada.
+                  </p>
+                </div>
 
-              <div className="flex flex-wrap gap-2">
-                <button
-                  type="button"
-                  onClick={openDriverInGoogleMaps}
-                  disabled={!selectedDriver?.currentLocation?.lat}
-                  className={`px-4 py-2 rounded-xl font-semibold ${
-                    selectedDriver?.currentLocation?.lat
-                      ? "bg-green-600 text-white"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  Ver ubicación
-                </button>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={openDriverInGoogleMaps}
+                    disabled={!selectedDriver?.currentLocation?.lat}
+                    className={`rounded-2xl px-4 py-2.5 font-semibold transition ${
+                      selectedDriver?.currentLocation?.lat
+                        ? "bg-emerald-500 text-white hover:scale-[1.02]"
+                        : "cursor-not-allowed bg-slate-700 text-slate-400"
+                    }`}
+                  >
+                    Ver ubicación
+                  </button>
 
-                <button
-                  type="button"
-                  onClick={openRouteInGoogleMaps}
-                  disabled={!activeOrLastDelivery?.address || !selectedDriver?.currentLocation?.lat}
-                  className={`px-4 py-2 rounded-xl font-semibold ${
-                    activeOrLastDelivery?.address && selectedDriver?.currentLocation?.lat
-                      ? "bg-blue-600 text-white"
-                      : "bg-gray-300 text-gray-500 cursor-not-allowed"
-                  }`}
-                >
-                  Ver ruta
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-4">
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-sm text-gray-500">Conductor</p>
-                <p className="font-bold text-gray-900">{selectedDriver.name}</p>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-sm text-gray-500">Estado</p>
-                <p className="font-bold text-gray-900">
-                  {selectedDriver.status || "Disponible"}
-                </p>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-sm text-gray-500">Última actualización</p>
-                <p className="font-bold text-gray-900">
-                  {selectedDriver.currentLocation?.updatedAt
-                    ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
-                    : "Aún no reportada"}
-                </p>
-              </div>
-
-              <div className="bg-gray-50 rounded-xl p-4">
-                <p className="text-sm text-gray-500">Pendientes</p>
-                <p className="font-bold text-gray-900">
-                  {selectedDriverPendingDeliveries.length}
-                </p>
+                  <button
+                    type="button"
+                    onClick={openRouteInGoogleMaps}
+                    disabled={!activeOrLastDelivery?.address || !selectedDriver?.currentLocation?.lat}
+                    className={`rounded-2xl px-4 py-2.5 font-semibold transition ${
+                      activeOrLastDelivery?.address && selectedDriver?.currentLocation?.lat
+                        ? "bg-blue-500 text-white hover:scale-[1.02]"
+                        : "cursor-not-allowed bg-slate-700 text-slate-400"
+                    }`}
+                  >
+                    Ver ruta
+                  </button>
+                </div>
               </div>
             </div>
 
-            <EnterpriseLogisticsDriverMap
-              selectedDriver={selectedDriver}
-              activeOrLastDelivery={activeOrLastDelivery}
-              driverPendingDeliveriesCount={selectedDriverPendingDeliveries.length}
-            />
+            <div className="p-6">
+              <div className="mb-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                  <p className="text-sm font-semibold text-slate-500">Conductor</p>
+                  <p className="mt-2 text-lg font-extrabold text-slate-900">
+                    {selectedDriver.name}
+                  </p>
+                </div>
 
-            <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
-              <div className="bg-blue-50 rounded-xl p-4">
-                <p className="text-sm text-blue-700 font-semibold">
-                  Coordenadas actuales
-                </p>
-                <p className="text-sm text-gray-800 mt-1">
-                  {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
-                    ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
-                    : "Sin ubicación reportada"}
-                </p>
+                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                  <p className="text-sm font-semibold text-slate-500">Estado</p>
+                  <div className="mt-2">
+                    <span className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${statusBadgeClass(selectedDriver.status || "Pendiente")}`}>
+                      {selectedDriver.status || "Disponible"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                  <p className="text-sm font-semibold text-slate-500">Última actualización</p>
+                  <p className="mt-2 text-sm font-bold text-slate-900">
+                    {selectedDriver.currentLocation?.updatedAt
+                      ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+                      : "Aún no reportada"}
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
+                  <p className="text-sm font-semibold text-slate-500">Pendientes</p>
+                  <p className="mt-2 text-2xl font-extrabold text-slate-900">
+                    {selectedDriverPendingDeliveries.length}
+                  </p>
+                </div>
               </div>
 
-              <div className="bg-indigo-50 rounded-xl p-4">
-                <p className="text-sm text-indigo-700 font-semibold">
-                  Ruta activa
-                </p>
-                <p className="text-sm text-gray-800 mt-1">
-                  {selectedDriverActiveDelivery
-                    ? `${selectedDriverActiveDelivery.clientName} — ${selectedDriverActiveDelivery.address}`
-                    : "No tiene ruta en curso"}
-                </p>
-              </div>
+              <EnterpriseLogisticsDriverMap
+                selectedDriver={selectedDriver}
+                activeOrLastDelivery={activeOrLastDelivery}
+                driverPendingDeliveriesCount={selectedDriverPendingDeliveries.length}
+              />
 
-              <div className="bg-emerald-50 rounded-xl p-4">
-                <p className="text-sm text-emerald-700 font-semibold">
-                  Última entrega finalizada
-                </p>
-                <p className="text-sm text-gray-800 mt-1">
-                  {selectedDriverLastFinishedDelivery
-                    ? `${selectedDriverLastFinishedDelivery.clientName} — ${selectedDriverLastFinishedDelivery.address}`
-                    : "Sin entregas finalizadas"}
-                </p>
-              </div>
+              <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-3xl border border-blue-200 bg-gradient-to-br from-blue-50 to-white p-5">
+                  <p className="text-sm font-semibold text-blue-700">
+                    Coordenadas actuales
+                  </p>
+                  <p className="mt-2 text-sm text-slate-800">
+                    {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
+                      ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
+                      : "Sin ubicación reportada"}
+                  </p>
+                </div>
 
-              <div className="bg-purple-50 rounded-xl p-4">
-                <p className="text-sm text-purple-700 font-semibold">
-                  Referencia mostrada en mapa
-                </p>
-                <p className="text-sm text-gray-800 mt-1">
-                  {selectedDriverActiveDelivery
-                    ? "Destino activo"
-                    : selectedDriverLastFinishedDelivery
-                    ? "Última ruta conocida"
-                    : "Solo ubicación actual"}
-                </p>
+                <div className="rounded-3xl border border-indigo-200 bg-gradient-to-br from-indigo-50 to-white p-5">
+                  <p className="text-sm font-semibold text-indigo-700">Ruta activa</p>
+                  <p className="mt-2 text-sm text-slate-800">
+                    {selectedDriverActiveDelivery
+                      ? `${selectedDriverActiveDelivery.clientName} — ${selectedDriverActiveDelivery.address}`
+                      : "No tiene ruta en curso"}
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white p-5">
+                  <p className="text-sm font-semibold text-emerald-700">
+                    Última entrega finalizada
+                  </p>
+                  <p className="mt-2 text-sm text-slate-800">
+                    {selectedDriverLastFinishedDelivery
+                      ? `${selectedDriverLastFinishedDelivery.clientName} — ${selectedDriverLastFinishedDelivery.address}`
+                      : "Sin entregas finalizadas"}
+                  </p>
+                </div>
+
+                <div className="rounded-3xl border border-purple-200 bg-gradient-to-br from-purple-50 to-white p-5">
+                  <p className="text-sm font-semibold text-purple-700">
+                    Referencia mostrada en mapa
+                  </p>
+                  <p className="mt-2 text-sm text-slate-800">
+                    {selectedDriverActiveDelivery
+                      ? "Destino activo"
+                      : selectedDriverLastFinishedDelivery
+                      ? "Última ruta conocida"
+                      : "Solo ubicación actual"}
+                  </p>
+                </div>
               </div>
             </div>
           </div>
         ) : null}
 
         {selectedDriver ? (
-          <div className="mb-5">
+          <div className="mt-6">
             <EnterpriseDeliveryChat
               delivery={selectedDriverChatDelivery}
               selectedDriver={selectedDriver}
@@ -1151,93 +1325,151 @@ const EnterpriseLogistics = () => {
           </div>
         ) : null}
 
-        <div className="bg-white rounded-2xl shadow p-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
-            Pedidos asignados
-          </h2>
+        <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-slate-100 px-6 py-5">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900">
+                  Pedidos asignados
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Listado operativo de entregas registradas en el sistema.
+                </p>
+              </div>
 
-          {loadingDeliveries ? (
-            <p className="text-gray-500">Cargando pedidos...</p>
-          ) : filteredDeliveries.length === 0 ? (
-            <p className="text-gray-500">No hay pedidos para este filtro.</p>
-          ) : (
-            <div className="space-y-4">
-              {filteredDeliveries.map((delivery) => {
-                const deliveryId = delivery._id || delivery.id;
-                return (
-                  <div key={deliveryId} className="border rounded-xl p-4">
-                    <p className="font-bold text-gray-900">
-                      Factura #{delivery.invoiceNumber}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Cliente: {delivery.clientName}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Dirección: {delivery.address}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Teléfono: {delivery.clientPhone}
-                    </p>
-                    <p className="text-sm text-blue-600 font-semibold mt-2">
-                      Asignado a:{" "}
-                      {delivery.assignedDriverName ||
-                        delivery.assignedDriverId?.name ||
-                        "Sin nombre"}
-                    </p>
-
-                    {delivery.placeId ? (
-                      <p className="text-xs text-gray-500 mt-1">
-                        placeId: {delivery.placeId}
-                      </p>
-                    ) : null}
-
-                    <p className="text-sm mt-2">
-                      Estado:{" "}
-                      <span
-                        className={
-                          delivery.status === "Finalizada"
-                            ? "text-green-600 font-semibold"
-                            : delivery.status === "En curso"
-                            ? "text-blue-600 font-semibold"
-                            : "text-yellow-600 font-semibold"
-                        }
-                      >
-                        {delivery.status}
-                      </span>
-                    </p>
-
-                    {delivery.startedAt && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Inicio: {new Date(delivery.startedAt).toLocaleString()}
-                      </p>
-                    )}
-
-                    {delivery.finishedAt && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
-                      </p>
-                    )}
-
-                    {delivery.notes ? (
-                      <p className="text-sm text-gray-500 mt-1">
-                        Observaciones: {delivery.notes}
-                      </p>
-                    ) : null}
-
-                    <div className="flex justify-end mt-3">
-                      <button
-                        type="button"
-                        onClick={() => handleDeleteDelivery(deliveryId)}
-                        className="bg-red-500 text-white px-3 py-1 rounded-lg text-sm font-semibold"
-                      >
-                        Eliminar
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
+              <div className="rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200">
+                Total: {filteredDeliveries.length}
+              </div>
             </div>
-          )}
+          </div>
+
+          <div className="p-6">
+            {loadingDeliveries ? (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
+                Cargando pedidos...
+              </div>
+            ) : filteredDeliveries.length === 0 ? (
+              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
+                No hay pedidos para este filtro.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                {filteredDeliveries.map((delivery) => {
+                  const deliveryId = delivery._id || delivery.id;
+
+                  return (
+                    <div
+                      key={deliveryId}
+                      className={`rounded-[26px] border bg-gradient-to-br p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg ${statusCardClass(delivery.status)}`}
+                    >
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <p className="text-lg font-extrabold text-slate-900">
+                              Factura #{delivery.invoiceNumber}
+                            </p>
+                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${statusBadgeClass(delivery.status)}`}>
+                              {delivery.status}
+                            </span>
+                          </div>
+                          <p className="mt-1 text-sm text-slate-500">
+                            Pedido asignado a operación logística
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDelivery(deliveryId)}
+                          className="inline-flex items-center justify-center rounded-2xl bg-red-500 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-red-600"
+                        >
+                          Eliminar
+                        </button>
+                      </div>
+
+                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <div className="rounded-2xl bg-white/80 p-4 border border-white/70">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Cliente
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.clientName}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-4 border border-white/70">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Teléfono
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.clientPhone}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-4 border border-white/70 sm:col-span-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Dirección
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.address}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white/80 p-4 border border-white/70 sm:col-span-2">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Asignado a
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-blue-700">
+                            {delivery.assignedDriverName ||
+                              delivery.assignedDriverId?.name ||
+                              "Sin nombre"}
+                          </p>
+                        </div>
+                      </div>
+
+                      {delivery.placeId ? (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3 text-xs text-slate-500">
+                          placeId: {delivery.placeId}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                        {delivery.startedAt && (
+                          <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Inicio
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-slate-800">
+                              {new Date(delivery.startedAt).toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+
+                        {delivery.finishedAt && (
+                          <div className="rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Finalizó
+                            </p>
+                            <p className="mt-1 text-sm font-medium text-slate-800">
+                              {new Date(delivery.finishedAt).toLocaleString()}
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      {delivery.notes ? (
+                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white/70 px-4 py-3">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Observaciones
+                          </p>
+                          <p className="mt-1 text-sm text-slate-700">{delivery.notes}</p>
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
