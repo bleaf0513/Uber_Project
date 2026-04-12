@@ -262,6 +262,8 @@ const EnterpriseLogisticsDriverMap = ({
 };
 
 const EnterpriseLogistics = () => {
+  const todayDate = new Date().toISOString().slice(0, 10);
+
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
   const [selectedDriverFilter, setSelectedDriverFilter] = useState("");
@@ -271,7 +273,8 @@ const EnterpriseLogistics = () => {
 
   const [listDriverFilter, setListDriverFilter] = useState("");
   const [listStatusFilter, setListStatusFilter] = useState("Todos");
-  const [listDateFilter, setListDateFilter] = useState("");
+  const [listDateFilter, setListDateFilter] = useState(todayDate);
+  const [listScopeFilter, setListScopeFilter] = useState("Hoy");
 
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -834,19 +837,34 @@ const EnterpriseLogistics = () => {
   }, [deliveries, selectedDriver]);
 
   const listFilteredDeliveries = useMemo(() => {
-    return deliveries.filter((delivery) => {
-      const matchesDriver =
-        !listDriverFilter || getDeliveryAssignedId(delivery) === String(listDriverFilter);
+    return deliveries
+      .filter((delivery) => {
+        const matchesDriver =
+          !listDriverFilter || getDeliveryAssignedId(delivery) === String(listDriverFilter);
 
-      const matchesStatus =
-        listStatusFilter === "Todos" || String(delivery?.status || "") === String(listStatusFilter);
+        const matchesStatus =
+          listStatusFilter === "Todos" || String(delivery?.status || "") === String(listStatusFilter);
 
-      const deliveryDate = getDeliveryReferenceDate(delivery);
-      const matchesDate = !listDateFilter || deliveryDate === listDateFilter;
+        const deliveryDate = getDeliveryReferenceDate(delivery);
 
-      return matchesDriver && matchesStatus && matchesDate;
-    });
-  }, [deliveries, listDriverFilter, listStatusFilter, listDateFilter]);
+        const matchesDate =
+          listScopeFilter === "Todos"
+            ? !listDateFilter || deliveryDate === listDateFilter
+            : deliveryDate === listDateFilter;
+
+        return matchesDriver && matchesStatus && matchesDate;
+      })
+      .sort((a, b) => {
+        const aTime = new Date(
+          a?.createdAt || a?.updatedAt || a?.startedAt || a?.finishedAt || 0
+        ).getTime();
+        const bTime = new Date(
+          b?.createdAt || b?.updatedAt || b?.startedAt || b?.finishedAt || 0
+        ).getTime();
+
+        return bTime - aTime;
+      });
+  }, [deliveries, listDriverFilter, listStatusFilter, listDateFilter, listScopeFilter]);
 
   const activeOrLastDelivery =
     selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
@@ -879,6 +897,13 @@ const EnterpriseLogistics = () => {
     )}&destination=${encodeURIComponent(activeOrLastDelivery.address)}&travelmode=driving`;
 
     window.open(url, "_blank");
+  };
+
+  const handleListScopeChange = (scope) => {
+    setListScopeFilter(scope);
+    if (scope === "Hoy") {
+      setListDateFilter(todayDate);
+    }
   };
 
   return (
@@ -1208,7 +1233,7 @@ const EnterpriseLogistics = () => {
                 Pedidos asignados
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Filtra por fecha, conductor y estado.
+                Por defecto se muestran los pedidos de hoy para evitar una lista demasiado larga.
               </p>
             </div>
 
@@ -1217,11 +1242,40 @@ const EnterpriseLogistics = () => {
             </div>
           </div>
 
+          <div className="flex flex-wrap gap-2 mb-4">
+            <button
+              type="button"
+              onClick={() => handleListScopeChange("Hoy")}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                listScopeFilter === "Hoy"
+                  ? "bg-blue-600 text-white"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Ver hoy
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleListScopeChange("Todos")}
+              className={`px-4 py-2 rounded-xl font-semibold ${
+                listScopeFilter === "Todos"
+                  ? "bg-slate-800 text-white"
+                  : "bg-gray-100 text-gray-700 border border-gray-200"
+              }`}
+            >
+              Ver todos
+            </button>
+          </div>
+
           <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-5">
             <input
               type="date"
               value={listDateFilter}
-              onChange={(e) => setListDateFilter(e.target.value)}
+              onChange={(e) => {
+                setListDateFilter(e.target.value);
+                setListScopeFilter("Todos");
+              }}
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
@@ -1252,13 +1306,14 @@ const EnterpriseLogistics = () => {
             <button
               type="button"
               onClick={() => {
-                setListDateFilter("");
+                setListDateFilter(todayDate);
                 setListDriverFilter("");
                 setListStatusFilter("Todos");
+                setListScopeFilter("Hoy");
               }}
               className="w-full bg-slate-800 text-white rounded-xl px-4 py-3 font-semibold"
             >
-              Limpiar filtros
+              Reiniciar filtros
             </button>
           </div>
 
