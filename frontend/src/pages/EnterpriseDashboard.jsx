@@ -143,6 +143,7 @@ const EnterpriseDashboard = () => {
         "Registra, consulta y administra los conductores de tu empresa.",
       icon: "👨‍✈️",
       badge: "Gestión",
+      accent: "from-blue-500 to-cyan-500",
     },
     {
       to: "/enterprise-logistics",
@@ -151,6 +152,7 @@ const EnterpriseDashboard = () => {
         "Crea entregas, asigna conductores y organiza la operación.",
       icon: "📦",
       badge: "Operación",
+      accent: "from-violet-500 to-indigo-500",
     },
     {
       to: "/enterprise-delivery-stats",
@@ -159,6 +161,7 @@ const EnterpriseDashboard = () => {
         "Consulta el rendimiento por día o por mes y analiza el desempeño general.",
       icon: "📊",
       badge: "Analítica",
+      accent: "from-emerald-500 to-green-500",
     },
     {
       to: "/enterprise-delivery-history",
@@ -167,8 +170,11 @@ const EnterpriseDashboard = () => {
         "Busca entregas por factura, cliente, conductor o fecha.",
       icon: "🗂️",
       badge: "Historial",
+      accent: "from-amber-500 to-orange-500",
     },
   ];
+
+  const enterpriseName = "Tu Empresa";
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -186,19 +192,24 @@ const EnterpriseDashboard = () => {
                 <span>Central Go Empresas</span>
               </div>
 
-              <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
-                Panel principal empresarial
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-200">
+                Bienvenido
+              </p>
+
+              <h1 className="mt-2 text-3xl font-extrabold tracking-tight md:text-5xl">
+                {enterpriseName}
               </h1>
-              <p className="mt-2 max-w-2xl text-sm text-blue-100 md:text-base">
+
+              <p className="mt-3 max-w-2xl text-sm text-blue-100 md:text-base">
                 Administra conductores, supervisa entregas y controla toda la
-                operación logística desde un entorno más profesional y claro.
+                operación logística desde un entorno profesional, claro y moderno.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <Link
                 to="/"
-                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-blue-800 shadow-lg transition hover:scale-[1.02]"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-blue-800 shadow-lg transition duration-200 hover:scale-[1.03] hover:shadow-2xl"
               >
                 Salir
               </Link>
@@ -232,19 +243,13 @@ const EnterpriseDashboard = () => {
 
       <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
         <div className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <h2 className="text-xl font-extrabold text-slate-900">
-                Centro de control
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Accede rápidamente a los módulos principales del sistema.
-              </p>
-            </div>
-
-            <div className="rounded-2xl border border-blue-100 bg-blue-50 px-4 py-2 text-sm font-semibold text-blue-700">
-              Operación en tiempo real
-            </div>
+          <div>
+            <h2 className="text-xl font-extrabold text-slate-900">
+              Centro de control
+            </h2>
+            <p className="mt-1 text-sm text-slate-500">
+              Accede rápidamente a los módulos principales del sistema.
+            </p>
           </div>
         </div>
 
@@ -253,14 +258,16 @@ const EnterpriseDashboard = () => {
             <Link
               key={module.to}
               to={module.to}
-              className="group overflow-hidden rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition hover:-translate-y-1 hover:shadow-[0_18px_40px_rgba(15,23,42,0.10)]"
+              className="group relative overflow-hidden rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1.5 hover:shadow-[0_20px_45px_rgba(15,23,42,0.12)]"
             >
+              <div className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${module.accent}`} />
+
               <div className="flex items-start justify-between gap-4">
-                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-slate-100 to-blue-50 text-2xl">
+                <div className={`flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br ${module.accent} text-3xl text-white shadow-lg transition duration-300 group-hover:scale-110`}>
                   {module.icon}
                 </div>
 
-                <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+                <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition group-hover:bg-slate-900 group-hover:text-white">
                   {module.badge}
                 </div>
               </div>
@@ -274,9 +281,17 @@ const EnterpriseDashboard = () => {
                 </p>
               </div>
 
-              <div className="mt-5 inline-flex items-center gap-2 text-sm font-semibold text-blue-700">
-                Abrir módulo
-                <span className="transition group-hover:translate-x-1">→</span>
+              <div className="mt-6 flex items-center justify-between">
+                <div className="inline-flex items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition group-hover:bg-blue-50 group-hover:text-blue-700">
+                  Abrir módulo
+                  <span className="transition duration-300 group-hover:translate-x-1">
+                    →
+                  </span>
+                </div>
+
+                <div className="h-10 w-10 rounded-2xl bg-slate-100 flex items-center justify-center text-slate-500 transition duration-300 group-hover:bg-slate-900 group-hover:text-white">
+                  ↗
+                </div>
               </div>
             </Link>
           ))}
