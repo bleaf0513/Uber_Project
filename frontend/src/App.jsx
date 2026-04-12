@@ -24,6 +24,7 @@ import EnterpriseDriverLogin from "./pages/EnterpriseDriverLogin";
 import EnterpriseDeliveryStats from "./pages/EnterpriseDeliveryStats";
 import EnterpriseDeliveryHistory from "./pages/EnterpriseDeliveryHistory";
 import EnterpriseAccess from "./pages/EnterpriseAccess";
+import EnterpriseClients from "./pages/EnterpriseClients";
 
 // Nuevas páginas del conductor
 import CaptainGoodsOffers from "./pages/CaptainGoodsOffers";
@@ -89,6 +90,7 @@ const App = () => {
         <Route path="/enterprise-dashboard" element={<EnterpriseDashboard />} />
         <Route path="/enterprise-drivers" element={<EnterpriseDrivers />} />
         <Route path="/enterprise-logistics" element={<EnterpriseLogistics />} />
+        <Route path="/enterprise-clients" element={<EnterpriseClients />} />
         <Route
           path="/enterprise-driver-login"
           element={<EnterpriseDriverLogin />}
