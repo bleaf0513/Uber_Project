@@ -7,7 +7,6 @@ import EnterpriseDeliveryChat from "./EnterpriseDeliveryChat";
 
 const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
-const ONLINE_WINDOW_MS = 3 * 60 * 1000;
 
 const TRUCK_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -318,8 +317,6 @@ const EnterpriseLogistics = () => {
     }
   };
 
-  const normalizeText = (value) => String(value || "").trim().toLowerCase();
-
   const sortDriversByFreshness = (items) => {
     return [...items].sort((a, b) => {
       const aUpdated = a?.currentLocation?.updatedAt
@@ -442,41 +439,6 @@ const EnterpriseLogistics = () => {
     }
 
     return `${clean}, Colombia`;
-  };
-
-  const hasRecentActivity = (driver) => {
-    const updatedAt = driver?.currentLocation?.updatedAt;
-    if (!updatedAt) return false;
-
-    const time = new Date(updatedAt).getTime();
-    if (!Number.isFinite(time)) return false;
-
-    return Date.now() - time <= ONLINE_WINDOW_MS;
-  };
-
-  const isDriverConnected = (driver) => {
-    if (driver?.isOnline === true) return true;
-    if (driver?.online === true) return true;
-    if (normalizeText(driver?.connectionStatus) === "online") return true;
-    if (normalizeText(driver?.status) === "conectado") return true;
-    return hasRecentActivity(driver);
-  };
-
-  const getDriverOperationalStatus = (driver, deliveriesInProgress) => {
-    const driverId = driverIdValue(driver);
-    const hasActiveDelivery = deliveriesInProgress.some(
-      (delivery) => getDeliveryAssignedId(delivery) === driverId
-    );
-
-    if (!isDriverConnected(driver)) return "Desconectado";
-    if (hasActiveDelivery) return "En ruta";
-
-    const status = normalizeText(driver?.status);
-    if (status === "en curso" || status === "ocupado" || status === "en ruta") {
-      return "En ruta";
-    }
-
-    return "Disponible";
   };
 
   const fetchDrivers = useCallback(async (silent = false) => {
@@ -809,40 +771,6 @@ const EnterpriseLogistics = () => {
     }
   };
 
-  const deliveriesInProgress = useMemo(() => {
-    return deliveries.filter((delivery) => delivery.status === "En curso");
-  }, [deliveries]);
-
-  const connectedDrivers = useMemo(() => {
-    return drivers.filter(isDriverConnected);
-  }, [drivers]);
-
-  const availableDrivers = useMemo(() => {
-    const busyDriverIds = new Set(
-      deliveriesInProgress.map((delivery) => getDeliveryAssignedId(delivery))
-    );
-
-    return connectedDrivers.filter((driver) => {
-      const driverId = driverIdValue(driver);
-      const status = normalizeText(driver?.status);
-
-      if (busyDriverIds.has(driverId)) return false;
-      if (status === "en curso" || status === "ocupado" || status === "en ruta") {
-        return false;
-      }
-
-      return true;
-    });
-  }, [connectedDrivers, deliveriesInProgress]);
-
-  const orderedDriversForMonitoring = useMemo(() => {
-    const connectedIds = new Set(connectedDrivers.map((driver) => driverIdValue(driver)));
-    return [
-      ...connectedDrivers,
-      ...drivers.filter((driver) => !connectedIds.has(driverIdValue(driver))),
-    ];
-  }, [drivers, connectedDrivers]);
-
   const selectedDriver = useMemo(() => {
     return drivers.find(
       (driver) => driverIdValue(driver) === String(selectedDriverFilter)
@@ -1000,28 +928,9 @@ const EnterpriseLogistics = () => {
 
       <div className="p-5">
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                Crear nueva entrega
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Solo se muestran conductores conectados y disponibles para asignación.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2 text-xs font-semibold">
-              <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full">
-                Disponibles: {availableDrivers.length}
-              </span>
-              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
-                Conectados: {connectedDrivers.length}
-              </span>
-              <span className="bg-yellow-100 text-yellow-700 px-3 py-1 rounded-full">
-                En ruta: {deliveriesInProgress.length}
-              </span>
-            </div>
-          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-4">
+            Crear nueva entrega
+          </h2>
 
           <form onSubmit={handleSaveDelivery} className="grid grid-cols-1 gap-4">
             <input
@@ -1108,14 +1017,13 @@ const EnterpriseLogistics = () => {
               <option value="">
                 {loadingDrivers
                   ? "Cargando conductores..."
-                  : availableDrivers.length === 0
-                  ? "No hay conductores conectados y disponibles"
-                  : "Seleccionar conductor disponible"}
+                  : drivers.length === 0
+                  ? "No hay conductores disponibles"
+                  : "Seleccionar conductor"}
               </option>
-
-              {availableDrivers.map((driver) => (
+              {drivers.map((driver) => (
                 <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                  {driver.name} - CC {driver.cedula} - {driver.vehicle} - Disponible
+                  {driver.name} - CC {driver.cedula} - {driver.vehicle}
                 </option>
               ))}
             </select>
@@ -1131,7 +1039,7 @@ const EnterpriseLogistics = () => {
 
             <button
               type="submit"
-              disabled={savingDelivery || (!loadingDrivers && availableDrivers.length === 0)}
+              disabled={savingDelivery}
               className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-60"
             >
               {savingDelivery ? "Guardando..." : "Guardar y asignar entrega"}
@@ -1140,28 +1048,9 @@ const EnterpriseLogistics = () => {
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">
-                Supervisar por conductor
-              </h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Los conductores conectados aparecen primero.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap gap-2 text-xs font-semibold">
-              <span className="bg-green-100 text-green-700 px-3 py-1 rounded-full">
-                Disponibles
-              </span>
-              <span className="bg-blue-100 text-blue-700 px-3 py-1 rounded-full">
-                En ruta
-              </span>
-              <span className="bg-gray-100 text-gray-700 px-3 py-1 rounded-full">
-                Desconectados
-              </span>
-            </div>
-          </div>
+          <h2 className="text-xl font-bold text-gray-900 mb-4">
+            Supervisar por conductor
+          </h2>
 
           <select
             value={selectedDriverFilter}
@@ -1169,14 +1058,11 @@ const EnterpriseLogistics = () => {
             className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
           >
             <option value="">Ver todos los conductores</option>
-            {orderedDriversForMonitoring.map((driver) => {
-              const operationalStatus = getDriverOperationalStatus(driver, deliveriesInProgress);
-              return (
-                <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                  {driver.name} - CC {driver.cedula} - {driver.vehicle} - {operationalStatus}
-                </option>
-              );
-            })}
+            {drivers.map((driver) => (
+              <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
+                {driver.name} - CC {driver.cedula} - {driver.vehicle}
+              </option>
+            ))}
           </select>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
@@ -1216,18 +1102,6 @@ const EnterpriseLogistics = () => {
               </div>
 
               <div className="flex flex-wrap gap-2">
-                <span
-                  className={`px-3 py-2 rounded-xl text-sm font-semibold ${
-                    getDriverOperationalStatus(selectedDriver, deliveriesInProgress) === "Disponible"
-                      ? "bg-green-100 text-green-700"
-                      : getDriverOperationalStatus(selectedDriver, deliveriesInProgress) === "En ruta"
-                      ? "bg-blue-100 text-blue-700"
-                      : "bg-gray-100 text-gray-700"
-                  }`}
-                >
-                  {getDriverOperationalStatus(selectedDriver, deliveriesInProgress)}
-                </span>
-
                 <button
                   type="button"
                   onClick={openDriverInGoogleMaps}
@@ -1265,7 +1139,7 @@ const EnterpriseLogistics = () => {
               <div className="bg-gray-50 rounded-xl p-4">
                 <p className="text-sm text-gray-500">Estado</p>
                 <p className="font-bold text-gray-900">
-                  {getDriverOperationalStatus(selectedDriver, deliveriesInProgress)}
+                  {selectedDriver.status || "Disponible"}
                 </p>
               </div>
 
@@ -1411,9 +1285,9 @@ const EnterpriseLogistics = () => {
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             >
               <option value="">Todos los conductores</option>
-              {orderedDriversForMonitoring.map((driver) => (
+              {drivers.map((driver) => (
                 <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
-                  {driver.name} - {getDriverOperationalStatus(driver, deliveriesInProgress)}
+                  {driver.name} - CC {driver.cedula}
                 </option>
               ))}
             </select>
