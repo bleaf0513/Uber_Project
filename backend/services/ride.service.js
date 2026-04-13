@@ -1,4 +1,5 @@
 const rideModel = require("../models/ride.model");
+const captainModel = require("../models/captain.model");
 const mapService = require("./maps.service");
 const crypto = require("crypto");
 const userModel = require("../models/user.model");
@@ -8,6 +9,11 @@ function getOtp(num) {
         return crypto.randomInt(Math.pow(10, num - 1), Math.pow(10, num)).toString();
     }
     return generateOtp(num);
+}
+
+function safeNumber(value, fallback = 0) {
+    const num = Number(value);
+    return Number.isFinite(num) ? num : fallback;
 }
 
 const getFare = async (pickup, destination) => {
@@ -239,6 +245,22 @@ const endRide = async ({ rideId, captain }) => {
 
     ride.status = "completed";
     await ride.save();
+
+    const fareValue = safeNumber(ride.fare, 0);
+    const distanceMeters = safeNumber(ride.distance, 0);
+    const distanceKm = distanceMeters > 0 ? distanceMeters / 1000 : 0;
+
+    await captainModel.findByIdAndUpdate(
+        captain._id,
+        {
+            $inc: {
+                "stats.totalEarning": fareValue,
+                "stats.totalDistanceKm": distanceKm,
+                "stats.totalTrips": 1,
+            },
+        },
+        { new: true }
+    );
 
     return ride;
 };
