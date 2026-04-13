@@ -37,8 +37,8 @@ function Home() {
   const [offeredPrice, setOfferedPrice] = useState(null);
   const [ride, setRide] = useState(null);
 
-  // Aquí luego pondremos los conductores activos reales por socket
-  const [nearbyDrivers] = useState([]);
+  // Conductores cercanos / activos en tiempo real
+  const [nearbyDrivers, setNearbyDrivers] = useState([]);
 
   const panelRef = useRef(null);
   const titleRef = useRef(null);
@@ -78,12 +78,57 @@ function Home() {
       setRide(rideData || null);
     };
 
+    // Lista inicial de conductores cercanos/activos
+    const onNearbyCaptains = (drivers) => {
+      setNearbyDrivers(Array.isArray(drivers) ? drivers : []);
+    };
+
+    // Actualización en tiempo real de posición de conductores
+    const onCaptainLocationUpdated = (payload) => {
+      if (!payload?.captainId || !payload?.location) return;
+
+      setNearbyDrivers((prev) => {
+        const list = Array.isArray(prev) ? [...prev] : [];
+        const idx = list.findIndex(
+          (d) =>
+            String(d?._id || d?.captainId) === String(payload.captainId)
+        );
+
+        const updatedDriver = {
+          ...(idx >= 0 ? list[idx] : {}),
+          _id: idx >= 0 ? list[idx]._id : payload.captainId,
+          captainId: payload.captainId,
+          location: {
+            ltd: Number(payload.location.ltd),
+            lng: Number(payload.location.lng),
+          },
+          vehicleType:
+            payload.vehicleType ||
+            (idx >= 0 ? list[idx]?.vehicleType : null),
+          profileImage:
+            payload.profileImage ||
+            (idx >= 0 ? list[idx]?.profileImage : ""),
+        };
+
+        if (idx >= 0) {
+          list[idx] = updatedDriver;
+          return list;
+        }
+
+        return [...list, updatedDriver];
+      });
+    };
+
     socket.on("ride-started", onRideStarted);
     socket.on("ride-confirmed", onRideConfirmed);
+    socket.on("nearby-captains", onNearbyCaptains);
+    socket.on("captain-location-updated", onCaptainLocationUpdated);
 
     return () => {
       socket.off("ride-started", onRideStarted);
       socket.off("ride-confirmed", onRideConfirmed);
+      socket.off("nearby-captains", onNearbyCaptains);
+      socket.off("captain-location-updated", onCaptainLocationUpdated);
     };
   }, [socket, navigate]);
 
@@ -336,6 +381,9 @@ function Home() {
       setVehiclePanel(false);
       setConfirmRidePanel(false);
       setDriverSelected(false);
+
+      // IMPORTANTE: activar estado de búsqueda
+      setVehicleFound(true);
 
       return rideData;
     } catch (error) {
