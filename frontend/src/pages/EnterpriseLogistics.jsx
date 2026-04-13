@@ -1333,34 +1333,77 @@ const EnterpriseLogistics = () => {
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
-            <input
-              type="text"
-              placeholder="Buscar cliente por nombre, teléfono o dirección"
-              value={clientSearch}
-              onChange={(e) => setClientSearch(e.target.value)}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
+            <div className="relative" ref={clientDropdownRef}>
+  <button
+    type="button"
+    onClick={() => {
+      if (!loadingClients) {
+        setShowClientDropdown((prev) => !prev);
+      }
+    }}
+    className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200 text-left flex items-center justify-between"
+  >
+    <span className={formData.clientId ? "text-gray-900" : "text-gray-500"}>
+      {loadingClients
+        ? "Cargando clientes..."
+        : formData.clientId && selectedClient
+        ? `${selectedClient.name} - ${selectedClient.phone}`
+        : "Seleccionar cliente"}
+    </span>
+    <span className="text-gray-500">▾</span>
+  </button>
 
-            <select
-              name="clientId"
-              value={formData.clientId}
-              onChange={(e) => handleClientSelect(e.target.value)}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              disabled={loadingClients}
+  {showClientDropdown && !loadingClients ? (
+    <div className="absolute z-50 mt-2 w-full bg-white border border-gray-200 rounded-2xl shadow-xl overflow-hidden">
+      <div className="p-3 border-b border-gray-100">
+        <input
+          type="text"
+          placeholder="Buscar por nombre, teléfono o dirección"
+          value={clientSearch}
+          onChange={(e) => setClientSearch(e.target.value)}
+          className="w-full bg-gray-50 rounded-xl px-4 py-3 outline-none border border-gray-200"
+          autoFocus
+        />
+      </div>
+
+      <div className="max-h-72 overflow-y-auto">
+        <button
+          type="button"
+          onClick={() => {
+            handleClientSelect("");
+            setClientSearch("");
+            setShowClientDropdown(false);
+          }}
+          className="w-full text-left px-4 py-3 hover:bg-gray-50 border-b border-gray-100 text-gray-500"
+        >
+          Seleccionar cliente
+        </button>
+
+        {filteredClientsForSelect.length === 0 ? (
+          <div className="px-4 py-4 text-sm text-gray-500">
+            No hay clientes para este filtro.
+          </div>
+        ) : (
+          filteredClientsForSelect.map((client) => (
+            <button
+              key={clientIdValue(client)}
+              type="button"
+              onClick={() => {
+                handleClientSelect(clientIdValue(client));
+                setShowClientDropdown(false);
+              }}
+              className="w-full text-left px-4 py-4 hover:bg-gray-50 border-b last:border-b-0 border-gray-100"
             >
-              <option value="">
-                {loadingClients
-                  ? "Cargando clientes..."
-                  : filteredClientsForSelect.length === 0
-                  ? "No hay clientes disponibles"
-                  : "Seleccionar cliente"}
-              </option>
-              {filteredClientsForSelect.map((client) => (
-                <option key={clientIdValue(client)} value={clientIdValue(client)}>
-                  {client.name} - {client.phone} - {client.address}
-                </option>
-              ))}
-            </select>
+              <div className="font-semibold text-gray-900">{client.name}</div>
+              <div className="text-sm text-gray-600 mt-1">{client.phone}</div>
+              <div className="text-sm text-gray-500 mt-1">{client.address}</div>
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  ) : null}
+</div>
 
             {selectedClient ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
