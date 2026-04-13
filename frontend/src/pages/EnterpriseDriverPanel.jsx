@@ -1187,19 +1187,38 @@ const EnterpriseDriverPanel = () => {
   };
 
   const handleScopeChange = (scope) => {
-    setListScopeFilter(scope);
+  setListScopeFilter(scope);
 
-    if (scope === "Pendientes") {
-      setListStatusFilter("Pendiente");
-      setListDateFilter("");
-      return;
-    }
+  if (scope === "Pendientes") {
+    setListStatusFilter("Pendiente");
+    setListDateFilter("");
+    return;
+  }
 
-    if (scope === "Hoy") {
-      setListDateFilter(new Date().toISOString().slice(0, 10));
-      return;
-    }
-  };
+  if (scope === "En curso") {
+    setListStatusFilter("En curso");
+    setListDateFilter("");
+    return;
+  }
+
+  if (scope === "Finalizados") {
+    setListStatusFilter("Finalizada");
+    setListDateFilter("");
+    return;
+  }
+
+  if (scope === "Hoy") {
+    setListStatusFilter("Todos");
+    setListDateFilter(new Date().toISOString().slice(0, 10));
+    return;
+  }
+
+  if (scope === "Todos") {
+    setListStatusFilter("Todos");
+    setListDateFilter("");
+    return;
+  }
+};
 
   if (!activeCedula) {
     return (
@@ -1429,42 +1448,66 @@ const EnterpriseDriverPanel = () => {
 
           <div className="p-6">
             <div className="flex flex-wrap gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => handleScopeChange("Pendientes")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "Pendientes"
-                    ? "bg-amber-500 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                Pendientes
-              </button>
+  <button
+    type="button"
+    onClick={() => handleScopeChange("Pendientes")}
+    className={`px-4 py-2 rounded-2xl font-semibold transition ${
+      listScopeFilter === "Pendientes"
+        ? "bg-amber-500 text-white shadow-md"
+        : "bg-slate-100 text-slate-700 border border-slate-200"
+    }`}
+  >
+    Pendientes
+  </button>
 
-              <button
-                type="button"
-                onClick={() => handleScopeChange("Hoy")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "Hoy"
-                    ? "bg-green-600 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                Ver hoy
-              </button>
+  <button
+    type="button"
+    onClick={() => handleScopeChange("En curso")}
+    className={`px-4 py-2 rounded-2xl font-semibold transition ${
+      listScopeFilter === "En curso"
+        ? "bg-blue-600 text-white shadow-md"
+        : "bg-slate-100 text-slate-700 border border-slate-200"
+    }`}
+  >
+    En curso
+  </button>
 
-              <button
-                type="button"
-                onClick={() => handleScopeChange("Todos")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "Todos"
-                    ? "bg-slate-800 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                Ver todos
-              </button>
-            </div>
+  <button
+    type="button"
+    onClick={() => handleScopeChange("Finalizados")}
+    className={`px-4 py-2 rounded-2xl font-semibold transition ${
+      listScopeFilter === "Finalizados"
+        ? "bg-emerald-600 text-white shadow-md"
+        : "bg-slate-100 text-slate-700 border border-slate-200"
+    }`}
+  >
+    Finalizados
+  </button>
+
+  <button
+    type="button"
+    onClick={() => handleScopeChange("Hoy")}
+    className={`px-4 py-2 rounded-2xl font-semibold transition ${
+      listScopeFilter === "Hoy"
+        ? "bg-green-600 text-white shadow-md"
+        : "bg-slate-100 text-slate-700 border border-slate-200"
+    }`}
+  >
+    Ver hoy
+  </button>
+
+  <button
+    type="button"
+    onClick={() => handleScopeChange("Todos")}
+    className={`px-4 py-2 rounded-2xl font-semibold transition ${
+      listScopeFilter === "Todos"
+        ? "bg-slate-800 text-white shadow-md"
+        : "bg-slate-100 text-slate-700 border border-slate-200"
+    }`}
+  >
+    Ver todos
+  </button>
+</div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
               <input
