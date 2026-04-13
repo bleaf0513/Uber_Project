@@ -14,6 +14,14 @@ module.exports.createRide = async (req, res) => {
     const { pickup, destination, vehicle, offeredFare } = req.body;
 
     try {
+        console.log('[ride] createRide request:', {
+            userId: req.user?._id ? String(req.user._id) : null,
+            pickup,
+            destination,
+            vehicle,
+            offeredFare,
+        });
+
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
@@ -24,10 +32,23 @@ module.exports.createRide = async (req, res) => {
 
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
 
+        console.log('[ride] pickupCoordinates:', pickupCoordinates);
+
+        // Subido temporalmente para pruebas
         const captainsInRadius = await mapService.getCaptainsInTheRadius(
             pickupCoordinates.ltd,
             pickupCoordinates.lng,
-            2
+            8
+        );
+
+        console.log(
+            '[ride] captainsInRadius:',
+            (captainsInRadius || []).map((captain) => ({
+                _id: captain?._id ? String(captain._id) : null,
+                socketId: captain?.socketId || null,
+                status: captain?.status || null,
+                location: captain?.location || null,
+            }))
         );
 
         ride.otp = "";
@@ -36,14 +57,25 @@ module.exports.createRide = async (req, res) => {
             .findOne({ _id: ride._id })
             .populate('user');
 
-        captainsInRadius.forEach((captain) => {
+        let emittedCount = 0;
+
+        (captainsInRadius || []).forEach((captain) => {
+            console.log('[ride] trying socket emit new-ride:', {
+                captainId: captain?._id ? String(captain._id) : null,
+                socketId: captain?.socketId || null,
+            });
+
             if (!captain?.socketId) return;
 
             sendMessageToSocketId(captain.socketId, {
                 event: 'new-ride',
                 data: rideWithUser
             });
+
+            emittedCount += 1;
         });
+
+        console.log('[ride] new-ride emitted to captains:', emittedCount);
 
         return res.status(201).json(ride);
     } catch (err) {
@@ -83,6 +115,11 @@ module.exports.confirmRide = async (req, res) => {
             captain: req.captain
         });
 
+        console.log('[ride] ride-confirmed emit:', {
+            rideId: ride?._id ? String(ride._id) : null,
+            userSocketId: ride?.user?.socketId || null,
+        });
+
         sendMessageToSocketId(ride.user.socketId, {
             event: 'ride-confirmed',
             data: ride
@@ -110,6 +147,11 @@ module.exports.startRide = async (req, res) => {
             captain: req.captain
         });
 
+        console.log('[ride] ride-started emit:', {
+            rideId: ride?._id ? String(ride._id) : null,
+            userSocketId: ride?.user?.socketId || null,
+        });
+
         sendMessageToSocketId(ride.user.socketId, {
             event: 'ride-started',
             data: ride
@@ -134,6 +176,11 @@ module.exports.endRide = async (req, res) => {
         const ride = await rideService.endRide({
             rideId,
             captain: req.captain
+        });
+
+        console.log('[ride] ride-ended emit:', {
+            rideId: ride?._id ? String(ride._id) : null,
+            userSocketId: ride?.user?.socketId || null,
         });
 
         sendMessageToSocketId(ride.user.socketId, {
