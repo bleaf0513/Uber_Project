@@ -53,6 +53,12 @@ const LiveTracking = ({
 
   const watchIdRef = useRef(null);
 
+  // NUEVO: evita que el mapa se recoloque todo el tiempo
+  const hasAutoFittedRef = useRef(false);
+  const isUserInteractingRef = useRef(false);
+  const interactionTimeoutRef = useRef(null);
+  const lastFocusKeyRef = useRef("");
+
   const mapOptions = useMemo(
     () => ({
       mapTypeControl: false,
@@ -113,6 +119,18 @@ const LiveTracking = ({
       })
       .filter(Boolean);
   }, [nearbyDrivers]);
+
+  const markUserInteraction = () => {
+    isUserInteractingRef.current = true;
+
+    if (interactionTimeoutRef.current) {
+      clearTimeout(interactionTimeoutRef.current);
+    }
+
+    interactionTimeoutRef.current = setTimeout(() => {
+      isUserInteractingRef.current = false;
+    }, 4000);
+  };
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -194,8 +212,10 @@ const LiveTracking = ({
     return () => clearInterval(interval);
   }, []);
 
+  // NUEVO: solo autoajusta al inicio o cuando cambia realmente el foco del viaje
   useEffect(() => {
     if (!map || !mapsApiLoaded || !window.google?.maps) return;
+    if (isUserInteractingRef.current) return;
 
     const bounds = new window.google.maps.LatLngBounds();
     let hasPoints = false;
@@ -217,6 +237,31 @@ const LiveTracking = ({
 
     if (!hasPoints) return;
 
+    const focusKey = JSON.stringify({
+      pickup: pickupPosition
+        ? {
+            lat: Number(pickupPosition.lat).toFixed(5),
+            lng: Number(pickupPosition.lng).toFixed(5),
+          }
+        : null,
+      me: currentPosition
+        ? {
+            lat: Number(currentPosition.lat).toFixed(5),
+            lng: Number(currentPosition.lng).toFixed(5),
+          }
+        : null,
+      drivers: safeNearbyDrivers.map((d) => ({
+        id: d.id,
+        lat: Number(d.lat).toFixed(5),
+        lng: Number(d.lng).toFixed(5),
+      })),
+    });
+
+    const shouldRefocus =
+      !hasAutoFittedRef.current || lastFocusKeyRef.current !== focusKey;
+
+    if (!shouldRefocus) return;
+
     if (pickupPosition && (currentPosition || safeNearbyDrivers.length > 0)) {
       map.fitBounds(bounds, {
         top: 80,
@@ -224,14 +269,22 @@ const LiveTracking = ({
         bottom: 260,
         left: 60,
       });
-      return;
-    }
-
-    if (currentPosition) {
+    } else if (currentPosition) {
       map.panTo(currentPosition);
       map.setZoom(zoom);
     }
+
+    hasAutoFittedRef.current = true;
+    lastFocusKeyRef.current = focusKey;
   }, [map, currentPosition, pickupPosition, safeNearbyDrivers, mapsApiLoaded, zoom]);
+
+  useEffect(() => {
+    return () => {
+      if (interactionTimeoutRef.current) {
+        clearTimeout(interactionTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const userDotIcon =
     mapsApiLoaded && window.google?.maps
@@ -310,6 +363,9 @@ const LiveTracking = ({
       center={currentPosition || DEFAULT_CENTER}
       zoom={zoom}
       onLoad={setMap}
+      onDragStart={markUserInteraction}
+      onZoomChanged={markUserInteraction}
+      onClick={markUserInteraction}
       options={mapOptions}
     >
       {currentPosition && (
