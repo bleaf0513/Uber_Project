@@ -5,7 +5,11 @@ const { sendMessageToSocketId } = require('../socket');
 const rideModel = require('../models/ride.model');
 const { mapsErrorStatus } = require('../utils/mapsHttpStatus');
 
+console.log('🔥🔥🔥 RIDE CONTROLLER NUEVO EN PRODUCCION 🔥🔥🔥');
+
 module.exports.createRide = async (req, res) => {
+    console.log('🔥 CREATE RIDE NUEVO FUNCIONANDO 🔥');
+
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
@@ -22,6 +26,10 @@ module.exports.createRide = async (req, res) => {
             offeredFare,
         });
 
+        console.log('[ride] pickup recibido:', pickup);
+        console.log('[ride] destination recibido:', destination);
+        console.log('[ride] vehicle recibido:', vehicle);
+
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
@@ -34,7 +42,6 @@ module.exports.createRide = async (req, res) => {
 
         console.log('[ride] pickupCoordinates:', pickupCoordinates);
 
-        // Subido temporalmente para pruebas
         const captainsInRadius = await mapService.getCaptainsInTheRadius(
             pickupCoordinates.ltd,
             pickupCoordinates.lng,
