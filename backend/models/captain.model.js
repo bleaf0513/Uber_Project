@@ -17,6 +17,7 @@ const captainSchema = new mongoose.Schema(
                 trim: true,
             },
         },
+
         email: {
             type: String,
             required: true,
@@ -26,19 +27,24 @@ const captainSchema = new mongoose.Schema(
             match: [/\S+@\S+\.\S+/, 'Please enter a valid email'],
             minlength: [6, 'Email must be at least 6 characters long'],
         },
+
         password: {
             type: String,
             required: true,
+            select: false,
         },
+
         socketId: {
             type: String,
             default: null,
         },
+
         status: {
             type: String,
             enum: ['active', 'inactive'],
             default: 'active',
         },
+
         vehicle: {
             color: {
                 type: String,
@@ -70,6 +76,7 @@ const captainSchema = new mongoose.Schema(
                 ],
             },
         },
+
         location: {
             ltd: {
                 type: Number,
@@ -78,6 +85,76 @@ const captainSchema = new mongoose.Schema(
             lng: {
                 type: Number,
                 default: null,
+            },
+        },
+
+        // Foto real del conductor
+        profileImage: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+
+        // Calificación real
+        rating: {
+            type: Number,
+            default: 5,
+            min: 0,
+            max: 5,
+        },
+
+        // Control opcional de sesión activa
+        onlineSession: {
+            isOnline: {
+                type: Boolean,
+                default: false,
+            },
+            sessionStartedAt: {
+                type: Date,
+                default: null,
+            },
+            lastSeenAt: {
+                type: Date,
+                default: null,
+            },
+        },
+
+        // Estadísticas acumuladas del conductor
+        stats: {
+            hoursOnline: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            totalDistanceKm: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            totalEarning: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            cashCollected: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            transferCollected: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            totalTrips: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            pendingToSettle: {
+                type: Number,
+                default: 0,
+                min: 0,
             },
         },
     },
