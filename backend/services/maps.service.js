@@ -31,6 +31,28 @@ function serverMapsKey() {
     return process.env.GOOGLE_MAPS_SERVER_API || process.env.GOOGLE_MAPS_API;
 }
 
+function toNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : NaN;
+}
+
+function isValidLatitude(lat) {
+    return Number.isFinite(lat) && lat >= -90 && lat <= 90;
+}
+
+function isValidLongitude(lng) {
+    return Number.isFinite(lng) && lng >= -180 && lng <= 180;
+}
+
+function isValidLatLng(lat, lng) {
+    return isValidLatitude(lat) && isValidLongitude(lng);
+}
+
+function isColombiaCoordinate(lat, lng) {
+    // Rango amplio y seguro para Colombia
+    return isValidLatLng(lat, lng) && lat >= -4.5 && lat <= 16.5 && lng >= -81.9 && lng <= -66.0;
+}
+
 async function googleMapsFormPost(apiPath, fields) {
     const key = serverMapsKey();
     if (!key) {
@@ -197,10 +219,10 @@ module.exports.getAddressCoordinates = async (address) => {
 
         if (data.status === 'OK' && data.results?.length) {
             const loc = data.results[0]?.geometry?.location;
-            const lat = loc?.lat;
-            const lng = loc?.lng;
+            const lat = toNumber(loc?.lat);
+            const lng = toNumber(loc?.lng);
 
-            if (Number.isFinite(lat) && Number.isFinite(lng)) {
+            if (isValidLatLng(lat, lng)) {
                 console.log('🇨🇴 Google geocode OK:', { ltd: lat, lng });
                 return { ltd: lat, lng };
             }
@@ -324,32 +346,77 @@ module.exports.getSuggestions = async (address) => {
 };
 
 module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm) => {
-    const radiusM = radiusKm * 1000;
+    const pickupLtd = toNumber(ltd);
+    const pickupLng = toNumber(lng);
+    const radiusKmSafe = Math.max(toNumber(radiusKm) || 0, 0);
+    const radiusM = radiusKmSafe * 1000;
+
+    if (!isValidLatLng(pickupLtd, pickupLng)) {
+        console.warn('[maps] invalid pickup coordinates for radius search:', {
+            pickupLtd,
+            pickupLng,
+            radiusKm,
+        });
+        return [];
+    }
+
+    if (!isColombiaCoordinate(pickupLtd, pickupLng)) {
+        console.warn('[maps] pickup coordinate outside Colombia:', {
+            pickupLtd,
+            pickupLng,
+            radiusKm,
+        });
+        return [];
+    }
 
     console.log('[maps] searching captains in radius:', {
-        pickupLtd: ltd,
-        pickupLng: lng,
-        radiusKm,
+        pickupLtd,
+        pickupLng,
+        radiusKm: radiusKmSafe,
     });
 
     const captains = await captainModel.find({
         status: 'active',
+        socketId: { $exists: true, $ne: null },
         'location.ltd': { $exists: true, $ne: null },
         'location.lng': { $exists: true, $ne: null },
     });
 
-    console.log('[maps] active captains with location:', captains.length);
+    console.log('[maps] active captains with socket and location:', captains.length);
 
     const nearbyCaptains = captains.filter((c) => {
-        const dist = haversineMeters(ltd, lng, c.location.ltd, c.location.lng);
-        const isInside = dist <= radiusM;
+        const captainLtd = toNumber(c.location?.ltd);
+        const captainLng = toNumber(c.location?.lng);
+
+        if (!isValidLatLng(captainLtd, captainLng)) {
+            console.warn('[maps] skipping captain with invalid coordinates:', {
+                captainId: String(c._id),
+                socketId: c.socketId || null,
+                captainLtd: c.location?.ltd,
+                captainLng: c.location?.lng,
+            });
+            return false;
+        }
+
+        if (!isColombiaCoordinate(captainLtd, captainLng)) {
+            console.warn('[maps] skipping captain outside Colombia bounds:', {
+                captainId: String(c._id),
+                socketId: c.socketId || null,
+                captainLtd,
+                captainLng,
+            });
+            return false;
+        }
+
+        const dist = haversineMeters(pickupLtd, pickupLng, captainLtd, captainLng);
+        const isInside = Number.isFinite(dist) && dist <= radiusM;
 
         console.log('[maps] captain distance check:', {
             captainId: String(c._id),
             socketId: c.socketId || null,
-            captainLtd: c.location?.ltd,
-            captainLng: c.location?.lng,
-            distanceMeters: Math.round(dist),
+            captainLtd,
+            captainLng,
+            distanceMeters: Number.isFinite(dist) ? Math.round(dist) : null,
             insideRadius: isInside,
         });
 
