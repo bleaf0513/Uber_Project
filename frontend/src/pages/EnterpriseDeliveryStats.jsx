@@ -29,6 +29,41 @@ const EnterpriseDeliveryStats = () => {
     }
   };
 
+  const formatCurrency = (value) => {
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    }).format(Number(value || 0));
+  };
+
+  const getDriverId = (delivery) =>
+    String(
+      delivery?.assignedDriverId?._id ||
+        delivery?.assignedDriverId ||
+        delivery?.driver?._id ||
+        delivery?.driver ||
+        ""
+    );
+
+  const getBaseDate = (delivery) =>
+    delivery?.finishedAt || delivery?.startedAt || delivery?.createdAt || "";
+
+  const isMissingInvoiceValue = (delivery) => {
+    const raw = delivery?.invoiceValue;
+    return raw === "" || raw === null || raw === undefined || Number(raw) <= 0;
+  };
+
+  const isCashPayment = (delivery) => {
+    const method = String(delivery?.paymentMethod || "").trim().toLowerCase();
+    return method.includes("efectivo");
+  };
+
+  const isTransferPayment = (delivery) => {
+    const method = String(delivery?.paymentMethod || "").trim().toLowerCase();
+    return method.includes("transfer");
+  };
+
   const fetchData = useCallback(async (silent = false) => {
     try {
       if (!silent) setLoading(true);
@@ -84,12 +119,7 @@ const EnterpriseDeliveryStats = () => {
 
   const filteredDeliveries = useMemo(() => {
     return deliveries.filter((delivery) => {
-      const baseDate =
-        delivery.finishedAt ||
-        delivery.startedAt ||
-        delivery.createdAt ||
-        "";
-
+      const baseDate = getBaseDate(delivery);
       if (!baseDate) return false;
 
       if (viewMode === "day") {
@@ -103,6 +133,12 @@ const EnterpriseDeliveryStats = () => {
       return true;
     });
   }, [deliveries, viewMode, selectedDate, selectedMonth]);
+
+  const finalizedDeliveries = useMemo(() => {
+    return filteredDeliveries.filter(
+      (delivery) => String(delivery?.status || "") === "Finalizada"
+    );
+  }, [filteredDeliveries]);
 
   const generalStats = useMemo(() => {
     const total = filteredDeliveries.length;
@@ -120,17 +156,7 @@ const EnterpriseDeliveryStats = () => {
       total > 0 ? ((finished / total) * 100).toFixed(1) : "0.0";
 
     const activeDriversCount = new Set(
-      filteredDeliveries
-        .map((delivery) => {
-          return String(
-            delivery.assignedDriverId?._id ||
-              delivery.assignedDriverId ||
-              delivery.driver?._id ||
-              delivery.driver ||
-              ""
-          );
-        })
-        .filter(Boolean)
+      filteredDeliveries.map((delivery) => getDriverId(delivery)).filter(Boolean)
     ).size;
 
     return {
@@ -143,19 +169,42 @@ const EnterpriseDeliveryStats = () => {
     };
   }, [filteredDeliveries]);
 
+  const paymentStats = useMemo(() => {
+    const deliveredInvoices = finalizedDeliveries.length;
+
+    const cashTotal = finalizedDeliveries.reduce((acc, delivery) => {
+      if (!isCashPayment(delivery) || isMissingInvoiceValue(delivery)) return acc;
+      return acc + Number(delivery.invoiceValue || 0);
+    }, 0);
+
+    const transferTotal = finalizedDeliveries.reduce((acc, delivery) => {
+      if (!isTransferPayment(delivery) || isMissingInvoiceValue(delivery)) return acc;
+      return acc + Number(delivery.invoiceValue || 0);
+    }, 0);
+
+    const missingValueCount = finalizedDeliveries.filter((delivery) =>
+      isMissingInvoiceValue(delivery)
+    ).length;
+
+    const missingValueDeliveries = finalizedDeliveries.filter((delivery) =>
+      isMissingInvoiceValue(delivery)
+    );
+
+    return {
+      deliveredInvoices,
+      cashTotal,
+      transferTotal,
+      missingValueCount,
+      missingValueDeliveries,
+    };
+  }, [finalizedDeliveries]);
+
   const driverStats = useMemo(() => {
     const rows = drivers.map((driver) => {
       const driverId = String(driver._id || driver.id || "");
 
       const driverDeliveries = filteredDeliveries.filter((delivery) => {
-        const assignedId =
-          delivery.assignedDriverId?._id ||
-          delivery.assignedDriverId ||
-          delivery.driver?._id ||
-          delivery.driver ||
-          "";
-
-        return String(assignedId) === driverId;
+        return getDriverId(delivery) === driverId;
       });
 
       const total = driverDeliveries.length;
@@ -172,23 +221,42 @@ const EnterpriseDeliveryStats = () => {
       const completionRate =
         total > 0 ? ((finished / total) * 100).toFixed(1) : "0.0";
 
+      const finalized = driverDeliveries.filter(
+        (d) => String(d?.status || "") === "Finalizada"
+      );
+
+      const deliveredInvoices = finalized.length;
+
+      const cashTotal = finalized.reduce((acc, delivery) => {
+        if (!isCashPayment(delivery) || isMissingInvoiceValue(delivery)) return acc;
+        return acc + Number(delivery.invoiceValue || 0);
+      }, 0);
+
+      const transferTotal = finalized.reduce((acc, delivery) => {
+        if (!isTransferPayment(delivery) || isMissingInvoiceValue(delivery)) return acc;
+        return acc + Number(delivery.invoiceValue || 0);
+      }, 0);
+
+      const missingValueCount = finalized.filter((delivery) =>
+        isMissingInvoiceValue(delivery)
+      ).length;
+
+      const missingValueInvoices = finalized
+        .filter((delivery) => isMissingInvoiceValue(delivery))
+        .map((delivery) => delivery.invoiceNumber)
+        .filter(Boolean);
+
+      const liquidationTotal = cashTotal + transferTotal;
+
       const lastActivitySource = driverDeliveries
         .slice()
         .sort((a, b) => {
-          const timeA = new Date(
-            a.finishedAt || a.startedAt || a.createdAt || 0
-          ).getTime();
-          const timeB = new Date(
-            b.finishedAt || b.startedAt || b.createdAt || 0
-          ).getTime();
+          const timeA = new Date(getBaseDate(a) || 0).getTime();
+          const timeB = new Date(getBaseDate(b) || 0).getTime();
           return timeB - timeA;
         })[0];
 
-      const lastActivity =
-        lastActivitySource?.finishedAt ||
-        lastActivitySource?.startedAt ||
-        lastActivitySource?.createdAt ||
-        null;
+      const lastActivity = getBaseDate(lastActivitySource) || null;
 
       return {
         ...driver,
@@ -199,13 +267,22 @@ const EnterpriseDeliveryStats = () => {
         finished,
         completionRate,
         lastActivity,
+        deliveredInvoices,
+        cashTotal,
+        transferTotal,
+        missingValueCount,
+        missingValueInvoices,
+        liquidationTotal,
       };
     });
 
     return rows.sort((a, b) => {
       if (b.finished !== a.finished) return b.finished - a.finished;
+      if (b.liquidationTotal !== a.liquidationTotal) {
+        return b.liquidationTotal - a.liquidationTotal;
+      }
       if (b.total !== a.total) return b.total - a.total;
-      return a.name.localeCompare(b.name);
+      return String(a.name || "").localeCompare(String(b.name || ""));
     });
   }, [drivers, filteredDeliveries]);
 
@@ -215,19 +292,21 @@ const EnterpriseDeliveryStats = () => {
   }, [driverStats]);
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
-        <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-slate-100">
+      <div className="bg-gradient-to-r from-blue-700 via-blue-800 to-slate-900 text-white px-6 py-6 shadow-lg">
+        <div className="flex items-center justify-between gap-4 flex-wrap">
           <div>
-            <h1 className="text-2xl font-bold">Estadísticas de entregas</h1>
+            <h1 className="text-2xl md:text-3xl font-bold">
+              Estadísticas de entregas
+            </h1>
             <p className="text-sm text-blue-100 mt-1">
-              Resumen general y rendimiento detallado por conductor
+              Resumen operativo, liquidación y rendimiento detallado por conductor
             </p>
           </div>
 
           <Link
             to="/enterprise-dashboard"
-            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
+            className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold shadow"
           >
             Volver
           </Link>
@@ -235,8 +314,8 @@ const EnterpriseDeliveryStats = () => {
       </div>
 
       <div className="p-5">
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
-          <h2 className="text-xl font-bold text-gray-900 mb-4">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 mb-5">
+          <h2 className="text-xl font-bold text-slate-900 mb-4">
             Filtros de consulta
           </h2>
 
@@ -244,7 +323,7 @@ const EnterpriseDeliveryStats = () => {
             <select
               value={viewMode}
               onChange={(e) => setViewMode(e.target.value)}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+              className="w-full bg-slate-50 rounded-2xl px-4 py-3 outline-none border border-slate-200"
             >
               <option value="day">Ver por día</option>
               <option value="month">Ver por mes</option>
@@ -255,18 +334,18 @@ const EnterpriseDeliveryStats = () => {
                 type="date"
                 value={selectedDate}
                 onChange={(e) => setSelectedDate(e.target.value)}
-                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                className="w-full bg-slate-50 rounded-2xl px-4 py-3 outline-none border border-slate-200"
               />
             ) : (
               <input
                 type="month"
                 value={selectedMonth}
                 onChange={(e) => setSelectedMonth(e.target.value)}
-                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                className="w-full bg-slate-50 rounded-2xl px-4 py-3 outline-none border border-slate-200"
               />
             )}
 
-            <div className="bg-blue-50 rounded-xl px-4 py-3 flex items-center">
+            <div className="bg-blue-50 rounded-2xl px-4 py-3 flex items-center border border-blue-100">
               <p className="text-sm text-blue-700 font-semibold">
                 {viewMode === "day"
                   ? `Consultando el día: ${selectedDate}`
@@ -276,79 +355,152 @@ const EnterpriseDeliveryStats = () => {
           </div>
         </div>
 
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5 mb-5">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-            <h2 className="text-xl font-bold text-gray-900">Vista general</h2>
+            <h2 className="text-xl font-bold text-slate-900">Vista general</h2>
+
             {topDriver ? (
-              <div className="bg-green-50 text-green-700 px-4 py-2 rounded-xl text-sm font-semibold">
+              <div className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-2xl text-sm font-semibold border border-emerald-100">
                 Mejor conductor del período: {topDriver.name} · {topDriver.finished} finalizadas
               </div>
             ) : (
-              <div className="bg-gray-100 text-gray-600 px-4 py-2 rounded-xl text-sm font-semibold">
+              <div className="bg-slate-100 text-slate-600 px-4 py-2 rounded-2xl text-sm font-semibold">
                 Sin conductor destacado aún
               </div>
             )}
           </div>
 
-          <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
-            <div className="bg-gray-50 rounded-2xl p-4 border">
-              <p className="text-sm text-gray-500">Total entregas</p>
-              <p className="text-2xl font-bold text-gray-900 mt-2">
+          <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-4">
+            <div className="bg-slate-50 rounded-2xl p-4 border border-slate-200">
+              <p className="text-sm text-slate-500">Total entregas</p>
+              <p className="text-2xl font-bold text-slate-900 mt-2">
                 {generalStats.total}
               </p>
             </div>
 
             <div className="bg-yellow-50 rounded-2xl p-4 border border-yellow-100">
-              <p className="text-sm text-gray-500">Pendientes</p>
+              <p className="text-sm text-slate-500">Pendientes</p>
               <p className="text-2xl font-bold text-yellow-600 mt-2">
                 {generalStats.pending}
               </p>
             </div>
 
             <div className="bg-blue-50 rounded-2xl p-4 border border-blue-100">
-              <p className="text-sm text-gray-500">En curso</p>
+              <p className="text-sm text-slate-500">En curso</p>
               <p className="text-2xl font-bold text-blue-600 mt-2">
                 {generalStats.inProgress}
               </p>
             </div>
 
             <div className="bg-green-50 rounded-2xl p-4 border border-green-100">
-              <p className="text-sm text-gray-500">Finalizadas</p>
+              <p className="text-sm text-slate-500">Finalizadas</p>
               <p className="text-2xl font-bold text-green-600 mt-2">
                 {generalStats.finished}
               </p>
             </div>
 
             <div className="bg-purple-50 rounded-2xl p-4 border border-purple-100">
-              <p className="text-sm text-gray-500">% cumplimiento</p>
+              <p className="text-sm text-slate-500">% cumplimiento</p>
               <p className="text-2xl font-bold text-purple-600 mt-2">
                 {generalStats.completionRate}%
               </p>
             </div>
 
             <div className="bg-indigo-50 rounded-2xl p-4 border border-indigo-100">
-              <p className="text-sm text-gray-500">Conductores activos</p>
+              <p className="text-sm text-slate-500">Conductores activos</p>
               <p className="text-2xl font-bold text-indigo-600 mt-2">
                 {generalStats.activeDriversCount}
               </p>
             </div>
+
+            <div className="bg-emerald-50 rounded-2xl p-4 border border-emerald-100">
+              <p className="text-sm text-slate-500">Facturas entregadas</p>
+              <p className="text-2xl font-bold text-emerald-700 mt-2">
+                {paymentStats.deliveredInvoices}
+              </p>
+            </div>
+
+            <div className="bg-rose-50 rounded-2xl p-4 border border-rose-100">
+              <p className="text-sm text-slate-500">Sin valor</p>
+              <p className="text-2xl font-bold text-rose-600 mt-2">
+                {paymentStats.missingValueCount}
+              </p>
+            </div>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-5">
+            <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-5">
+              <p className="text-sm text-emerald-700 font-semibold">
+                Total en efectivo
+              </p>
+              <p className="text-2xl font-bold text-emerald-800 mt-2">
+                {formatCurrency(paymentStats.cashTotal)}
+              </p>
+              <p className="text-xs text-emerald-700/80 mt-2">
+                Valor correspondiente a facturas finalizadas pagadas en efectivo
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-sky-100 bg-sky-50 p-5">
+              <p className="text-sm text-sky-700 font-semibold">
+                Total por transferencia
+              </p>
+              <p className="text-2xl font-bold text-sky-800 mt-2">
+                {formatCurrency(paymentStats.transferTotal)}
+              </p>
+              <p className="text-xs text-sky-700/80 mt-2">
+                Valor correspondiente a facturas finalizadas pagadas por transferencia
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-amber-100 bg-amber-50 p-5">
+              <p className="text-sm text-amber-700 font-semibold">
+                Validación pendiente de logística
+              </p>
+              <p className="text-2xl font-bold text-amber-800 mt-2">
+                {paymentStats.missingValueCount} factura
+                {paymentStats.missingValueCount === 1 ? "" : "s"}
+              </p>
+              <p className="text-xs text-amber-700/80 mt-2">
+                Estas entregas fueron finalizadas pero no tienen valor registrado
+              </p>
+            </div>
+          </div>
+
+          {paymentStats.missingValueCount > 0 ? (
+            <div className="mt-5 rounded-2xl border border-rose-200 bg-rose-50 p-4">
+              <p className="text-sm font-bold text-rose-700 mb-2">
+                Facturas finalizadas sin valor registrado
+              </p>
+              <div className="flex flex-wrap gap-2">
+                {paymentStats.missingValueDeliveries.map((delivery) => (
+                  <span
+                    key={delivery._id || delivery.id}
+                    className="px-3 py-1 rounded-full bg-white border border-rose-200 text-rose-700 text-xs font-semibold"
+                  >
+                    Factura #{delivery.invoiceNumber || "Sin número"} ·{" "}
+                    {delivery.clientName || "Cliente"}
+                  </span>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
 
-        <div className="bg-white rounded-2xl shadow p-5">
+        <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-5">
           <div className="flex items-center justify-between flex-wrap gap-3 mb-4">
-            <h2 className="text-xl font-bold text-gray-900">
-              Estadísticas por conductor
+            <h2 className="text-xl font-bold text-slate-900">
+              Liquidación y estadísticas por conductor
             </h2>
-            <div className="text-sm text-gray-500">
+            <div className="text-sm text-slate-500">
               {driverStats.filter((d) => d.total > 0).length} con movimiento en el período
             </div>
           </div>
 
           {loading ? (
-            <p className="text-gray-500">Cargando estadísticas...</p>
+            <p className="text-slate-500">Cargando estadísticas...</p>
           ) : driverStats.length === 0 ? (
-            <p className="text-gray-500">No hay conductores registrados.</p>
+            <p className="text-slate-500">No hay conductores registrados.</p>
           ) : (
             <div className="space-y-4">
               {driverStats.map((driver, index) => {
@@ -357,14 +509,16 @@ const EnterpriseDeliveryStats = () => {
                 return (
                   <div
                     key={driver._id || driver.id}
-                    className={`rounded-2xl p-4 border ${
-                      hasData ? "bg-gray-50" : "bg-white"
+                    className={`rounded-3xl p-5 border transition-all ${
+                      hasData
+                        ? "bg-slate-50 border-slate-200"
+                        : "bg-white border-slate-200"
                     }`}
                   >
-                    <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-                      <div>
+                    <div className="flex flex-col xl:flex-row xl:items-start xl:justify-between gap-5">
+                      <div className="xl:w-[320px]">
                         <div className="flex items-center gap-3 flex-wrap">
-                          <p className="text-lg font-bold text-gray-900">
+                          <p className="text-lg font-bold text-slate-900">
                             {index + 1}. {driver.name}
                           </p>
 
@@ -373,25 +527,25 @@ const EnterpriseDeliveryStats = () => {
                               Con movimiento
                             </span>
                           ) : (
-                            <span className="px-3 py-1 rounded-full bg-gray-100 text-gray-600 text-xs font-semibold">
+                            <span className="px-3 py-1 rounded-full bg-slate-100 text-slate-600 text-xs font-semibold">
                               Sin movimiento
                             </span>
                           )}
                         </div>
 
-                        <p className="text-sm text-gray-500 mt-1">
+                        <p className="text-sm text-slate-500 mt-1">
                           CC {driver.cedula} · {driver.vehicle || "Sin vehículo"} ·{" "}
                           {driver.plate || "Sin placa"}
                         </p>
 
-                        <p className="text-sm text-gray-600 mt-1">
+                        <p className="text-sm text-slate-600 mt-1">
                           Estado actual:{" "}
-                          <span className="font-semibold text-gray-800">
+                          <span className="font-semibold text-slate-800">
                             {driver.status || "Disponible"}
                           </span>
                         </p>
 
-                        <p className="text-xs text-gray-400 mt-1">
+                        <p className="text-xs text-slate-400 mt-1">
                           Última actividad:{" "}
                           {driver.lastActivity
                             ? new Date(driver.lastActivity).toLocaleString()
@@ -399,59 +553,131 @@ const EnterpriseDeliveryStats = () => {
                         </p>
                       </div>
 
-                      <div className="grid grid-cols-2 md:grid-cols-5 gap-3 w-full lg:w-auto">
-                        <div className="bg-white rounded-xl p-3 min-w-[110px]">
-                          <p className="text-xs text-gray-500">Total</p>
-                          <p className="text-lg font-bold text-gray-900 mt-1">
-                            {driver.total}
-                          </p>
+                      <div className="flex-1">
+                        <div className="grid grid-cols-2 md:grid-cols-4 xl:grid-cols-8 gap-3">
+                          <div className="bg-white rounded-2xl p-3 border border-slate-200">
+                            <p className="text-xs text-slate-500">Total</p>
+                            <p className="text-lg font-bold text-slate-900 mt-1">
+                              {driver.total}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-yellow-100">
+                            <p className="text-xs text-slate-500">Pendientes</p>
+                            <p className="text-lg font-bold text-yellow-600 mt-1">
+                              {driver.pending}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-blue-100">
+                            <p className="text-xs text-slate-500">En curso</p>
+                            <p className="text-lg font-bold text-blue-600 mt-1">
+                              {driver.inProgress}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-green-100">
+                            <p className="text-xs text-slate-500">Finalizadas</p>
+                            <p className="text-lg font-bold text-green-600 mt-1">
+                              {driver.finished}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-emerald-100">
+                            <p className="text-xs text-slate-500">Facturas</p>
+                            <p className="text-lg font-bold text-emerald-700 mt-1">
+                              {driver.deliveredInvoices}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-purple-100">
+                            <p className="text-xs text-slate-500">% Cumplimiento</p>
+                            <p className="text-lg font-bold text-purple-600 mt-1">
+                              {driver.completionRate}%
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-amber-100">
+                            <p className="text-xs text-slate-500">Sin valor</p>
+                            <p className="text-lg font-bold text-amber-600 mt-1">
+                              {driver.missingValueCount}
+                            </p>
+                          </div>
+
+                          <div className="bg-white rounded-2xl p-3 border border-slate-200">
+                            <p className="text-xs text-slate-500">Liquidación</p>
+                            <p className="text-base font-bold text-slate-900 mt-1">
+                              {formatCurrency(driver.liquidationTotal)}
+                            </p>
+                          </div>
                         </div>
 
-                        <div className="bg-white rounded-xl p-3 min-w-[110px]">
-                          <p className="text-xs text-gray-500">Pendientes</p>
-                          <p className="text-lg font-bold text-yellow-600 mt-1">
-                            {driver.pending}
-                          </p>
-                        </div>
+                        {hasData ? (
+                          <>
+                            <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                              <div className="rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+                                <p className="text-xs font-semibold text-emerald-700">
+                                  Efectivo a entregar
+                                </p>
+                                <p className="text-xl font-bold text-emerald-800 mt-2">
+                                  {formatCurrency(driver.cashTotal)}
+                                </p>
+                              </div>
 
-                        <div className="bg-white rounded-xl p-3 min-w-[110px]">
-                          <p className="text-xs text-gray-500">En curso</p>
-                          <p className="text-lg font-bold text-blue-600 mt-1">
-                            {driver.inProgress}
-                          </p>
-                        </div>
+                              <div className="rounded-2xl border border-sky-100 bg-sky-50 p-4">
+                                <p className="text-xs font-semibold text-sky-700">
+                                  Transferencia
+                                </p>
+                                <p className="text-xl font-bold text-sky-800 mt-2">
+                                  {formatCurrency(driver.transferTotal)}
+                                </p>
+                              </div>
 
-                        <div className="bg-white rounded-xl p-3 min-w-[110px]">
-                          <p className="text-xs text-gray-500">Finalizadas</p>
-                          <p className="text-lg font-bold text-green-600 mt-1">
-                            {driver.finished}
-                          </p>
-                        </div>
+                              <div className="rounded-2xl border border-rose-100 bg-rose-50 p-4">
+                                <p className="text-xs font-semibold text-rose-700">
+                                  Facturas por validar valor
+                                </p>
+                                <p className="text-xl font-bold text-rose-800 mt-2">
+                                  {driver.missingValueCount}
+                                </p>
+                              </div>
+                            </div>
 
-                        <div className="bg-white rounded-xl p-3 min-w-[110px]">
-                          <p className="text-xs text-gray-500">% Cumplimiento</p>
-                          <p className="text-lg font-bold text-purple-600 mt-1">
-                            {driver.completionRate}%
-                          </p>
-                        </div>
+                            <div className="mt-4">
+                              <div className="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-green-500 rounded-full"
+                                  style={{
+                                    width: `${Math.min(
+                                      Number(driver.completionRate) || 0,
+                                      100
+                                    )}%`,
+                                  }}
+                                />
+                              </div>
+                            </div>
+
+                            {driver.missingValueInvoices.length > 0 ? (
+                              <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 p-4">
+                                <p className="text-xs font-bold text-amber-700 mb-2">
+                                  Facturas de este conductor sin valor registrado
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {driver.missingValueInvoices.map((invoice, idx) => (
+                                    <span
+                                      key={`${driver.driverId}-${invoice}-${idx}`}
+                                      className="px-3 py-1 rounded-full bg-white border border-amber-200 text-amber-700 text-xs font-semibold"
+                                    >
+                                      #{invoice}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </>
+                        ) : null}
                       </div>
                     </div>
-
-                    {hasData ? (
-                      <div className="mt-4">
-                        <div className="w-full h-3 bg-gray-200 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-green-500 rounded-full"
-                            style={{
-                              width: `${Math.min(
-                                Number(driver.completionRate) || 0,
-                                100
-                              )}%`,
-                            }}
-                          />
-                        </div>
-                      </div>
-                    ) : null}
                   </div>
                 );
               })}
