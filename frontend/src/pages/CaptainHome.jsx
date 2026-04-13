@@ -1,4 +1,10 @@
-import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
+import React, {
+  useState,
+  useEffect,
+  useContext,
+  useRef,
+  useCallback,
+} from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -16,6 +22,10 @@ const CaptainHome = () => {
   const ridePopupRef = useRef(null);
   const confirmRidePickupRef = useRef(null);
   const locationWatchIdRef = useRef(null);
+  const locationIntervalRef = useRef(null);
+  const lastLocationSentRef = useRef(0);
+  const latestRideIdRef = useRef(null);
+
   const navigate = useNavigate();
 
   const { captain } = useContext(CaptainDataContext);
@@ -24,10 +34,45 @@ const CaptainHome = () => {
   const [ridePopup, setRidePopup] = useState(false);
   const [ride, setRide] = useState(null);
   const [confirmRidePickup, setConfirmRidePickup] = useState(false);
+  const [socketReady, setSocketReady] = useState(false);
+  const [locationReady, setLocationReady] = useState(false);
+
+  const openRidePopup = useCallback((rideData) => {
+    if (!rideData) return;
+
+    console.log("[captain-home] abriendo popup de servicio:", {
+      rideId: rideData?._id,
+      pickup: rideData?.pickup,
+      destination: rideData?.destination,
+    });
+
+    latestRideIdRef.current = rideData?._id || null;
+    setRide(rideData);
+    setConfirmRidePickup(false);
+    setRidePopup(true);
+
+    if (ridePopupRef.current) {
+      gsap.killTweensOf(ridePopupRef.current);
+      gsap.to(ridePopupRef.current, {
+        y: "0%",
+        duration: 0.25,
+        ease: "power2.out",
+      });
+    }
+  }, []);
 
   const emitCaptainJoin = useCallback(() => {
-    if (!captain?._id) return;
-    if (!socket?.connected) {
+    if (!captain?._id) {
+      console.warn("[captain-home] no hay captain._id para join");
+      return;
+    }
+
+    if (!socket) {
+      console.warn("[captain-home] socket no disponible para join");
+      return;
+    }
+
+    if (!socket.connected) {
       console.warn("[captain-home] socket no conectado todavía");
       return;
     }
@@ -43,52 +88,44 @@ const CaptainHome = () => {
     });
   }, [captain?._id, socket]);
 
-  useEffect(() => {
-    if (!socket) return;
-
-    const onConnect = () => {
-      console.log("[captain-home] socket connected:", socket.id);
-      emitCaptainJoin();
-    };
-
-    const onSocketJoined = (payload) => {
-      console.log("[captain-home] socket-joined:", payload);
-    };
-
-    const onLocationUpdated = (payload) => {
-      console.log("[captain-home] location-updated:", payload);
-    };
-
-    socket.on("connect", onConnect);
-    socket.on("socket-joined", onSocketJoined);
-    socket.on("location-updated", onLocationUpdated);
-
-    if (socket.connected) {
-      emitCaptainJoin();
-    }
-
-    return () => {
-      socket.off("connect", onConnect);
-      socket.off("socket-joined", onSocketJoined);
-      socket.off("location-updated", onLocationUpdated);
-    };
-  }, [socket, emitCaptainJoin]);
-
-  useEffect(() => {
-    if (!captain?._id || !navigator.geolocation || !socket) return;
-
-    const sendCaptainLocation = (position) => {
-      const ltd = Number(position?.coords?.latitude);
-      const lng = Number(position?.coords?.longitude);
-
-      if (!Number.isFinite(ltd) || !Number.isFinite(lng)) {
-        console.warn("[captain-home] ubicación inválida");
+  const emitCaptainLocation = useCallback(
+    (coords, source = "unknown") => {
+      if (!captain?._id || !socket?.connected) {
+        console.warn("[captain-home] no se puede enviar ubicación:", {
+          hasCaptainId: !!captain?._id,
+          socketConnected: !!socket?.connected,
+          source,
+        });
         return;
       }
+
+      const ltd = Number(coords?.latitude);
+      const lng = Number(coords?.longitude);
+
+      if (!Number.isFinite(ltd) || !Number.isFinite(lng)) {
+        console.warn("[captain-home] ubicación inválida", {
+          source,
+          latitude: coords?.latitude,
+          longitude: coords?.longitude,
+        });
+        return;
+      }
+
+      const now = Date.now();
+      const elapsed = now - lastLocationSentRef.current;
+
+      // Evita spam absurdo por duplicados muy pegados
+      if (elapsed < 1500 && source !== "connect-refresh") {
+        return;
+      }
+
+      lastLocationSentRef.current = now;
+      setLocationReady(true);
 
       console.log("[captain-home] emit update-location-captain", {
         captainId: captain._id,
         socketId: socket.id,
+        source,
         ltd,
         lng,
       });
@@ -100,62 +137,165 @@ const CaptainHome = () => {
           lng,
         },
       });
-    };
+    },
+    [captain?._id, socket]
+  );
 
-    const onLocationError = (error) => {
-      console.error("Error obteniendo ubicación del transportador:", error);
-    };
-
-    navigator.geolocation.getCurrentPosition(
-      sendCaptainLocation,
-      onLocationError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 15000,
+  const requestAndEmitCurrentLocation = useCallback(
+    (source = "manual-request") => {
+      if (!navigator.geolocation) {
+        console.error("[captain-home] geolocation no soportado");
+        return;
       }
-    );
 
-    locationWatchIdRef.current = navigator.geolocation.watchPosition(
-      sendCaptainLocation,
-      onLocationError,
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 15000,
-      }
-    );
-
-    return () => {
-      if (locationWatchIdRef.current != null) {
-        navigator.geolocation.clearWatch(locationWatchIdRef.current);
-      }
-    };
-  }, [captain?._id, socket]);
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          emitCaptainLocation(position.coords, source);
+        },
+        (error) => {
+          console.error("[captain-home] error obteniendo ubicación actual:", {
+            source,
+            code: error?.code,
+            message: error?.message,
+          });
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 15000,
+        }
+      );
+    },
+    [emitCaptainLocation]
+  );
 
   useEffect(() => {
     if (!socket) return;
 
-    const onNewRide = (rideData) => {
-      console.log("[captain-home] new-ride recibido:", rideData);
-      setRide(rideData);
-      setConfirmRidePickup(false);
-      setRidePopup(true);
+    const onConnect = () => {
+      console.log("[captain-home] socket connected:", socket.id);
+      setSocketReady(true);
+
+      emitCaptainJoin();
+
+      // Reenvía ubicación apenas reconecta
+      setTimeout(() => {
+        requestAndEmitCurrentLocation("connect-refresh");
+      }, 500);
     };
 
+    const onDisconnect = (reason) => {
+      console.warn("[captain-home] socket disconnected:", reason);
+      setSocketReady(false);
+    };
+
+    const onConnectError = (error) => {
+      console.error("[captain-home] socket connect_error:", error?.message || error);
+      setSocketReady(false);
+    };
+
+    const onSocketJoined = (payload) => {
+      console.log("[captain-home] socket-joined:", payload);
+    };
+
+    const onLocationUpdated = (payload) => {
+      console.log("[captain-home] location-updated:", payload);
+    };
+
+    const onNewRide = (rideData) => {
+      console.log("[captain-home] new-ride recibido:", {
+        rideId: rideData?._id,
+        pickup: rideData?.pickup,
+        destination: rideData?.destination,
+        raw: rideData,
+      });
+
+      openRidePopup(rideData);
+    };
+
+    socket.off("connect", onConnect);
+    socket.off("disconnect", onDisconnect);
+    socket.off("connect_error", onConnectError);
+    socket.off("socket-joined", onSocketJoined);
+    socket.off("location-updated", onLocationUpdated);
+    socket.off("new-ride", onNewRide);
+
+    socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
+    socket.on("socket-joined", onSocketJoined);
+    socket.on("location-updated", onLocationUpdated);
     socket.on("new-ride", onNewRide);
 
+    if (socket.connected) {
+      onConnect();
+    }
+
     return () => {
+      socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+      socket.off("socket-joined", onSocketJoined);
+      socket.off("location-updated", onLocationUpdated);
       socket.off("new-ride", onNewRide);
     };
-  }, [socket]);
+  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, openRidePopup]);
+
+  useEffect(() => {
+    if (!captain?._id || !socket) return;
+    if (!navigator.geolocation) return;
+
+    const onLocationSuccess = (position) => {
+      emitCaptainLocation(position.coords, "watchPosition");
+    };
+
+    const onLocationError = (error) => {
+      console.error("[captain-home] Error obteniendo ubicación del transportador:", {
+        code: error?.code,
+        message: error?.message,
+      });
+    };
+
+    requestAndEmitCurrentLocation("initial-getCurrentPosition");
+
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      onLocationSuccess,
+      onLocationError,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 5000,
+        timeout: 15000,
+      }
+    );
+
+    locationIntervalRef.current = setInterval(() => {
+      requestAndEmitCurrentLocation("interval-refresh");
+    }, 10000);
+
+    return () => {
+      if (locationWatchIdRef.current != null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+        locationWatchIdRef.current = null;
+      }
+
+      if (locationIntervalRef.current != null) {
+        clearInterval(locationIntervalRef.current);
+        locationIntervalRef.current = null;
+      }
+    };
+  }, [captain?._id, socket, emitCaptainLocation, requestAndEmitCurrentLocation]);
 
   const confirmRide = async () => {
     try {
       if (!ride?._id) {
-        console.error("No hay servicio seleccionado para confirmar.");
+        console.error("[captain-home] No hay servicio seleccionado para confirmar.");
         return;
       }
+
+      console.log("[captain-home] confirmando ride:", {
+        rideId: ride._id,
+        captainId: captain?._id,
+      });
 
       await axios.post(
         `${getApiBaseUrl()}/rides/confirm`,
@@ -173,7 +313,7 @@ const CaptainHome = () => {
       setRidePopup(false);
       setConfirmRidePickup(true);
     } catch (error) {
-      console.error("Error confirmando servicio:", error);
+      console.error("[captain-home] Error confirmando servicio:", error);
       alert(
         error?.response?.data?.message ||
           "No se pudo confirmar el servicio. Intenta nuevamente."
@@ -202,11 +342,15 @@ const CaptainHome = () => {
       if (ridePopup) {
         gsap.to(ridePopupRef.current, {
           y: "0%",
-          delay: 0.3,
+          delay: 0.1,
+          duration: 0.25,
+          ease: "power2.out",
         });
       } else {
         gsap.to(ridePopupRef.current, {
           y: "100%",
+          duration: 0.2,
+          ease: "power2.inOut",
         });
       }
     },
@@ -218,11 +362,15 @@ const CaptainHome = () => {
       if (confirmRidePickup) {
         gsap.to(confirmRidePickupRef.current, {
           y: "0%",
-          delay: 0.3,
+          delay: 0.1,
+          duration: 0.25,
+          ease: "power2.out",
         });
       } else {
         gsap.to(confirmRidePickupRef.current, {
           y: "100%",
+          duration: 0.2,
+          ease: "power2.inOut",
         });
       }
     },
@@ -233,11 +381,7 @@ const CaptainHome = () => {
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
       <div className="absolute top-0 left-0 ml-7 py-7 z-30">
         <Link to="/">
-          <img
-            className="w-20"
-            src="/logo-centralgo.png"
-            alt="Central Go"
-          />
+          <img className="w-20" src="/logo-centralgo.png" alt="Central Go" />
         </Link>
       </div>
 
@@ -251,6 +395,27 @@ const CaptainHome = () => {
         ></i>
       </Link>
 
+      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
+        <div className="flex items-center gap-2 rounded-full bg-white/95 shadow-lg border border-gray-200 px-4 py-2">
+          <span
+            className={`inline-block w-2.5 h-2.5 rounded-full ${
+              socketReady ? "bg-emerald-500" : "bg-red-500"
+            }`}
+          />
+          <span className="text-xs font-semibold text-gray-700">
+            {socketReady ? "Conectado" : "Reconectando..."}
+          </span>
+          <span className="text-gray-300">|</span>
+          <span
+            className={`text-xs font-semibold ${
+              locationReady ? "text-emerald-700" : "text-amber-600"
+            }`}
+          >
+            {locationReady ? "Ubicación activa" : "Ubicando..."}
+          </span>
+        </div>
+      </div>
+
       <div className="absolute w-screen h-[100%] top-0 z-20">
         <LiveTracking />
       </div>
@@ -261,10 +426,16 @@ const CaptainHome = () => {
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
           </div>
 
-          <div className="px-5 pb-2">
+          <div className="px-5 pb-2 flex items-center justify-between gap-3">
             <p className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-4 py-2 text-sm font-semibold">
               Panel del transportador
             </p>
+
+            {ride?._id && ridePopup && (
+              <div className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-2 text-xs font-bold">
+                Nueva solicitud
+              </div>
+            )}
           </div>
 
           <CaptainDetails />
