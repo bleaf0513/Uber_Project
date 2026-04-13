@@ -1187,20 +1187,37 @@ const EnterpriseDriverPanel = () => {
   };
 
   const handleScopeChange = (scope) => {
-    setListScopeFilter(scope);
+  setListScopeFilter(scope);
 
-    if (scope === "Pendientes") {
-      setListStatusFilter("Pendiente");
-      setListDateFilter("");
-      return;
-    }
+  if (scope === "Pendientes") {
+    setListStatusFilter("Pendiente");
+    setListDateFilter("");
+    return;
+  }
 
-    if (scope === "Hoy") {
-      setListDateFilter(new Date().toISOString().slice(0, 10));
-      return;
-    }
-  };
+  if (scope === "En curso") {
+    setListStatusFilter("En curso");
+    setListDateFilter("");
+    return;
+  }
 
+  if (scope === "Finalizados") {
+    setListStatusFilter("Finalizada");
+    setListDateFilter("");
+    return;
+  }
+
+  if (scope === "Hoy") {
+    setListDateFilter(new Date().toISOString().slice(0, 10));
+    setListStatusFilter("Todos");
+    return;
+  }
+
+  if (scope === "Todos") {
+    setListStatusFilter("Todos");
+    setListDateFilter("");
+  }
+};
   if (!activeCedula) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
