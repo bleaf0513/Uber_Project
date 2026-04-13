@@ -157,7 +157,7 @@ const CaptainHome = () => {
       <div className="absolute top-0 left-0 ml-7 py-7 z-30">
         <Link to="/">
           <img
-            className="absolute w-20 ml-7 pt-7 z-30"
+            className="w-20"
             src="/logo-centralgo.png"
             alt="Central Go"
           />
