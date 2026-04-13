@@ -1341,26 +1341,40 @@ const EnterpriseLogistics = () => {
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
-            <select
-              name="clientId"
-              value={formData.clientId}
-              onChange={(e) => handleClientSelect(e.target.value)}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-              disabled={loadingClients}
-            >
-              <option value="">
-                {loadingClients
-                  ? "Cargando clientes..."
-                  : filteredClientsForSelect.length === 0
-                  ? "No hay clientes disponibles"
-                  : "Seleccionar cliente"}
-              </option>
-              {filteredClientsForSelect.map((client) => (
-                <option key={clientIdValue(client)} value={clientIdValue(client)}>
-                  {client.name} - {client.phone} - {client.address}
-                </option>
-              ))}
-            </select>
+            <div className="rounded-xl border border-gray-200 bg-gray-100 p-3">
+  <label className="block text-sm font-semibold text-gray-700 mb-2">
+    Seleccionar cliente
+  </label>
+
+  <input
+    type="text"
+    placeholder="Buscar dentro de seleccionar cliente"
+    value={clientSearch}
+    onChange={(e) => setClientSearch(e.target.value)}
+    className="w-full bg-white rounded-xl px-4 py-3 outline-none border border-gray-200 mb-3"
+  />
+
+  <select
+    name="clientId"
+    value={formData.clientId}
+    onChange={(e) => handleClientSelect(e.target.value)}
+    className="w-full bg-white rounded-xl px-4 py-3 outline-none border border-gray-200"
+    disabled={loadingClients}
+  >
+    <option value="">
+      {loadingClients
+        ? "Cargando clientes..."
+        : filteredClientsForSelect.length === 0
+        ? "No hay clientes disponibles"
+        : "Seleccionar cliente"}
+    </option>
+    {filteredClientsForSelect.map((client) => (
+      <option key={clientIdValue(client)} value={clientIdValue(client)}>
+        {client.name} - {client.phone} - {client.address}
+      </option>
+    ))}
+  </select>
+</div>
 
             {selectedClient ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
