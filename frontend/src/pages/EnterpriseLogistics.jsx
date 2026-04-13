@@ -940,26 +940,21 @@ const EnterpriseLogistics = () => {
     );
   }, [clients, formData.clientId]);
 
-  const filteredClientsForSelect = useMemo(() => {
-    const term = String(clientSearch || "").trim().toLowerCase();
+ const filteredClientsForSelect = useMemo(() => {
+  const term = String(clientSearch || "").trim().toLowerCase();
 
-    return clients
-      .filter((client) => Boolean(client?.isActive ?? true))
-      .filter((client) => {
-        if (!term) return true;
-        return (
-          String(client?.name || "").toLowerCase().includes(term) ||
-          String(client?.phone || "").toLowerCase().includes(term) ||
-          String(client?.address || "").toLowerCase().includes(term) ||
-          String(client?.neighborhood || "").toLowerCase().includes(term)
-        );
-      })
-      .sort((a, b) => {
-        const aUpdated = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-        const bUpdated = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-        return bUpdated - aUpdated;
-      });
-  }, [clients, clientSearch]);
+  return clients
+    .filter((client) => Boolean(client?.isActive ?? true))
+    .filter((client) => {
+      if (!term) return true;
+      return String(client?.name || "").toLowerCase().includes(term);
+    })
+    .sort((a, b) => {
+      const aUpdated = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+      const bUpdated = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+      return bUpdated - aUpdated;
+    });
+}, [clients, clientSearch]);
 
   const handleClientSelect = (clientId) => {
     const client =
@@ -1333,47 +1328,60 @@ const EnterpriseLogistics = () => {
               className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
             />
 
-            <input
-              type="text"
-              placeholder="Buscar cliente por nombre, teléfono o dirección"
-              value={clientSearch}
-              onChange={(e) => setClientSearch(e.target.value)}
-              className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-            />
-
-            <div className="rounded-xl border border-gray-200 bg-gray-100 p-3">
-  <label className="block text-sm font-semibold text-gray-700 mb-2">
-    Seleccionar cliente
-  </label>
-
+            <div className="relative">
   <input
     type="text"
-    placeholder="Buscar dentro de seleccionar cliente"
-    value={clientSearch}
-    onChange={(e) => setClientSearch(e.target.value)}
-    className="w-full bg-white rounded-xl px-4 py-3 outline-none border border-gray-200 mb-3"
+    placeholder="Seleccionar cliente"
+    value={
+      formData.clientId
+        ? `${formData.clientName || ""}`
+        : clientSearch
+    }
+    onChange={(e) => {
+      setClientSearch(e.target.value);
+      if (formData.clientId) {
+        setFormData((prev) => ({
+          ...prev,
+          clientId: "",
+          clientName: "",
+          address: "",
+          clientPhone: "",
+          neighborhood: "",
+          reference: "",
+          placeId: "",
+        }));
+      }
+    }}
+    className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+    disabled={loadingClients}
   />
 
-  <select
-    name="clientId"
-    value={formData.clientId}
-    onChange={(e) => handleClientSelect(e.target.value)}
-    className="w-full bg-white rounded-xl px-4 py-3 outline-none border border-gray-200"
-    disabled={loadingClients}
-  >
-    <option value="">
-      {loadingClients
-        ? "Cargando clientes..."
-        : filteredClientsForSelect.length === 0
-        ? "No hay clientes disponibles"
-        : "Seleccionar cliente"}
-    </option>
-    {filteredClientsForSelect.map((client) => (
-      <option key={clientIdValue(client)} value={clientIdValue(client)}>
-        {client.name} - {client.phone} - {client.address}
-      </option>
-    ))}
-  </select>
+  {!loadingClients && !formData.clientId && clientSearch.trim() !== "" && (
+    <div className="absolute z-20 mt-2 w-full max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+      {filteredClientsForSelect.length === 0 ? (
+        <div className="px-4 py-3 text-sm text-gray-500">
+          No se encontraron clientes
+        </div>
+      ) : (
+        filteredClientsForSelect.map((client) => (
+          <button
+            key={clientIdValue(client)}
+            type="button"
+            onClick={() => {
+              handleClientSelect(clientIdValue(client));
+              setClientSearch("");
+            }}
+            className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
+          >
+            <div className="font-medium text-gray-900">{client.name}</div>
+            <div className="text-sm text-gray-500">
+              {client.phone} - {client.address}
+            </div>
+          </button>
+        ))
+      )}
+    </div>
+  )}
 </div>
 
             {selectedClient ? (
