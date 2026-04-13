@@ -20,6 +20,27 @@ function msToHours(ms = 0) {
 }
 
 /**
+ * Distancia entre dos puntos en metros
+ */
+function haversineMeters(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = (d) => (d * Math.PI) / 180;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) *
+            Math.cos(toRad(lat2)) *
+            Math.sin(dLng / 2) *
+            Math.sin(dLng / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+/**
  * Arma la respuesta del captain para el frontend
  * sin exponer password y dejando stats listas para el panel.
  */
@@ -57,6 +78,11 @@ function buildCaptainResponse(captainDoc) {
             captain.stars ??
             5
         ),
+
+        location: {
+            ltd: toNumber(captain?.location?.ltd, 0),
+            lng: toNumber(captain?.location?.lng, 0),
+        },
 
         onlineSession: {
             isOnline: Boolean(captain?.onlineSession?.isOnline),
@@ -277,6 +303,81 @@ module.exports.logoutCaptain = async (req, res, next) => {
         console.error('logoutCaptain error:', err);
         return res.status(500).json({
             message: 'Error logging out',
+            error: err.message,
+        });
+    }
+};
+
+module.exports.getNearbyCaptains = async (req, res) => {
+    try {
+        const lat = toNumber(req.query.lat, NaN);
+        const lng = toNumber(req.query.lng, NaN);
+        const radiusKm = Math.max(toNumber(req.query.radiusKm, 8), 1);
+        const radiusM = radiusKm * 1000;
+
+        if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+            return res.status(400).json({
+                message: 'Latitud y longitud inválidas.',
+            });
+        }
+
+        const captains = await captainModel.find({
+            status: 'active',
+            socketId: { $exists: true, $ne: null },
+            'location.ltd': { $exists: true, $ne: null },
+            'location.lng': { $exists: true, $ne: null },
+        });
+
+        const nearbyCaptains = captains
+            .map((captain) => {
+                const captainLat = toNumber(captain?.location?.ltd, NaN);
+                const captainLng = toNumber(captain?.location?.lng, NaN);
+
+                if (!Number.isFinite(captainLat) || !Number.isFinite(captainLng)) {
+                    return null;
+                }
+
+                const distanceMeters = haversineMeters(
+                    lat,
+                    lng,
+                    captainLat,
+                    captainLng
+                );
+
+                if (!Number.isFinite(distanceMeters) || distanceMeters > radiusM) {
+                    return null;
+                }
+
+                return {
+                    _id: captain._id,
+                    captainId: captain._id,
+                    name:
+                        `${captain?.fullname?.firstname || ''} ${captain?.fullname?.lastname || ''}`.trim() ||
+                        captain?.name ||
+                        'Conductor activo',
+                    socketId: captain.socketId || '',
+                    status: captain.status || 'active',
+                    vehicleType:
+                        captain?.vehicle?.vehicleType ||
+                        captain?.vehicleType ||
+                        'car',
+                    location: {
+                        ltd: captainLat,
+                        lng: captainLng,
+                    },
+                    distanceMeters: Math.round(distanceMeters),
+                };
+            })
+            .filter(Boolean)
+            .sort((a, b) => a.distanceMeters - b.distanceMeters);
+
+        return res.status(200).json({
+            captains: nearbyCaptains,
+        });
+    } catch (err) {
+        console.error('getNearbyCaptains error:', err);
+        return res.status(500).json({
+            message: 'Error obteniendo conductores cercanos',
             error: err.message,
         });
     }
