@@ -3,6 +3,7 @@ const { validationResult } = require('express-validator');
 const mapService = require('../services/maps.service');
 const { sendMessageToSocketId } = require('../socket');
 const rideModel = require('../models/ride.model');
+const captainModel = require('../models/captain.model');
 const { mapsErrorStatus } = require('../utils/mapsHttpStatus');
 
 console.log('🔥🔥🔥 RIDE CONTROLLER NUEVO EN PRODUCCION 🔥🔥🔥');
@@ -15,8 +16,44 @@ function safeId(value) {
     }
 }
 
-function isFiniteNumber(value) {
-    return typeof value === 'number' && Number.isFinite(value);
+function toNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : NaN;
+}
+
+function isValidLatitude(lat) {
+    return Number.isFinite(lat) && lat >= -90 && lat <= 90;
+}
+
+function isValidLongitude(lng) {
+    return Number.isFinite(lng) && lng >= -180 && lng <= 180;
+}
+
+function isValidLatLng(lat, lng) {
+    return isValidLatitude(lat) && isValidLongitude(lng);
+}
+
+function haversineMeters(lat1, lng1, lat2, lng2) {
+    const R = 6371000;
+    const toRad = (d) => (d * Math.PI) / 180;
+
+    const dLat = toRad(lat2 - lat1);
+    const dLng = toRad(lng2 - lng1);
+
+    const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(lat1)) *
+            Math.cos(toRad(lat2)) *
+            Math.sin(dLng / 2) *
+            Math.sin(dLng / 2);
+
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return R * c;
+}
+
+function kmText(meters) {
+    if (!Number.isFinite(meters)) return null;
+    return `${(meters / 1000).toFixed(2)} km`;
 }
 
 module.exports.createRide = async (req, res) => {
@@ -58,8 +95,8 @@ module.exports.createRide = async (req, res) => {
 
         if (
             !pickupCoordinates ||
-            !isFiniteNumber(pickupCoordinates.ltd) ||
-            !isFiniteNumber(pickupCoordinates.lng)
+            !Number.isFinite(pickupCoordinates.ltd) ||
+            !Number.isFinite(pickupCoordinates.lng)
         ) {
             console.error('[ride] invalid pickup coordinates after geocoding:', pickupCoordinates);
             return res.status(500).json({
@@ -67,10 +104,13 @@ module.exports.createRide = async (req, res) => {
             });
         }
 
+        // Subido a 15 km para pruebas reales en Medellín/Itagüí/Envigado/Sabaneta
+        const SEARCH_RADIUS_KM = 15;
+
         const captainsInRadius = await mapService.getCaptainsInTheRadius(
             pickupCoordinates.ltd,
             pickupCoordinates.lng,
-            8
+            SEARCH_RADIUS_KM
         );
 
         const captainsSummary = (captainsInRadius || []).map((captain) => ({
@@ -82,6 +122,63 @@ module.exports.createRide = async (req, res) => {
 
         console.log('[ride] captainsInRadius summary:', captainsSummary);
         console.log('[ride] captainsInRadius count:', captainsSummary.length);
+
+        // Diagnóstico adicional: revisar TODOS los capitanes activos para entender por qué uno conectado no entró
+        const allActiveCaptains = await captainModel.find({
+            status: 'active',
+        });
+
+        const allActiveDiagnostic = (allActiveCaptains || []).map((captain) => {
+            const captainId = safeId(captain?._id);
+            const socketId = captain?.socketId || null;
+            const captainLtd = toNumber(captain?.location?.ltd);
+            const captainLng = toNumber(captain?.location?.lng);
+
+            const connected = !!socketId;
+            const hasValidLocation = isValidLatLng(captainLtd, captainLng);
+
+            let distanceMeters = null;
+            let distanceKm = null;
+            let insideRadius = false;
+            let discardReason = null;
+
+            if (!connected) {
+                discardReason = 'not_connected';
+            } else if (!hasValidLocation) {
+                discardReason = 'invalid_or_missing_location';
+            } else {
+                distanceMeters = haversineMeters(
+                    pickupCoordinates.ltd,
+                    pickupCoordinates.lng,
+                    captainLtd,
+                    captainLng
+                );
+                distanceKm = kmText(distanceMeters);
+                insideRadius = Number.isFinite(distanceMeters)
+                    ? distanceMeters <= SEARCH_RADIUS_KM * 1000
+                    : false;
+
+                if (!insideRadius) {
+                    discardReason = 'outside_radius';
+                }
+            }
+
+            return {
+                captainId,
+                connected,
+                socketId,
+                status: captain?.status || null,
+                captainLtd: Number.isFinite(captainLtd) ? captainLtd : null,
+                captainLng: Number.isFinite(captainLng) ? captainLng : null,
+                hasValidLocation,
+                distanceMeters: Number.isFinite(distanceMeters) ? Math.round(distanceMeters) : null,
+                distanceKm,
+                insideRadius,
+                discardReason,
+            };
+        });
+
+        console.log('[ride] active captains diagnostic:', allActiveDiagnostic);
 
         ride.otp = '';
 
@@ -156,13 +253,28 @@ module.exports.createRide = async (req, res) => {
                 rideId: safeId(rideWithUser?._id),
                 pickup,
                 pickupCoordinates,
-                radiusKm: 8,
+                radiusKm: SEARCH_RADIUS_KM,
+            });
+
+            return res.status(404).json({
+                message: 'No hay conductores disponibles cerca en este momento.',
+                code: 'NO_CAPTAINS_AVAILABLE',
+                pickupCoordinates,
+                radiusKm: SEARCH_RADIUS_KM,
+                activeCaptainsDiagnostic: allActiveDiagnostic,
             });
         }
 
         if ((captainsInRadius || []).length > 0 && emittedCount === 0) {
             console.warn('[ride] captains found but no new-ride emitted:', {
                 rideId: safeId(rideWithUser?._id),
+                captainsFound: captainsSummary.length,
+                skippedCaptains,
+            });
+
+            return res.status(503).json({
+                message: 'Se encontraron conductores, pero no fue posible notificarles.',
+                code: 'CAPTAINS_FOUND_BUT_NOT_NOTIFIED',
                 captainsFound: captainsSummary.length,
                 skippedCaptains,
             });
