@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useContext, useRef } from "react";
+import React, { useState, useEffect, useContext, useRef, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -15,6 +15,7 @@ import LiveTracking from "../../components/LiveTracking";
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
   const confirmRidePickupRef = useRef(null);
+  const locationWatchIdRef = useRef(null);
   const navigate = useNavigate();
 
   const { captain } = useContext(CaptainDataContext);
@@ -24,8 +25,17 @@ const CaptainHome = () => {
   const [ride, setRide] = useState(null);
   const [confirmRidePickup, setConfirmRidePickup] = useState(false);
 
-  useEffect(() => {
+  const emitCaptainJoin = useCallback(() => {
     if (!captain?._id) return;
+    if (!socket?.connected) {
+      console.warn("[captain-home] socket no conectado todavía");
+      return;
+    }
+
+    console.log("[captain-home] emit join", {
+      captainId: captain._id,
+      socketId: socket.id,
+    });
 
     socket.emit("join", {
       userId: captain._id,
@@ -34,21 +44,71 @@ const CaptainHome = () => {
   }, [captain?._id, socket]);
 
   useEffect(() => {
-    if (!captain?._id || !navigator.geolocation) return;
+    if (!socket) return;
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        socket.emit("update-location-captain", {
-          userId: captain._id,
-          location: {
-            ltd: position.coords.latitude,
-            lng: position.coords.longitude,
-          },
-        });
-      },
-      (error) => {
-        console.error("Error obteniendo ubicación del transportador:", error);
-      },
+    const onConnect = () => {
+      console.log("[captain-home] socket connected:", socket.id);
+      emitCaptainJoin();
+    };
+
+    const onSocketJoined = (payload) => {
+      console.log("[captain-home] socket-joined:", payload);
+    };
+
+    const onLocationUpdated = (payload) => {
+      console.log("[captain-home] location-updated:", payload);
+    };
+
+    socket.on("connect", onConnect);
+    socket.on("socket-joined", onSocketJoined);
+    socket.on("location-updated", onLocationUpdated);
+
+    if (socket.connected) {
+      emitCaptainJoin();
+    }
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.off("socket-joined", onSocketJoined);
+      socket.off("location-updated", onLocationUpdated);
+    };
+  }, [socket, emitCaptainJoin]);
+
+  useEffect(() => {
+    if (!captain?._id || !navigator.geolocation || !socket) return;
+
+    const sendCaptainLocation = (position) => {
+      const ltd = Number(position?.coords?.latitude);
+      const lng = Number(position?.coords?.longitude);
+
+      if (!Number.isFinite(ltd) || !Number.isFinite(lng)) {
+        console.warn("[captain-home] ubicación inválida");
+        return;
+      }
+
+      console.log("[captain-home] emit update-location-captain", {
+        captainId: captain._id,
+        socketId: socket.id,
+        ltd,
+        lng,
+      });
+
+      socket.emit("update-location-captain", {
+        userId: captain._id,
+        location: {
+          ltd,
+          lng,
+        },
+      });
+    };
+
+    const onLocationError = (error) => {
+      console.error("Error obteniendo ubicación del transportador:", error);
+    };
+
+    navigator.geolocation.getCurrentPosition(
+      sendCaptainLocation,
+      onLocationError,
       {
         enableHighAccuracy: true,
         maximumAge: 10000,
@@ -56,11 +116,28 @@ const CaptainHome = () => {
       }
     );
 
-    return () => navigator.geolocation.clearWatch(watchId);
+    locationWatchIdRef.current = navigator.geolocation.watchPosition(
+      sendCaptainLocation,
+      onLocationError,
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 15000,
+      }
+    );
+
+    return () => {
+      if (locationWatchIdRef.current != null) {
+        navigator.geolocation.clearWatch(locationWatchIdRef.current);
+      }
+    };
   }, [captain?._id, socket]);
 
   useEffect(() => {
+    if (!socket) return;
+
     const onNewRide = (rideData) => {
+      console.log("[captain-home] new-ride recibido:", rideData);
       setRide(rideData);
       setConfirmRidePickup(false);
       setRidePopup(true);
