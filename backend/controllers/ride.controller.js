@@ -7,11 +7,24 @@ const { mapsErrorStatus } = require('../utils/mapsHttpStatus');
 
 console.log('🔥🔥🔥 RIDE CONTROLLER NUEVO EN PRODUCCION 🔥🔥🔥');
 
+function safeId(value) {
+    try {
+        return value ? String(value) : null;
+    } catch {
+        return null;
+    }
+}
+
+function isFiniteNumber(value) {
+    return typeof value === 'number' && Number.isFinite(value);
+}
+
 module.exports.createRide = async (req, res) => {
     console.log('🔥 CREATE RIDE NUEVO FUNCIONANDO 🔥');
 
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -19,16 +32,12 @@ module.exports.createRide = async (req, res) => {
 
     try {
         console.log('[ride] createRide request:', {
-            userId: req.user?._id ? String(req.user._id) : null,
+            userId: safeId(req.user?._id),
             pickup,
             destination,
             vehicle,
             offeredFare,
         });
-
-        console.log('[ride] pickup recibido:', pickup);
-        console.log('[ride] destination recibido:', destination);
-        console.log('[ride] vehicle recibido:', vehicle);
 
         const ride = await rideService.createRide({
             user: req.user,
@@ -38,9 +47,25 @@ module.exports.createRide = async (req, res) => {
             offeredFare,
         });
 
+        console.log('[ride] ride created:', {
+            rideId: safeId(ride?._id),
+            userId: safeId(req.user?._id),
+        });
+
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
 
         console.log('[ride] pickupCoordinates:', pickupCoordinates);
+
+        if (
+            !pickupCoordinates ||
+            !isFiniteNumber(pickupCoordinates.ltd) ||
+            !isFiniteNumber(pickupCoordinates.lng)
+        ) {
+            console.error('[ride] invalid pickup coordinates after geocoding:', pickupCoordinates);
+            return res.status(500).json({
+                message: 'No se pudo determinar la ubicación de recogida.',
+            });
+        }
 
         const captainsInRadius = await mapService.getCaptainsInTheRadius(
             pickupCoordinates.ltd,
@@ -48,69 +73,147 @@ module.exports.createRide = async (req, res) => {
             8
         );
 
-        console.log(
-            '[ride] captainsInRadius:',
-            (captainsInRadius || []).map((captain) => ({
-                _id: captain?._id ? String(captain._id) : null,
-                socketId: captain?.socketId || null,
-                status: captain?.status || null,
-                location: captain?.location || null,
-            }))
-        );
+        const captainsSummary = (captainsInRadius || []).map((captain) => ({
+            captainId: safeId(captain?._id),
+            socketId: captain?.socketId || null,
+            status: captain?.status || null,
+            location: captain?.location || null,
+        }));
 
-        ride.otp = "";
+        console.log('[ride] captainsInRadius summary:', captainsSummary);
+        console.log('[ride] captainsInRadius count:', captainsSummary.length);
+
+        ride.otp = '';
 
         const rideWithUser = await rideModel
             .findOne({ _id: ride._id })
             .populate('user');
 
+        if (!rideWithUser) {
+            console.error('[ride] rideWithUser not found after creation:', {
+                rideId: safeId(ride?._id),
+            });
+
+            return res.status(500).json({
+                message: 'No se pudo cargar la solicitud recién creada.',
+            });
+        }
+
         let emittedCount = 0;
+        let skippedNoSocket = 0;
+        const emittedTo = [];
+        const skippedCaptains = [];
 
-        (captainsInRadius || []).forEach((captain) => {
+        for (const captain of captainsInRadius || []) {
+            const captainId = safeId(captain?._id);
+            const socketId = captain?.socketId || null;
+
             console.log('[ride] trying socket emit new-ride:', {
-                captainId: captain?._id ? String(captain._id) : null,
-                socketId: captain?.socketId || null,
+                captainId,
+                socketId,
             });
 
-            if (!captain?.socketId) return;
+            if (!socketId) {
+                skippedNoSocket += 1;
+                skippedCaptains.push({
+                    captainId,
+                    reason: 'missing_socket',
+                });
+                continue;
+            }
 
-            sendMessageToSocketId(captain.socketId, {
+            const sent = sendMessageToSocketId(socketId, {
                 event: 'new-ride',
-                data: rideWithUser
+                data: rideWithUser,
             });
 
-            emittedCount += 1;
+            if (sent) {
+                emittedCount += 1;
+                emittedTo.push({
+                    captainId,
+                    socketId,
+                });
+            } else {
+                skippedCaptains.push({
+                    captainId,
+                    socketId,
+                    reason: 'emit_failed',
+                });
+            }
+        }
+
+        console.log('[ride] new-ride emit result:', {
+            rideId: safeId(rideWithUser?._id),
+            captainsFound: captainsSummary.length,
+            emittedCount,
+            skippedNoSocket,
+            emittedTo,
+            skippedCaptains,
         });
 
-        console.log('[ride] new-ride emitted to captains:', emittedCount);
+        if ((captainsInRadius || []).length === 0) {
+            console.warn('[ride] no captains found in radius for ride:', {
+                rideId: safeId(rideWithUser?._id),
+                pickup,
+                pickupCoordinates,
+                radiusKm: 8,
+            });
+        }
+
+        if ((captainsInRadius || []).length > 0 && emittedCount === 0) {
+            console.warn('[ride] captains found but no new-ride emitted:', {
+                rideId: safeId(rideWithUser?._id),
+                captainsFound: captainsSummary.length,
+                skippedCaptains,
+            });
+        }
 
         return res.status(201).json(ride);
     } catch (err) {
         console.error('Error en createRide:', err);
-        return res.status(500).json({ message: err.message });
+
+        const status = typeof mapsErrorStatus === 'function' ? mapsErrorStatus(err) : null;
+        if (status) {
+            return res.status(status).json({ message: err.message });
+        }
+
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
 
 module.exports.getFare = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] getFare validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
     const { pickup, destination } = req.query;
 
     try {
+        console.log('[ride] getFare request:', { pickup, destination });
+
         const fare = await rideService.getFare(pickup, destination);
+
+        console.log('[ride] getFare response:', fare);
+
         return res.status(200).json(fare);
     } catch (err) {
         console.error('Error en getFare:', err);
-        return res.status(500).json({ message: err.message });
+
+        const status = typeof mapsErrorStatus === 'function' ? mapsErrorStatus(err) : null;
+        if (status) {
+            return res.status(status).json({ message: err.message });
+        }
+
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
 
 module.exports.confirmRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] confirmRide validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -123,8 +226,9 @@ module.exports.confirmRide = async (req, res) => {
         });
 
         console.log('[ride] ride-confirmed emit:', {
-            rideId: ride?._id ? String(ride._id) : null,
+            rideId: safeId(ride?._id),
             userSocketId: ride?.user?.socketId || null,
+            captainId: safeId(req.captain?._id),
         });
 
         sendMessageToSocketId(ride.user.socketId, {
@@ -135,13 +239,14 @@ module.exports.confirmRide = async (req, res) => {
         return res.status(200).json(ride);
     } catch (err) {
         console.error('Error en confirmRide:', err);
-        return res.status(500).json({ message: err.message });
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
 
 module.exports.startRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] startRide validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -155,8 +260,9 @@ module.exports.startRide = async (req, res) => {
         });
 
         console.log('[ride] ride-started emit:', {
-            rideId: ride?._id ? String(ride._id) : null,
+            rideId: safeId(ride?._id),
             userSocketId: ride?.user?.socketId || null,
+            captainId: safeId(req.captain?._id),
         });
 
         sendMessageToSocketId(ride.user.socketId, {
@@ -167,13 +273,14 @@ module.exports.startRide = async (req, res) => {
         return res.status(200).json(ride);
     } catch (err) {
         console.error('Error en startRide:', err);
-        return res.status(500).json({ message: err.message });
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
 
 module.exports.endRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] endRide validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -186,8 +293,9 @@ module.exports.endRide = async (req, res) => {
         });
 
         console.log('[ride] ride-ended emit:', {
-            rideId: ride?._id ? String(ride._id) : null,
+            rideId: safeId(ride?._id),
             userSocketId: ride?.user?.socketId || null,
+            captainId: safeId(req.captain?._id),
         });
 
         sendMessageToSocketId(ride.user.socketId, {
@@ -198,13 +306,14 @@ module.exports.endRide = async (req, res) => {
         return res.status(200).json(ride);
     } catch (err) {
         console.error('Error en endRide:', err);
-        return res.status(500).json({ message: err.message });
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
 
 module.exports.cancelRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
+        console.warn('[ride] cancelRide validation errors:', errors.array());
         return res.status(400).json({ errors: errors.array() });
     }
 
@@ -216,12 +325,17 @@ module.exports.cancelRide = async (req, res) => {
             user: req.user
         });
 
+        console.log('[ride] ride cancelled:', {
+            rideId: safeId(ride?._id),
+            userId: safeId(req.user?._id),
+        });
+
         return res.status(200).json({
             message: 'Solicitud cancelada correctamente',
             ride
         });
     } catch (err) {
         console.error('Error en cancelRide:', err);
-        return res.status(500).json({ message: err.message });
+        return res.status(500).json({ message: err.message || 'Error interno del servidor' });
     }
 };
