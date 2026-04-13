@@ -45,6 +45,11 @@ router.get('/logout', authMiddleware.authCaptain, (req, res) => {
     captainController.logoutCaptain(req, res);
 });
 
+// NUEVA RUTA: conductores cercanos para el mapa
+router.get('/nearby', (req, res) => {
+    captainController.getNearbyCaptains(req, res);
+});
+
 router.get('/', (req, res) => {
     res.send('Hello World');
 });
