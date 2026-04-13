@@ -6,6 +6,8 @@ import {
   OverlayView,
 } from "@react-google-maps/api";
 import { useGoogleMapsScript } from "../src/context/GoogleMapsLoadContext";
+import axios from "axios";
+import { getApiBaseUrl } from "../src/apiBase";
 
 const containerStyle = {
   width: "100%",
@@ -38,11 +40,14 @@ const LiveTracking = ({
   nearbyDrivers = [],
   showPickupRadar = true,
   zoom = 15,
+  autoFetchNearbyDrivers = true,
+  nearbyDriversRefreshMs = 8000,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
   const [currentPosition, setCurrentPosition] = useState(null);
   const [pickupPosition, setPickupPosition] = useState(null);
+  const [fetchedDrivers, setFetchedDrivers] = useState([]);
   const [error, setError] = useState(null);
   const [isGeolocationAvailable, setIsGeolocationAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(true);
@@ -52,12 +57,15 @@ const LiveTracking = ({
   const [pulseRadiusB, setPulseRadiusB] = useState(260);
 
   const watchIdRef = useRef(null);
+  const driversIntervalRef = useRef(null);
+  const geocoderRequestIdRef = useRef(0);
 
-  // NUEVO: evita que el mapa se recoloque todo el tiempo
   const hasAutoFittedRef = useRef(false);
   const isUserInteractingRef = useRef(false);
   const interactionTimeoutRef = useRef(null);
   const lastFocusKeyRef = useRef("");
+
+  const apiBase = getApiBaseUrl();
 
   const mapOptions = useMemo(
     () => ({
@@ -73,8 +81,15 @@ const LiveTracking = ({
     []
   );
 
+  const mergedNearbyDrivers = useMemo(() => {
+    if (Array.isArray(nearbyDrivers) && nearbyDrivers.length > 0) {
+      return nearbyDrivers;
+    }
+    return fetchedDrivers;
+  }, [nearbyDrivers, fetchedDrivers]);
+
   const safeNearbyDrivers = useMemo(() => {
-    return (Array.isArray(nearbyDrivers) ? nearbyDrivers : [])
+    return (Array.isArray(mergedNearbyDrivers) ? mergedNearbyDrivers : [])
       .map((driver, index) => {
         const lat =
           toFiniteNumber(driver?.lat) ??
@@ -115,10 +130,15 @@ const LiveTracking = ({
             toFiniteNumber(driver?.rotation) ??
             0,
           name,
+          vehicleType:
+            driver?.vehicleType ||
+            driver?.vehicle?.vehicleType ||
+            driver?.vehicle ||
+            "car",
         };
       })
       .filter(Boolean);
-  }, [nearbyDrivers]);
+  }, [mergedNearbyDrivers]);
 
   const markUserInteraction = () => {
     isUserInteractingRef.current = true;
@@ -182,6 +202,8 @@ const LiveTracking = ({
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps) return;
 
+    const currentRequestId = ++geocoderRequestIdRef.current;
+
     if (!pickup || typeof pickup !== "string" || pickup.trim().length < 3) {
       setPickupPosition(null);
       return;
@@ -190,6 +212,8 @@ const LiveTracking = ({
     const geocoder = new window.google.maps.Geocoder();
 
     geocoder.geocode({ address: pickup }, (results, status) => {
+      if (currentRequestId !== geocoderRequestIdRef.current) return;
+
       if (status === "OK" && results?.[0]?.geometry?.location) {
         const location = results[0].geometry.location;
         setPickupPosition({
@@ -212,7 +236,56 @@ const LiveTracking = ({
     return () => clearInterval(interval);
   }, []);
 
-  // NUEVO: solo autoajusta al inicio o cuando cambia realmente el foco del viaje
+  useEffect(() => {
+    if (!autoFetchNearbyDrivers) return;
+    if (!currentPosition?.lat || !currentPosition?.lng) return;
+
+    let cancelled = false;
+
+    const fetchNearbyDrivers = async () => {
+      try {
+        const response = await axios.get(`${apiBase}/captains/nearby`, {
+          params: {
+            lat: currentPosition.lat,
+            lng: currentPosition.lng,
+          },
+        });
+
+        if (cancelled) return;
+
+        const drivers =
+          response?.data?.captains ||
+          response?.data?.drivers ||
+          response?.data?.nearbyDrivers ||
+          [];
+
+        setFetchedDrivers(Array.isArray(drivers) ? drivers : []);
+      } catch (err) {
+        console.error("[LiveTracking] error consultando conductores cercanos:", err);
+      }
+    };
+
+    fetchNearbyDrivers();
+
+    driversIntervalRef.current = setInterval(() => {
+      fetchNearbyDrivers();
+    }, nearbyDriversRefreshMs);
+
+    return () => {
+      cancelled = true;
+      if (driversIntervalRef.current) {
+        clearInterval(driversIntervalRef.current);
+        driversIntervalRef.current = null;
+      }
+    };
+  }, [
+    autoFetchNearbyDrivers,
+    apiBase,
+    currentPosition?.lat,
+    currentPosition?.lng,
+    nearbyDriversRefreshMs,
+  ]);
+
   useEffect(() => {
     if (!map || !mapsApiLoaded || !window.google?.maps) return;
     if (isUserInteractingRef.current) return;
@@ -310,14 +383,17 @@ const LiveTracking = ({
         }
       : undefined;
 
-  const buildCarSvg = (rotation = 0) => {
+  const buildCarSvg = (rotation = 0, active = true) => {
+    const fill = active ? "#7c3aed" : "#9ca3af";
+    const topFill = active ? "#8b5cf6" : "#cbd5e1";
+
     const svg = `
       <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
         <g transform="rotate(${rotation} 28 28)">
           <circle cx="28" cy="28" r="24" fill="white" fill-opacity="0.96"/>
           <circle cx="28" cy="28" r="24" stroke="#d1d5db" stroke-width="1.5" fill="none"/>
-          <rect x="15" y="22" width="26" height="12" rx="5" fill="#7c3aed"/>
-          <rect x="20" y="18" width="16" height="8" rx="3" fill="#8b5cf6"/>
+          <rect x="15" y="22" width="26" height="12" rx="5" fill="${fill}"/>
+          <rect x="20" y="18" width="16" height="8" rx="3" fill="${topFill}"/>
           <circle cx="21" cy="36" r="4" fill="#111827"/>
           <circle cx="35" cy="36" r="4" fill="#111827"/>
           <rect x="22" y="20" width="5" height="4" rx="1" fill="#dbeafe"/>
@@ -460,7 +536,7 @@ const LiveTracking = ({
           <Marker
             key={driver.id}
             position={{ lat: driver.lat, lng: driver.lng }}
-            icon={buildCarSvg(driver.rotation)}
+            icon={buildCarSvg(driver.rotation, true)}
             zIndex={40}
             title={driver.name}
           />
