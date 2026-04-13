@@ -1,7 +1,7 @@
 import React, { useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "remixicon/fonts/remixicon.css";
-import { CaptainDataContext } from "./../src/context/CaptainContext";
+import { CaptainDataContext } from "../context/CaptainContext";
 
 const CaptainDetails = () => {
   const navigate = useNavigate();
@@ -19,56 +19,18 @@ const CaptainDetails = () => {
     captain?.image ||
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
 
-  const rating = Number(captain?.rating ?? captain?.stats?.rating ?? 4.9);
+  const rating = Number(captain?.rating ?? 5);
+  const isOnline = Boolean(captain?.onlineSession?.isOnline);
 
   const stats = captain?.stats || {};
 
-  const hoursOnline = Number(
-    stats?.hoursOnline ??
-      captain?.hoursOnline ??
-      0
-  );
-
-  const totalDistanceKm = Number(
-    stats?.totalDistanceKm ??
-      stats?.distanceKm ??
-      captain?.totalDistanceKm ??
-      0
-  );
-
-  const totalEarning = Number(
-    stats?.totalEarning ??
-      stats?.earnings ??
-      captain?.totalEarning ??
-      0
-  );
-
-  const cashCollected = Number(
-    stats?.cashCollected ??
-      stats?.cash ??
-      captain?.cashCollected ??
-      0
-  );
-
-  const transferCollected = Number(
-    stats?.transferCollected ??
-      stats?.transfer ??
-      captain?.transferCollected ??
-      0
-  );
-
-  const totalTrips = Number(
-    stats?.totalTrips ??
-      stats?.completedTrips ??
-      captain?.totalTrips ??
-      0
-  );
-
-  const pendingToSettle = Number(
-    stats?.pendingToSettle ??
-      captain?.pendingToSettle ??
-      0
-  );
+  const hoursOnline = Number(stats?.hoursOnline ?? 0);
+  const totalDistanceKm = Number(stats?.totalDistanceKm ?? 0);
+  const totalEarning = Number(stats?.totalEarning ?? 0);
+  const cashCollected = Number(stats?.cashCollected ?? 0);
+  const transferCollected = Number(stats?.transferCollected ?? 0);
+  const totalTrips = Number(stats?.totalTrips ?? 0);
+  const pendingToSettle = Number(stats?.pendingToSettle ?? 0);
 
   const currencyFormatter = useMemo(() => {
     return new Intl.NumberFormat("es-CO", {
@@ -107,7 +69,11 @@ const CaptainDetails = () => {
                     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
                 }}
               />
-              <span className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-emerald-500 border-2 border-white"></span>
+              <span
+                className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white ${
+                  isOnline ? "bg-emerald-500" : "bg-gray-400"
+                }`}
+              ></span>
             </div>
 
             <div className="min-w-0 flex-1">
@@ -121,9 +87,15 @@ const CaptainDetails = () => {
                   <span>{rating.toFixed(1)}</span>
                 </div>
 
-                <div className="inline-flex items-center gap-1 rounded-full bg-emerald-50 text-emerald-700 px-2.5 py-1 text-xs font-semibold">
+                <div
+                  className={`inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full ${
+                    isOnline
+                      ? "bg-emerald-50 text-emerald-700"
+                      : "bg-gray-100 text-gray-700"
+                  }`}
+                >
                   <i className="ri-shield-check-line"></i>
-                  <span>Conductor activo</span>
+                  <span>{isOnline ? "En línea" : "Fuera de línea"}</span>
                 </div>
               </div>
             </div>
@@ -171,10 +143,10 @@ const CaptainDetails = () => {
             <div className="flex items-center justify-between gap-3 mb-3">
               <div>
                 <h4 className="text-base font-bold text-gray-900">
-                  Resumen del día
+                  Resumen del conductor
                 </h4>
                 <p className="text-sm text-gray-600">
-                  Control de recaudo y desempeño del conductor.
+                  Control general de viajes y recaudo.
                 </p>
               </div>
               <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shadow-sm">
@@ -185,9 +157,7 @@ const CaptainDetails = () => {
             <div className="grid grid-cols-2 gap-3">
               <div className="rounded-2xl bg-white/90 border border-white p-3">
                 <p className="text-xs text-gray-500 font-medium">Viajes realizados</p>
-                <p className="text-lg font-bold text-gray-900 mt-1">
-                  {totalTrips}
-                </p>
+                <p className="text-lg font-bold text-gray-900 mt-1">{totalTrips}</p>
               </div>
 
               <div className="rounded-2xl bg-white/90 border border-white p-3">
