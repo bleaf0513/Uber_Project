@@ -39,7 +39,11 @@ app.get('/', (req, res) => {
 });
 
 app.use('/users', userRoutes);
+
+// Deja ambas para compatibilidad
 app.use('/captain', captainRoutes);
+app.use('/captains', captainRoutes);
+
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
 app.use('/offers', offerRoutes);
