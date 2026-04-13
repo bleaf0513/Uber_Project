@@ -4,7 +4,6 @@ import React, {
   useContext,
   useRef,
   useCallback,
-  useMemo,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
@@ -32,92 +31,22 @@ const CaptainHome = () => {
   const { socket } = useContext(SocketContext);
 
   const [ridePopup, setRidePopup] = useState(false);
-  const [selectedRide, setSelectedRide] = useState(null);
-  const [incomingRides, setIncomingRides] = useState([]);
+  const [ride, setRide] = useState(null);
   const [confirmRidePickup, setConfirmRidePickup] = useState(false);
   const [socketReady, setSocketReady] = useState(false);
   const [locationReady, setLocationReady] = useState(false);
-  const [processingRideId, setProcessingRideId] = useState(null);
-
-  const apiBase = getApiBaseUrl();
-
-  const normalizeRide = useCallback((rideData) => {
-    if (!rideData?._id) return null;
-
-    return {
-      ...rideData,
-      vehicleType: rideData?.vehicleType || rideData?.vehicle || "car",
-      fare:
-        rideData?.offeredFare ??
-        rideData?.fare ??
-        0,
-      receivedAt: Date.now(),
-    };
-  }, []);
-
-  const sortedIncomingRides = useMemo(() => {
-    return [...incomingRides].sort((a, b) => {
-      return (b.receivedAt || 0) - (a.receivedAt || 0);
-    });
-  }, [incomingRides]);
-
-  const upsertIncomingRide = useCallback((rideData) => {
-    const normalized = normalizeRide(rideData);
-    if (!normalized) return;
-
-    setIncomingRides((prev) => {
-      const exists = prev.some((item) => item._id === normalized._id);
-      if (exists) {
-        return prev.map((item) =>
-          item._id === normalized._id ? { ...item, ...normalized } : item
-        );
-      }
-      return [normalized, ...prev];
-    });
-
-    setSelectedRide((current) => current || normalized);
-  }, [normalizeRide]);
-
-  const removeIncomingRide = useCallback((rideId) => {
-    if (!rideId) return;
-
-    setIncomingRides((prev) => prev.filter((item) => item._id !== rideId));
-
-    setSelectedRide((current) => {
-      if (!current?._id || current._id !== rideId) return current;
-
-      const remaining = incomingRides.filter((item) => item._id !== rideId);
-      return remaining.length ? remaining[0] : null;
-    });
-  }, [incomingRides]);
-
-  const openRidePopup = useCallback((rideData) => {
-    const normalized = normalizeRide(rideData);
-    if (!normalized) return;
-
-    console.log("[captain-home] abriendo popup de servicio:", {
-      rideId: normalized?._id,
-      pickup: normalized?.pickup,
-      destination: normalized?.destination,
-    });
-
-    upsertIncomingRide(normalized);
-    setSelectedRide(normalized);
-    setConfirmRidePickup(false);
-    setRidePopup(true);
-
-    if (ridePopupRef.current) {
-      gsap.killTweensOf(ridePopupRef.current);
-      gsap.to(ridePopupRef.current, {
-        y: "0%",
-        duration: 0.25,
-        ease: "power2.out",
-      });
-    }
-  }, [normalizeRide, upsertIncomingRide]);
+  const [processing, setProcessing] = useState(false);
 
   const emitCaptainJoin = useCallback(() => {
-    if (!captain?._id || !socket?.connected) return;
+    if (!captain?._id) {
+      console.warn("[captain-home] no hay captain._id para join");
+      return;
+    }
+
+    if (!socket?.connected) {
+      console.warn("[captain-home] socket no conectado todavía");
+      return;
+    }
 
     console.log("[captain-home] emit join", {
       captainId: captain._id,
@@ -132,7 +61,14 @@ const CaptainHome = () => {
 
   const emitCaptainLocation = useCallback(
     (coords, source = "unknown") => {
-      if (!captain?._id || !socket?.connected) return;
+      if (!captain?._id || !socket?.connected) {
+        console.warn("[captain-home] no se puede enviar ubicación:", {
+          hasCaptainId: !!captain?._id,
+          socketConnected: !!socket?.connected,
+          source,
+        });
+        return;
+      }
 
       const ltd = Number(coords?.latitude);
       const lng = Number(coords?.longitude);
@@ -156,6 +92,14 @@ const CaptainHome = () => {
       lastLocationSentRef.current = now;
       setLocationReady(true);
 
+      console.log("[captain-home] emit update-location-captain", {
+        captainId: captain._id,
+        socketId: socket.id,
+        source,
+        ltd,
+        lng,
+      });
+
       socket.emit("update-location-captain", {
         userId: captain._id,
         location: { ltd, lng },
@@ -166,10 +110,15 @@ const CaptainHome = () => {
 
   const requestAndEmitCurrentLocation = useCallback(
     (source = "manual-request") => {
-      if (!navigator.geolocation) return;
+      if (!navigator.geolocation) {
+        console.error("[captain-home] geolocation no soportado");
+        return;
+      }
 
       navigator.geolocation.getCurrentPosition(
-        (position) => emitCaptainLocation(position.coords, source),
+        (position) => {
+          emitCaptainLocation(position.coords, source);
+        },
         (error) => {
           console.error("[captain-home] error obteniendo ubicación actual:", {
             source,
@@ -191,6 +140,7 @@ const CaptainHome = () => {
     if (!socket) return;
 
     const onConnect = () => {
+      console.log("[captain-home] socket connected:", socket.id);
       setSocketReady(true);
       emitCaptainJoin();
 
@@ -219,7 +169,11 @@ const CaptainHome = () => {
         destination: rideData?.destination,
       });
 
-      openRidePopup(rideData);
+      if (!rideData?._id) return;
+
+      setRide(rideData);
+      setConfirmRidePickup(false);
+      setRidePopup(true);
     };
 
     socket.off("connect", onConnect);
@@ -245,7 +199,7 @@ const CaptainHome = () => {
       socket.off("location-updated", onLocationUpdated);
       socket.off("new-ride", onNewRide);
     };
-  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, openRidePopup]);
+  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation]);
 
   useEffect(() => {
     if (!captain?._id || !socket || !navigator.geolocation) return;
@@ -255,7 +209,7 @@ const CaptainHome = () => {
     locationWatchIdRef.current = navigator.geolocation.watchPosition(
       (position) => emitCaptainLocation(position.coords, "watchPosition"),
       (error) => {
-        console.error("[captain-home] Error obteniendo ubicación:", {
+        console.error("[captain-home] error obteniendo ubicación:", {
           code: error?.code,
           message: error?.message,
         });
@@ -284,40 +238,24 @@ const CaptainHome = () => {
     };
   }, [captain?._id, socket, emitCaptainLocation, requestAndEmitCurrentLocation]);
 
-  const selectRide = (rideItem) => {
-    setSelectedRide(rideItem);
-    setRidePopup(true);
-  };
-
-  const closeRidePopup = () => {
-    setRidePopup(false);
-  };
-
-  const ignoreRide = async (rideId) => {
-    if (!rideId) return;
-
-    removeIncomingRide(rideId);
-
-    if (selectedRide?._id === rideId) {
-      const remaining = sortedIncomingRides.filter((r) => r._id !== rideId);
-      setSelectedRide(remaining.length ? remaining[0] : null);
-      setRidePopup(remaining.length > 0);
-    }
-  };
-
   const confirmRide = async () => {
     try {
-      if (!selectedRide?._id) {
+      if (!ride?._id) {
         console.error("[captain-home] No hay servicio seleccionado para confirmar.");
         return;
       }
 
-      setProcessingRideId(selectedRide._id);
+      setProcessing(true);
+
+      console.log("[captain-home] confirmando ride:", {
+        rideId: ride._id,
+        captainId: captain?._id,
+      });
 
       await axios.post(
-        `${apiBase}/rides/confirm`,
+        `${getApiBaseUrl()}/rides/confirm`,
         {
-          rideId: selectedRide._id,
+          rideId: ride._id,
           captainId: captain?._id,
         },
         {
@@ -327,7 +265,6 @@ const CaptainHome = () => {
         }
       );
 
-      removeIncomingRide(selectedRide._id);
       setRidePopup(false);
       setConfirmRidePickup(true);
     } catch (error) {
@@ -337,57 +274,30 @@ const CaptainHome = () => {
           "No se pudo confirmar el servicio. Intenta nuevamente."
       );
     } finally {
-      setProcessingRideId(null);
+      setProcessing(false);
     }
   };
 
-  const sendCounterOffer = async ({ ride, value }) => {
-    if (!ride?._id) {
-      throw new Error("No hay servicio seleccionado.");
-    }
-
-    try {
-      setProcessingRideId(ride._id);
-
-      await axios.post(
-        `${apiBase}/rides/counter-offer`,
-        {
-          rideId: ride._id,
-          captainId: captain?._id,
-          counterFare: value,
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
-          },
-        }
-      );
-
-      setIncomingRides((prev) =>
-        prev.map((item) =>
-          item._id === ride._id
-            ? {
-                ...item,
-                counterOfferFare: value,
-                offerStatus: "countered",
-              }
-            : item
-        )
-      );
-
-      alert("Contraoferta enviada correctamente.");
-    } catch (error) {
-      console.error("[captain-home] Error enviando contraoferta:", error);
-      throw error;
-    } finally {
-      setProcessingRideId(null);
-    }
+  const ignoreRide = () => {
+    setRidePopup(false);
+    setRide(null);
   };
 
-  const goToGoodsOffer = () => navigate("/captain/offers/goods");
-  const goToSpaceOffer = () => navigate("/captain/offers/space");
-  const goToSeatOffer = () => navigate("/captain/offers/seats");
-  const goToReceivedBids = () => navigate("/captain/offers/received");
+  const goToGoodsOffer = () => {
+    navigate("/captain/offers/goods");
+  };
+
+  const goToSpaceOffer = () => {
+    navigate("/captain/offers/space");
+  };
+
+  const goToSeatOffer = () => {
+    navigate("/captain/offers/seats");
+  };
+
+  const goToReceivedBids = () => {
+    navigate("/captain/offers/received");
+  };
 
   useGSAP(
     () => {
@@ -428,15 +338,6 @@ const CaptainHome = () => {
     },
     [confirmRidePickup]
   );
-
-  const formatCOP = (value) => {
-    const number = Number(value) || 0;
-    return new Intl.NumberFormat("es-CO", {
-      style: "currency",
-      currency: "COP",
-      maximumFractionDigits: 0,
-    }).format(Math.ceil(number));
-  };
 
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
@@ -481,7 +382,7 @@ const CaptainHome = () => {
         <LiveTracking />
       </div>
 
-      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[58%]">
+      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[52%]">
         <div className="pt-2">
           <div className="flex justify-center py-2">
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
@@ -492,95 +393,14 @@ const CaptainHome = () => {
               Panel del transportador
             </p>
 
-            <div className="inline-flex items-center rounded-full bg-violet-50 text-violet-700 px-3 py-2 text-xs font-bold">
-              {sortedIncomingRides.length} ofertas
-            </div>
+            {ride?._id && ridePopup && (
+              <div className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-2 text-xs font-bold">
+                Nueva solicitud
+              </div>
+            )}
           </div>
 
           <CaptainDetails />
-
-          <div className="px-4 pb-4">
-            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Solicitudes disponibles
-                  </h3>
-                  <p className="text-sm text-gray-600">
-                    Revisa todas las ofertas que te van entrando.
-                  </p>
-                </div>
-                <div className="w-12 h-12 rounded-2xl bg-emerald-100 flex items-center justify-center">
-                  <i className="ri-notification-3-line text-2xl text-emerald-700"></i>
-                </div>
-              </div>
-
-              {sortedIncomingRides.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-gray-300 bg-white p-5 text-center">
-                  <p className="text-sm font-semibold text-gray-700">
-                    No tienes ofertas pendientes
-                  </p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    Cuando lleguen nuevas solicitudes, aparecerán aquí.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {sortedIncomingRides.map((item) => {
-                    const isSelected = selectedRide?._id === item._id;
-                    const amount =
-                      item?.counterOfferFare ??
-                      item?.offeredFare ??
-                      item?.fare ??
-                      0;
-
-                    return (
-                      <button
-                        key={item._id}
-                        type="button"
-                        onClick={() => selectRide(item)}
-                        className={`w-full rounded-2xl border p-4 text-left shadow-sm transition ${
-                          isSelected
-                            ? "border-emerald-400 bg-emerald-50"
-                            : "border-gray-200 bg-white"
-                        }`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="text-base font-bold text-gray-900 truncate">
-                              {item?.pickup || "Nuevo servicio"}
-                            </div>
-                            <div className="text-sm text-gray-600 truncate mt-1">
-                              {item?.destination || "Destino pendiente"}
-                            </div>
-                          </div>
-
-                          <div className="text-right shrink-0">
-                            <div className="text-base font-extrabold text-emerald-700">
-                              {formatCOP(amount)}
-                            </div>
-                            <div className="text-xs text-gray-500 mt-1">
-                              {item?.counterOfferFare ? "Tu contraoferta" : "Oferta"}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="flex items-center justify-between mt-3">
-                          <span className="inline-flex rounded-full bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-700">
-                            {item?.vehicleType || item?.vehicle || "car"}
-                          </span>
-
-                          <span className="text-xs font-semibold text-violet-700">
-                            {isSelected ? "Seleccionada" : "Tocar para ver"}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </div>
 
           <div className="px-4 pb-5">
             <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
@@ -674,11 +494,10 @@ const CaptainHome = () => {
           <RidePopup
             setConfirmRidePickup={setConfirmRidePickup}
             setRidePopup={setRidePopup}
-            ride={selectedRide}
+            ride={ride}
             confirmRide={confirmRide}
-            onCounterOffer={sendCounterOffer}
-            onIgnoreRide={() => ignoreRide(selectedRide?._id)}
-            isSubmitting={processingRideId === selectedRide?._id}
+            onIgnoreRide={ignoreRide}
+            isSubmitting={processing}
           />
         </div>
 
@@ -689,7 +508,7 @@ const CaptainHome = () => {
           <ConfirmRidePickup
             setConfirmRidePickup={setConfirmRidePickup}
             setRidePopup={setRidePopup}
-            ride={selectedRide}
+            ride={ride}
           />
         </div>
       </div>
