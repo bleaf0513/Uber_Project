@@ -12,6 +12,14 @@ function toNumber(value, fallback = 0) {
 }
 
 /**
+ * Convierte milisegundos a horas con 2 decimales
+ */
+function msToHours(ms = 0) {
+    const hours = ms / (1000 * 60 * 60);
+    return Number(hours.toFixed(2));
+}
+
+/**
  * Arma la respuesta del captain para el frontend
  * sin exponer password y dejando stats listas para el panel.
  */
@@ -36,7 +44,6 @@ function buildCaptainResponse(captainDoc) {
             vehicleType: captain?.vehicle?.vehicleType || '',
         },
 
-        // Foto real del conductor
         profileImage:
             captain.profileImage ||
             captain.photo ||
@@ -44,7 +51,6 @@ function buildCaptainResponse(captainDoc) {
             captain.image ||
             '',
 
-        // Rating real si existe, si no deja base segura
         rating: toNumber(
             captain.rating ??
             captain.avgRating ??
@@ -52,8 +58,12 @@ function buildCaptainResponse(captainDoc) {
             5
         ),
 
-        // Estadísticas reales si ya existen en Mongo
-        // Si aún no existen, devuelve 0 sin romper el frontend
+        onlineSession: {
+            isOnline: Boolean(captain?.onlineSession?.isOnline),
+            sessionStartedAt: captain?.onlineSession?.sessionStartedAt || null,
+            lastSeenAt: captain?.onlineSession?.lastSeenAt || null,
+        },
+
         stats: {
             hoursOnline: toNumber(
                 captain?.stats?.hoursOnline ??
@@ -160,6 +170,17 @@ module.exports.loginCaptain = async (req, res, next) => {
             return res.status(400).json({ message: 'Invalid password' });
         }
 
+        const now = new Date();
+
+        captain.onlineSession = {
+            ...(captain.onlineSession || {}),
+            isOnline: true,
+            sessionStartedAt: now,
+            lastSeenAt: now,
+        };
+
+        await captain.save();
+
         const token = captain.generateAuthToken();
 
         res.cookie('token', token, {
@@ -183,6 +204,19 @@ module.exports.loginCaptain = async (req, res, next) => {
 
 module.exports.getCaptainProfile = async (req, res, next) => {
     try {
+        if (req.captain?._id) {
+            await captainModel.findByIdAndUpdate(req.captain._id, {
+                $set: {
+                    'onlineSession.lastSeenAt': new Date(),
+                },
+            });
+
+            const freshCaptain = await captainModel.findById(req.captain._id);
+            return res.status(200).json({
+                captain: buildCaptainResponse(freshCaptain),
+            });
+        }
+
         return res.status(200).json({
             captain: buildCaptainResponse(req.captain),
         });
@@ -198,6 +232,38 @@ module.exports.getCaptainProfile = async (req, res, next) => {
 module.exports.logoutCaptain = async (req, res, next) => {
     try {
         const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+
+        if (req.captain?._id) {
+            const freshCaptain = await captainModel.findById(req.captain._id);
+
+            if (freshCaptain) {
+                const sessionStartedAt = freshCaptain?.onlineSession?.sessionStartedAt
+                    ? new Date(freshCaptain.onlineSession.sessionStartedAt)
+                    : null;
+
+                const now = new Date();
+
+                let additionalHours = 0;
+
+                if (sessionStartedAt && !Number.isNaN(sessionStartedAt.getTime())) {
+                    const diffMs = Math.max(0, now.getTime() - sessionStartedAt.getTime());
+                    additionalHours = msToHours(diffMs);
+                }
+
+                await captainModel.findByIdAndUpdate(freshCaptain._id, {
+                    $inc: {
+                        'stats.hoursOnline': additionalHours,
+                    },
+                    $set: {
+                        'onlineSession.isOnline': false,
+                        'onlineSession.lastSeenAt': now,
+                    },
+                    $unset: {
+                        'onlineSession.sessionStartedAt': 1,
+                    },
+                });
+            }
+        }
 
         if (token) {
             const blackToken = await blacklistTokenModel.create({ token });
