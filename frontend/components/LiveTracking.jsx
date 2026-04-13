@@ -28,6 +28,11 @@ const mapStyles = [
   },
 ];
 
+const toFiniteNumber = (value) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+};
+
 const LiveTracking = ({
   pickup = "",
   nearbyDrivers = [],
@@ -66,24 +71,44 @@ const LiveTracking = ({
     return (Array.isArray(nearbyDrivers) ? nearbyDrivers : [])
       .map((driver, index) => {
         const lat =
-          Number(driver?.lat) ||
-          Number(driver?.location?.lat) ||
-          Number(driver?.location?.ltd) ||
-          Number(driver?.coordinates?.lat);
+          toFiniteNumber(driver?.lat) ??
+          toFiniteNumber(driver?.location?.lat) ??
+          toFiniteNumber(driver?.location?.ltd) ??
+          toFiniteNumber(driver?.coordinates?.lat) ??
+          toFiniteNumber(driver?.coords?.lat) ??
+          toFiniteNumber(driver?.coords?.ltd);
 
         const lng =
-          Number(driver?.lng) ||
-          Number(driver?.location?.lng) ||
-          Number(driver?.coordinates?.lng);
+          toFiniteNumber(driver?.lng) ??
+          toFiniteNumber(driver?.location?.lng) ??
+          toFiniteNumber(driver?.coordinates?.lng) ??
+          toFiniteNumber(driver?.coords?.lng);
 
-        if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+        if (lat == null || lng == null) return null;
+
+        const id =
+          driver?._id ||
+          driver?.captainId ||
+          driver?.id ||
+          `driver-${index}`;
+
+        const rawName = driver?.name || driver?.fullname || driver?.fullName;
+        const name =
+          typeof rawName === "string"
+            ? rawName
+            : rawName?.firstname || rawName?.lastname
+            ? [rawName?.firstname, rawName?.lastname].filter(Boolean).join(" ")
+            : "Conductor activo";
 
         return {
-          id: driver?._id || driver?.id || `driver-${index}`,
+          id,
           lat,
           lng,
-          rotation: Number(driver?.heading) || Number(driver?.rotation) || 0,
-          name: driver?.name || driver?.fullname || "Conductor activo",
+          rotation:
+            toFiniteNumber(driver?.heading) ??
+            toFiniteNumber(driver?.rotation) ??
+            0,
+          name,
         };
       })
       .filter(Boolean);
@@ -138,6 +163,7 @@ const LiveTracking = ({
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps) return;
+
     if (!pickup || typeof pickup !== "string" || pickup.trim().length < 3) {
       setPickupPosition(null);
       return;
@@ -189,21 +215,21 @@ const LiveTracking = ({
       hasPoints = true;
     });
 
-    if (hasPoints) {
-      if (
-        pickupPosition &&
-        (currentPosition || safeNearbyDrivers.length > 0)
-      ) {
-        map.fitBounds(bounds, {
-          top: 80,
-          right: 60,
-          bottom: 260,
-          left: 60,
-        });
-      } else if (currentPosition) {
-        map.panTo(currentPosition);
-        map.setZoom(zoom);
-      }
+    if (!hasPoints) return;
+
+    if (pickupPosition && (currentPosition || safeNearbyDrivers.length > 0)) {
+      map.fitBounds(bounds, {
+        top: 80,
+        right: 60,
+        bottom: 260,
+        left: 60,
+      });
+      return;
+    }
+
+    if (currentPosition) {
+      map.panTo(currentPosition);
+      map.setZoom(zoom);
     }
   }, [map, currentPosition, pickupPosition, safeNearbyDrivers, mapsApiLoaded, zoom]);
 
@@ -301,11 +327,7 @@ const LiveTracking = ({
               visible: true,
             }}
           />
-          <Marker
-            position={currentPosition}
-            icon={userDotIcon}
-            zIndex={50}
-          />
+          <Marker position={currentPosition} icon={userDotIcon} zIndex={50} />
         </>
       )}
 
@@ -351,11 +373,7 @@ const LiveTracking = ({
             }}
           />
 
-          <Marker
-            position={pickupPosition}
-            icon={pickupDotIcon}
-            zIndex={60}
-          />
+          <Marker position={pickupPosition} icon={pickupDotIcon} zIndex={60} />
 
           <OverlayView
             position={pickupPosition}
