@@ -1,29 +1,38 @@
-import React from "react";
+import React, { useMemo, useState } from "react";
 
 const VEHICLE_META = {
   motorcycle: {
     label: "Moto",
     description: "Servicio rápido y económico",
+    icon: "ri-motorbike-fill",
   },
   car: {
     label: "Carro",
     description: "Servicio cómodo y espacioso",
+    icon: "ri-taxi-fill",
   },
   light_cargo: {
     label: "Carga liviana",
     description: "Ideal para paquetes y carga pequeña",
+    icon: "ri-box-3-fill",
   },
   van: {
     label: "Furgón / Camioneta",
     description: "Más espacio para mercancía y mudanzas pequeñas",
+    icon: "ri-truck-fill",
   },
   truck: {
     label: "Camión",
     description: "Servicio para carga pesada y trayectos logísticos",
+    icon: "ri-truck-fill",
   },
 };
 
 const RidePopup = (props) => {
+  const [showCounterOffer, setShowCounterOffer] = useState(false);
+  const [counterValue, setCounterValue] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
   if (!props.ride) {
     return (
       <div className="p-6 text-center text-gray-600">
@@ -34,8 +43,14 @@ const RidePopup = (props) => {
 
   const pickupAd = props.ride?.pickup || "";
   const destinationAd = props.ride?.destination || "";
-  const fare = props.ride?.fare || 0;
-  const vehicleType = props.ride?.vehicleType || "car";
+  const fare =
+    props.ride?.offeredFare ??
+    props.ride?.fare ??
+    0;
+  const vehicleType =
+    props.ride?.vehicleType ||
+    props.ride?.vehicle ||
+    "car";
 
   const vehicleInfo = VEHICLE_META[vehicleType] || VEHICLE_META.car;
 
@@ -61,11 +76,88 @@ const RidePopup = (props) => {
     }).format(Math.ceil(number));
   };
 
+  const parseMoney = (value) => {
+    const clean = String(value || "").replace(/[^\d]/g, "");
+    return Number(clean || 0);
+  };
+
+  const handleMoneyChange = (e) => {
+    const raw = e.target.value;
+    const numeric = parseMoney(raw);
+
+    if (!numeric) {
+      setCounterValue("");
+      return;
+    }
+
+    setCounterValue(
+      new Intl.NumberFormat("es-CO", {
+        maximumFractionDigits: 0,
+      }).format(numeric)
+    );
+  };
+
+  const numericCounterValue = useMemo(
+    () => parseMoney(counterValue),
+    [counterValue]
+  );
+
+  const isCounterValid = numericCounterValue > 0;
+
   const { firstPart: pickupMain, secondPart: pickupDetail } =
     formatAddress(pickupAd);
 
   const { firstPart: destinationMain, secondPart: destinationDetail } =
     formatAddress(destinationAd);
+
+  const handleAccept = async () => {
+    try {
+      setSubmitting(true);
+      await props.confirmRide?.();
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleIgnore = () => {
+    setShowCounterOffer(false);
+    setCounterValue("");
+    props.setRidePopup?.(false);
+  };
+
+  const handleCounterOffer = async () => {
+    if (!isCounterValid) {
+      alert("Ingresa un valor válido para la contraoferta.");
+      return;
+    }
+
+    if (!props.onCounterOffer) {
+      alert(
+        "La función de contraoferta aún no está conectada en el backend o en CaptainHome."
+      );
+      return;
+    }
+
+    try {
+      setSubmitting(true);
+
+      await props.onCounterOffer({
+        ride: props.ride,
+        value: numericCounterValue,
+      });
+
+      setShowCounterOffer(false);
+      setCounterValue("");
+    } catch (error) {
+      console.error("[RidePopup] error enviando contraoferta:", error);
+      alert(
+        error?.response?.data?.message ||
+          "No se pudo enviar la contraoferta."
+      );
+    } finally {
+      setSubmitting(false);
+    }
+  };
 
   return (
     <div className="bg-white rounded-t-[24px]">
@@ -88,6 +180,23 @@ const RidePopup = (props) => {
             clipPath: "polygon(0% 100%, 0% 55%, 55% 0%, 100% 55%, 100% 100%)",
           }}
         ></div>
+      </div>
+
+      <div className="mx-4 mb-3 rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+              Oferta del usuario
+            </p>
+            <h3 className="text-2xl font-extrabold text-emerald-900">
+              {formatCOP(fare)}
+            </h3>
+          </div>
+
+          <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center shadow-sm">
+            <i className={`${vehicleInfo.icon} text-2xl text-emerald-700`}></i>
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-col justify-start items-start mx-3">
@@ -127,7 +236,7 @@ const RidePopup = (props) => {
 
         <div className="flex flex-row justify-start w-full ml-2">
           <div className="flex items-center justify-center w-[20%]">
-            <i className="ri-truck-fill ri-xl"></i>
+            <i className={`${vehicleInfo.icon} ri-xl`}></i>
           </div>
 
           <div className="flex flex-col justify-start items-start w-full mr-5">
@@ -147,7 +256,7 @@ const RidePopup = (props) => {
 
           <div className="flex flex-col justify-start items-start w-full mr-5">
             <h2 className="text-xl font-semibold">{formatCOP(fare)}</h2>
-            <h4 className="text-sm text-gray-600">Pago contra servicio</h4>
+            <h4 className="text-sm text-gray-600">Oferta actual del usuario</h4>
             <div
               className="my-2"
               style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -156,23 +265,87 @@ const RidePopup = (props) => {
         </div>
       </div>
 
-      <div className="px-5 pt-2 pb-6 flex flex-row items-center justify-around gap-3">
+      <div className="px-5 pt-1">
+        {!showCounterOffer ? (
+          <button
+            type="button"
+            onClick={() => setShowCounterOffer(true)}
+            disabled={submitting}
+            className="w-full py-3 text-black text-base font-semibold rounded-2xl border border-gray-300 bg-white"
+          >
+            Contraofertar
+          </button>
+        ) : (
+          <div className="rounded-2xl border border-orange-200 bg-orange-50 p-4">
+            <p className="text-sm font-semibold text-orange-800 mb-2">
+              Ingresa tu contraoferta
+            </p>
+
+            <input
+              type="text"
+              inputMode="numeric"
+              value={counterValue}
+              onChange={handleMoneyChange}
+              placeholder="Ej: 28.000"
+              className="w-full rounded-xl border border-orange-200 bg-white px-4 py-3 text-lg font-semibold outline-none"
+            />
+
+            <div className="flex items-center justify-between mt-3 text-sm">
+              <span className="text-gray-600">Tu valor:</span>
+              <span className="font-bold text-orange-700">
+                {numericCounterValue > 0 ? formatCOP(numericCounterValue) : "$ 0"}
+              </span>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowCounterOffer(false);
+                  setCounterValue("");
+                }}
+                disabled={submitting}
+                className="w-full py-3 text-gray-700 text-base font-semibold rounded-2xl border border-gray-300 bg-white"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleCounterOffer}
+                disabled={submitting || !isCounterValid}
+                className="w-full py-3 text-white text-base font-semibold rounded-2xl"
+                style={{
+                  background:
+                    submitting || !isCounterValid
+                      ? "#9CA3AF"
+                      : "linear-gradient(to right, #f7971e, #ffd200)",
+                }}
+              >
+                Enviar oferta
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div className="px-5 pt-4 pb-6 flex flex-row items-center justify-around gap-3">
         <button
-          onClick={() => {
-            props.confirmRide();
-          }}
+          onClick={handleAccept}
+          disabled={submitting}
           className="w-full py-3 text-white text-lg font-semibold rounded-2xl"
           style={{
-            background: "linear-gradient(to right, #1d976c, #93f9b9)",
+            background: submitting
+              ? "#9CA3AF"
+              : "linear-gradient(to right, #1d976c, #93f9b9)",
           }}
         >
-          Aceptar
+          {submitting ? "Procesando..." : "Aceptar"}
         </button>
 
         <button
-          onClick={() => {
-            props.setRidePopup(false);
-          }}
+          onClick={handleIgnore}
+          disabled={submitting}
           className="w-full py-3 text-white text-lg font-semibold rounded-2xl"
           style={{
             background: "linear-gradient(to right, #cb2d3e, #ef473a)",
