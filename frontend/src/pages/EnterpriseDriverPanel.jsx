@@ -1483,30 +1483,6 @@ const EnterpriseDriverPanel = () => {
   >
     Finalizados
   </button>
-
-  <button
-    type="button"
-    onClick={() => handleScopeChange("Hoy")}
-    className={`px-4 py-2 rounded-2xl font-semibold transition ${
-      listScopeFilter === "Hoy"
-        ? "bg-green-600 text-white shadow-md"
-        : "bg-slate-100 text-slate-700 border border-slate-200"
-    }`}
-  >
-    Ver hoy
-  </button>
-
-  <button
-    type="button"
-    onClick={() => handleScopeChange("Todos")}
-    className={`px-4 py-2 rounded-2xl font-semibold transition ${
-      listScopeFilter === "Todos"
-        ? "bg-slate-800 text-white shadow-md"
-        : "bg-slate-100 text-slate-700 border border-slate-200"
-    }`}
-  >
-    Ver todos
-  </button>
 </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
