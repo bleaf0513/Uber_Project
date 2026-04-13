@@ -38,6 +38,16 @@ const getStatusBadgeClass = (status) => {
   return "bg-amber-100 text-amber-700 border border-amber-200";
 };
 
+const formatCurrencyCOP = (value) => {
+  const numericValue = Number(value || 0);
+
+  return new Intl.NumberFormat("es-CO", {
+    style: "currency",
+    currency: "COP",
+    maximumFractionDigits: 0,
+  }).format(Number.isFinite(numericValue) ? numericValue : 0);
+};
+
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
@@ -584,7 +594,11 @@ const EnterpriseDriverMap = ({
           </div>
 
           <div className="flex flex-wrap gap-2 text-xs font-semibold">
-            <span className={`rounded-full px-3 py-1 ${isTracking ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"}`}>
+            <span
+              className={`rounded-full px-3 py-1 ${
+                isTracking ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+              }`}
+            >
               {isTracking ? "Seguimiento activo" : "Seguimiento inactivo"}
             </span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
@@ -610,7 +624,11 @@ const EnterpriseDriverMap = ({
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                   Estado GPS
                 </p>
-                <p className={`mt-2 text-sm font-bold ${isTracking ? "text-emerald-600" : "text-red-600"}`}>
+                <p
+                  className={`mt-2 text-sm font-bold ${
+                    isTracking ? "text-emerald-600" : "text-red-600"
+                  }`}
+                >
                   {isTracking ? "Activo" : "Inactivo"}
                 </p>
               </div>
@@ -1324,7 +1342,13 @@ const EnterpriseDriverPanel = () => {
                         Estado
                       </p>
                       <div className="mt-2">
-                        <span className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${selectedDriver.status === "En ruta" ? "bg-blue-100 text-blue-700 border border-blue-200" : "bg-emerald-100 text-emerald-700 border border-emerald-200"}`}>
+                        <span
+                          className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${
+                            selectedDriver.status === "En ruta"
+                              ? "bg-blue-100 text-blue-700 border border-blue-200"
+                              : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                          }`}
+                        >
                           {selectedDriver.status || "Disponible"}
                         </span>
                       </div>
@@ -1507,7 +1531,11 @@ const EnterpriseDriverPanel = () => {
                             <p className="text-lg font-extrabold text-slate-900">
                               Factura #{delivery.invoiceNumber}
                             </p>
-                            <span className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusBadgeClass(delivery.status)}`}>
+                            <span
+                              className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusBadgeClass(
+                                delivery.status
+                              )}`}
+                            >
                               {delivery.status}
                             </span>
                           </div>
@@ -1532,7 +1560,7 @@ const EnterpriseDriverPanel = () => {
                             Teléfono
                           </p>
                           <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.clientPhone}
+                            {delivery.clientPhone || "Sin teléfono"}
                           </p>
                         </div>
 
@@ -1544,6 +1572,53 @@ const EnterpriseDriverPanel = () => {
                             {delivery.address}
                           </p>
                         </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Valor factura
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-emerald-700">
+                            {formatCurrencyCOP(delivery.invoiceValue)}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Método de pago
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.paymentMethod || "No definido"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Barrio
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.neighborhood || "Sin barrio"}
+                          </p>
+                        </div>
+
+                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                            Referencia
+                          </p>
+                          <p className="mt-1 text-sm font-bold text-slate-900">
+                            {delivery.reference || "Sin referencia"}
+                          </p>
+                        </div>
+
+                        {delivery.placeId ? (
+                          <div className="rounded-2xl bg-white p-4 border border-slate-200 sm:col-span-2">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                              Place ID
+                            </p>
+                            <p className="mt-1 text-sm font-bold text-slate-900 break-all">
+                              {delivery.placeId}
+                            </p>
+                          </div>
+                        ) : null}
                       </div>
 
                       {delivery.notes ? (
