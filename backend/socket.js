@@ -55,8 +55,56 @@ function isOriginAllowed(origin) {
     return false;
 }
 
+function toNumber(value) {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : NaN;
+}
+
 function isValidCoordinate(value) {
     return typeof value === 'number' && Number.isFinite(value);
+}
+
+function isValidLatitude(lat) {
+    return isValidCoordinate(lat) && lat >= -90 && lat <= 90;
+}
+
+function isValidLongitude(lng) {
+    return isValidCoordinate(lng) && lng >= -180 && lng <= 180;
+}
+
+function isColombiaCoordinate(lat, lng) {
+    // Rango amplio y seguro para Colombia
+    return lat >= -4.5 && lat <= 16.5 && lng >= -81.9 && lng <= -66.0;
+}
+
+function describeCoordinateIssue(lat, lng) {
+    if (!isValidLatitude(lat)) return 'Invalid latitude';
+    if (!isValidLongitude(lng)) return 'Invalid longitude';
+    if (!isColombiaCoordinate(lat, lng)) return 'Location outside Colombia bounds';
+    return '';
+}
+
+async function clearCaptainSocketIfMatches(userId, socketId) {
+    if (!userId || !socketId) return;
+
+    await captainModel.findOneAndUpdate(
+        { _id: userId, socketId },
+        {
+            $set: {
+                socketId: null,
+                'onlineSession.lastSeenAt': new Date(),
+            },
+        }
+    );
+}
+
+async function clearUserSocketIfMatches(userId, socketId) {
+    if (!userId || !socketId) return;
+
+    await userModel.findOneAndUpdate(
+        { _id: userId, socketId },
+        { $set: { socketId: null } }
+    );
 }
 
 function initializeSocket(server) {
@@ -162,8 +210,8 @@ function initializeSocket(server) {
         socket.on('update-location-captain', async (data = {}) => {
             try {
                 const { userId, location } = data || {};
-                const ltd = Number(location?.ltd);
-                const lng = Number(location?.lng);
+                const ltd = toNumber(location?.ltd);
+                const lng = toNumber(location?.lng);
 
                 if (!userId) {
                     console.warn('[socket] update-location-captain missing userId');
@@ -173,11 +221,19 @@ function initializeSocket(server) {
                     });
                 }
 
-                if (!isValidCoordinate(ltd) || !isValidCoordinate(lng)) {
-                    console.warn('[socket] invalid captain location:', data);
+                const issue = describeCoordinateIssue(ltd, lng);
+                if (issue) {
+                    console.warn('[socket] rejected captain location:', {
+                        captainId: String(userId),
+                        socketId: socket.id,
+                        received: location,
+                        parsed: { ltd, lng },
+                        reason: issue,
+                    });
+
                     return socket.emit('location-updated', {
                         ok: false,
-                        message: 'Invalid location data',
+                        message: issue,
                     });
                 }
 
@@ -228,24 +284,12 @@ function initializeSocket(server) {
                 console.log('[socket] disconnected:', socket.id, 'reason:', reason);
 
                 const { userId, userType } = socket.data || {};
-
                 if (!userId || !userType) return;
 
                 if (userType === 'user') {
-                    await userModel.findOneAndUpdate(
-                        { _id: userId, socketId: socket.id },
-                        { $set: { socketId: null } }
-                    );
+                    await clearUserSocketIfMatches(userId, socket.id);
                 } else if (userType === 'captain') {
-                    await captainModel.findOneAndUpdate(
-                        { _id: userId, socketId: socket.id },
-                        {
-                            $set: {
-                                socketId: null,
-                                'onlineSession.lastSeenAt': new Date(),
-                            },
-                        }
-                    );
+                    await clearCaptainSocketIfMatches(userId, socket.id);
                 }
             } catch (err) {
                 console.error('[socket] disconnect cleanup error:', err);
@@ -257,20 +301,26 @@ function initializeSocket(server) {
 const sendMessageToSocketId = (socketId, messageObject) => {
     if (!socketId) {
         console.warn('[socket] sendMessageToSocketId skipped: empty socketId');
-        return;
+        return false;
     }
 
     if (!io) {
         console.warn('[socket] sendMessageToSocketId skipped: io not initialized');
-        return;
+        return false;
+    }
+
+    if (!messageObject?.event) {
+        console.warn('[socket] sendMessageToSocketId skipped: missing event');
+        return false;
     }
 
     console.log('[socket] emitting event:', {
         socketId,
-        event: messageObject?.event,
+        event: messageObject.event,
     });
 
     io.to(socketId).emit(messageObject.event, messageObject.data);
+    return true;
 };
 
 module.exports = { initializeSocket, sendMessageToSocketId };
