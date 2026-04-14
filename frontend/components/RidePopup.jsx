@@ -35,7 +35,11 @@ const RidePopup = (props) => {
   const [submitting, setSubmitting] = useState(false);
 
   if (!props.ride) {
-    return <div className="p-6 text-center text-gray-600">Cargando servicio...</div>;
+    return (
+      <div className="p-6 text-center text-gray-600">
+        Cargando servicio...
+      </div>
+    );
   }
 
   const pickupAd = props.ride?.pickup || "";
@@ -342,7 +346,7 @@ const RidePopup = (props) => {
               : "linear-gradient(to right, #1d976c, #93f9b9)",
           }}
         >
-          {submitting ? "Procesando..." : "Aceptar valor"}
+          {submitting ? "Procesando..." : "Aceptar"}
         </button>
 
         <button
