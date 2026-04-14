@@ -142,7 +142,9 @@ const CaptainHome = () => {
         setGeoSupported(false);
         setLocationReady(false);
         setShowGpsPrompt(true);
-        setLocationError("Este dispositivo o navegador no soporta geolocalización.");
+        setLocationError(
+          "Este dispositivo o navegador no soporta geolocalización."
+        );
         return;
       }
 
@@ -156,11 +158,14 @@ const CaptainHome = () => {
         (error) => {
           const message = getGeolocationErrorMessage(error);
 
-          console.error("[captain-home] error obteniendo ubicación actual:", {
-            source,
-            code: error?.code,
-            message: error?.message,
-          });
+          console.error(
+            "[captain-home] error obteniendo ubicación actual:",
+            {
+              source,
+              code: error?.code,
+              message: error?.message,
+            }
+          );
 
           setRequestingLocation(false);
           setLocationReady(false);
@@ -248,7 +253,9 @@ const CaptainHome = () => {
     if (!navigator.geolocation) {
       setGeoSupported(false);
       setShowGpsPrompt(true);
-      setLocationError("Este dispositivo o navegador no soporta geolocalización.");
+      setLocationError(
+        "Este dispositivo o navegador no soporta geolocalización."
+      );
       return;
     }
 
@@ -279,7 +286,10 @@ const CaptainHome = () => {
           };
         })
         .catch((err) => {
-          console.warn("[captain-home] no se pudo consultar permiso geolocation", err);
+          console.warn(
+            "[captain-home] no se pudo consultar permiso geolocation",
+            err
+          );
           setShowGpsPrompt(true);
           requestAndEmitCurrentLocation("initial-auto-request", true);
         });
@@ -329,17 +339,55 @@ const CaptainHome = () => {
       setRidePopup(true);
     };
 
+    const onRideNoLongerAvailable = (payload) => {
+      const currentRideId = String(ride?._id || "");
+      const payloadRideId = String(payload?.rideId || "");
+
+      if (currentRideId && payloadRideId && currentRideId === payloadRideId) {
+        setRidePopup(false);
+        setRide(null);
+        setConfirmRidePickup(false);
+        alert(payload?.message || "Este viaje ya fue tomado por otro conductor.");
+      }
+    };
+
+    const onRideOfferRejected = (payload) => {
+      const rideId = String(payload?._id || payload?.rideId || "");
+      const currentRideId = String(ride?._id || "");
+
+      if (rideId && currentRideId && rideId === currentRideId) {
+        alert("El usuario rechazó tu oferta para este viaje.");
+      }
+    };
+
+    const onRideOfferAccepted = (payload) => {
+      const acceptedRideId = String(payload?._id || payload?.rideId || "");
+      const currentRideId = String(ride?._id || "");
+
+      if (acceptedRideId && currentRideId && acceptedRideId === currentRideId) {
+        setRide(payload);
+        setRidePopup(false);
+        setConfirmRidePickup(true);
+      }
+    };
+
     socket.off("connect", onConnect);
     socket.off("disconnect", onDisconnect);
     socket.off("socket-joined", onSocketJoined);
     socket.off("location-updated", onLocationUpdated);
     socket.off("new-ride", onNewRide);
+    socket.off("ride-no-longer-available", onRideNoLongerAvailable);
+    socket.off("ride-offer-rejected", onRideOfferRejected);
+    socket.off("ride-offer-accepted", onRideOfferAccepted);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
     socket.on("socket-joined", onSocketJoined);
     socket.on("location-updated", onLocationUpdated);
     socket.on("new-ride", onNewRide);
+    socket.on("ride-no-longer-available", onRideNoLongerAvailable);
+    socket.on("ride-offer-rejected", onRideOfferRejected);
+    socket.on("ride-offer-accepted", onRideOfferAccepted);
 
     if (socket.connected) {
       onConnect();
@@ -351,8 +399,11 @@ const CaptainHome = () => {
       socket.off("socket-joined", onSocketJoined);
       socket.off("location-updated", onLocationUpdated);
       socket.off("new-ride", onNewRide);
+      socket.off("ride-no-longer-available", onRideNoLongerAvailable);
+      socket.off("ride-offer-rejected", onRideOfferRejected);
+      socket.off("ride-offer-accepted", onRideOfferAccepted);
     };
-  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation]);
+  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, ride?._id]);
 
   useEffect(() => {
     if (!captain?._id || !socket || !geoSupported) return;
@@ -375,25 +426,21 @@ const CaptainHome = () => {
     stopLocationTracking,
   ]);
 
-  const confirmRide = async () => {
+  const sendRideOffer = async ({ price, message = "" }) => {
     try {
       if (!ride?._id) {
-        console.error("[captain-home] No hay servicio seleccionado para confirmar.");
+        console.error("[captain-home] No hay servicio seleccionado para ofertar.");
         return;
       }
 
       setProcessing(true);
 
-      console.log("[captain-home] confirmando ride:", {
-        rideId: ride._id,
-        captainId: captain?._id,
-      });
-
-      await axios.post(
-        `${getApiBaseUrl()}/rides/confirm`,
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/captain-offer`,
         {
           rideId: ride._id,
-          captainId: captain?._id,
+          price,
+          message,
         },
         {
           headers: {
@@ -402,17 +449,52 @@ const CaptainHome = () => {
         }
       );
 
+      setRide(response?.data || ride);
       setRidePopup(false);
-      setConfirmRidePickup(true);
+
+      alert("Oferta enviada al usuario correctamente.");
     } catch (error) {
-      console.error("[captain-home] Error confirmando servicio:", error);
+      console.error("[captain-home] Error enviando oferta del conductor:", error);
       alert(
         error?.response?.data?.message ||
-          "No se pudo confirmar el servicio. Intenta nuevamente."
+          "No se pudo enviar la oferta del viaje."
       );
     } finally {
       setProcessing(false);
     }
+  };
+
+  const confirmRide = async () => {
+    try {
+      if (!ride?._id) {
+        console.error("[captain-home] No hay servicio seleccionado para confirmar.");
+        return;
+      }
+
+      // En el nuevo flujo aceptar equivale a enviar oferta por el mismo valor del usuario
+      const currentFare =
+        Number(ride?.offeredFare ?? ride?.fare ?? ride?.suggestedFare ?? 0) || 0;
+
+      if (!currentFare || currentFare <= 0) {
+        alert("No hay un valor válido para aceptar este viaje.");
+        return;
+      }
+
+      await sendRideOffer({
+        price: currentFare,
+        message: "Acepto el valor propuesto por el usuario.",
+      });
+    } catch (error) {
+      console.error("[captain-home] Error aceptando valor del usuario:", error);
+    }
+  };
+
+  const handleCounterOffer = async ({ ride: currentRide, value, message }) => {
+    await sendRideOffer({
+      price: Number(value || 0),
+      message: message || "Contraoferta del conductor.",
+      ride: currentRide,
+    });
   };
 
   const ignoreRide = () => {
@@ -725,6 +807,7 @@ const CaptainHome = () => {
             ride={ride}
             confirmRide={confirmRide}
             onIgnoreRide={ignoreRide}
+            onCounterOffer={handleCounterOffer}
             isSubmitting={processing}
           />
         </div>
