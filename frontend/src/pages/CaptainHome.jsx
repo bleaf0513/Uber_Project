@@ -158,14 +158,11 @@ const CaptainHome = () => {
         (error) => {
           const message = getGeolocationErrorMessage(error);
 
-          console.error(
-            "[captain-home] error obteniendo ubicación actual:",
-            {
-              source,
-              code: error?.code,
-              message: error?.message,
-            }
-          );
+          console.error("[captain-home] error obteniendo ubicación actual:", {
+            source,
+            code: error?.code,
+            message: error?.message,
+          });
 
           setRequestingLocation(false);
           setLocationReady(false);
@@ -467,11 +464,10 @@ const CaptainHome = () => {
   const confirmRide = async () => {
     try {
       if (!ride?._id) {
-        console.error("[captain-home] No hay servicio seleccionado para confirmar.");
+        console.error("[captain-home] No hay servicio seleccionado para aceptar.");
         return;
       }
 
-      // En el nuevo flujo aceptar equivale a enviar oferta por el mismo valor del usuario
       const currentFare =
         Number(ride?.offeredFare ?? ride?.fare ?? ride?.suggestedFare ?? 0) || 0;
 
@@ -489,11 +485,10 @@ const CaptainHome = () => {
     }
   };
 
-  const handleCounterOffer = async ({ ride: currentRide, value, message }) => {
+  const handleCounterOffer = async ({ value, message }) => {
     await sendRideOffer({
       price: Number(value || 0),
       message: message || "Contraoferta del conductor.",
-      ride: currentRide,
     });
   };
 
