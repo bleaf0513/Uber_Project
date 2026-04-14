@@ -31,26 +31,17 @@ const VEHICLE_META = {
 const RidePopup = (props) => {
   const [showCounterOffer, setShowCounterOffer] = useState(false);
   const [counterValue, setCounterValue] = useState("");
+  const [counterMessage, setCounterMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   if (!props.ride) {
-    return (
-      <div className="p-6 text-center text-gray-600">
-        Cargando servicio...
-      </div>
-    );
+    return <div className="p-6 text-center text-gray-600">Cargando servicio...</div>;
   }
 
   const pickupAd = props.ride?.pickup || "";
   const destinationAd = props.ride?.destination || "";
-  const fare =
-    props.ride?.offeredFare ??
-    props.ride?.fare ??
-    0;
-  const vehicleType =
-    props.ride?.vehicleType ||
-    props.ride?.vehicle ||
-    "car";
+  const fare = props.ride?.offeredFare ?? props.ride?.fare ?? 0;
+  const vehicleType = props.ride?.vehicleType || props.ride?.vehicle || "car";
 
   const vehicleInfo = VEHICLE_META[vehicleType] || VEHICLE_META.car;
 
@@ -122,6 +113,8 @@ const RidePopup = (props) => {
   const handleIgnore = () => {
     setShowCounterOffer(false);
     setCounterValue("");
+    setCounterMessage("");
+    props.onIgnoreRide?.();
     props.setRidePopup?.(false);
   };
 
@@ -132,9 +125,7 @@ const RidePopup = (props) => {
     }
 
     if (!props.onCounterOffer) {
-      alert(
-        "La función de contraoferta aún no está conectada en el backend o en CaptainHome."
-      );
+      alert("La función de contraoferta aún no está conectada.");
       return;
     }
 
@@ -144,10 +135,12 @@ const RidePopup = (props) => {
       await props.onCounterOffer({
         ride: props.ride,
         value: numericCounterValue,
+        message: counterMessage || "Contraoferta del conductor.",
       });
 
       setShowCounterOffer(false);
       setCounterValue("");
+      setCounterMessage("");
     } catch (error) {
       console.error("[RidePopup] error enviando contraoferta:", error);
       alert(
@@ -290,6 +283,14 @@ const RidePopup = (props) => {
               className="w-full rounded-xl border border-orange-200 bg-white px-4 py-3 text-lg font-semibold outline-none"
             />
 
+            <textarea
+              rows={3}
+              value={counterMessage}
+              onChange={(e) => setCounterMessage(e.target.value)}
+              placeholder="Mensaje opcional para el usuario"
+              className="w-full rounded-xl border border-orange-200 bg-white px-4 py-3 text-sm outline-none resize-none mt-3"
+            />
+
             <div className="flex items-center justify-between mt-3 text-sm">
               <span className="text-gray-600">Tu valor:</span>
               <span className="font-bold text-orange-700">
@@ -303,6 +304,7 @@ const RidePopup = (props) => {
                 onClick={() => {
                   setShowCounterOffer(false);
                   setCounterValue("");
+                  setCounterMessage("");
                 }}
                 disabled={submitting}
                 className="w-full py-3 text-gray-700 text-base font-semibold rounded-2xl border border-gray-300 bg-white"
@@ -340,7 +342,7 @@ const RidePopup = (props) => {
               : "linear-gradient(to right, #1d976c, #93f9b9)",
           }}
         >
-          {submitting ? "Procesando..." : "Aceptar"}
+          {submitting ? "Procesando..." : "Aceptar valor"}
         </button>
 
         <button
