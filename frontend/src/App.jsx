@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React from "react";
 import { Route, Routes } from "react-router-dom";
 import Start from "./pages/Start";
 import UserLogin from "./pages/UserLogin";
@@ -37,44 +37,7 @@ import AvailableOffers from "./pages/AvailableOffers";
 import UserSentBids from "./pages/UserSentBids";
 
 const App = () => {
-  const [isMobileView, setIsMobileView] = useState(false);
-
-  useEffect(() => {
-    const checkMobileView = () => {
-      setIsMobileView(window.innerWidth <= 768);
-    };
-
-    checkMobileView();
-    window.addEventListener("resize", checkMobileView);
-
-    return () => window.removeEventListener("resize", checkMobileView);
-  }, []);
-
-  const DesktopMessage = () => (
-    <div
-      className="text-white flex flex-col justify-center items-center"
-      style={{
-        height: "100vh",
-        textAlign: "center",
-        padding: "20px",
-        background: "linear-gradient(to right, #00c6ff, #0072ff)",
-      }}
-    >
-      <img
-        className="w-72 mb-10 object-contain"
-        src="/logo-centralgo.png"
-        alt="Central Go"
-      />
-      <h1 className="text-3xl font-bold mb-3">
-        Central Go está diseñado para verse mejor en celular
-      </h1>
-      <p className="text-lg max-w-xl">
-        Por favor abre la aplicación en modo móvil o desde tu teléfono.
-      </p>
-    </div>
-  );
-
-  return isMobileView ? (
+  return (
     <div>
       <Routes>
         <Route path="/" element={<Start />} />
@@ -203,8 +166,6 @@ const App = () => {
 
       <ToastContainer />
     </div>
-  ) : (
-    <DesktopMessage />
   );
 };
 
