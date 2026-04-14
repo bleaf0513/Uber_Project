@@ -1,5 +1,39 @@
 const mongoose = require("mongoose");
 
+const driverOfferSchema = new mongoose.Schema(
+    {
+        captain: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "captain",
+            required: true,
+        },
+        price: {
+            type: Number,
+            required: true,
+            min: 0,
+        },
+        message: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        status: {
+            type: String,
+            enum: ["pending", "accepted", "rejected", "withdrawn"],
+            default: "pending",
+        },
+        createdAt: {
+            type: Date,
+            default: Date.now,
+        },
+        respondedAt: {
+            type: Date,
+            default: null,
+        },
+    },
+    { _id: true }
+);
+
 const rideSchema = new mongoose.Schema(
     {
         user: {
@@ -19,8 +53,17 @@ const rideSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["pending", "accepted", "rejected", "ongoing", "completed"],
+            enum: [
+                "pending",
+                "negotiating",
+                "accepted",
+                "rejected",
+                "ongoing",
+                "completed",
+                "cancelled",
+            ],
             default: "pending",
+            index: true,
         },
         captain: {
             type: mongoose.Schema.Types.ObjectId,
@@ -77,6 +120,23 @@ const rideSchema = new mongoose.Schema(
             type: String,
             select: false,
             required: true,
+        },
+
+        // NUEVO: negociación estilo InDriver
+        driverOffers: {
+            type: [driverOfferSchema],
+            default: [],
+        },
+        selectedOfferCaptain: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "captain",
+            default: null,
+        },
+        negotiationStatus: {
+            type: String,
+            enum: ["open", "driver_selected", "closed"],
+            default: "open",
+            index: true,
         },
     },
     {
