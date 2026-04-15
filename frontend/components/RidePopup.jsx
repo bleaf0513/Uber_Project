@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useState } from "react";
 
 const VEHICLE_META = {
   motorcycle: {
@@ -33,21 +33,6 @@ const RidePopup = (props) => {
   const [counterValue, setCounterValue] = useState("");
   const [counterMessage, setCounterMessage] = useState("");
   const [submitting, setSubmitting] = useState(false);
-
-  if (!props.ride) {
-    return (
-      <div className="p-6 text-center text-gray-600">
-        Cargando servicio...
-      </div>
-    );
-  }
-
-  const pickupAd = props.ride?.pickup || "";
-  const destinationAd = props.ride?.destination || "";
-  const fare = props.ride?.offeredFare ?? props.ride?.fare ?? 0;
-  const vehicleType = props.ride?.vehicleType || props.ride?.vehicle || "car";
-
-  const vehicleInfo = VEHICLE_META[vehicleType] || VEHICLE_META.car;
 
   const formatAddress = (address = "") => {
     const firstCommaIndex = address.indexOf(",");
@@ -92,12 +77,23 @@ const RidePopup = (props) => {
     );
   };
 
-  const numericCounterValue = useMemo(
-    () => parseMoney(counterValue),
-    [counterValue]
-  );
-
+  const numericCounterValue = parseMoney(counterValue);
   const isCounterValid = numericCounterValue > 0;
+
+  if (!props.ride) {
+    return (
+      <div className="p-6 text-center text-gray-600">
+        Cargando servicio...
+      </div>
+    );
+  }
+
+  const pickupAd = props.ride?.pickup || "";
+  const destinationAd = props.ride?.destination || "";
+  const fare = props.ride?.offeredFare ?? props.ride?.fare ?? 0;
+  const vehicleType = props.ride?.vehicleType || props.ride?.vehicle || "car";
+
+  const vehicleInfo = VEHICLE_META[vehicleType] || VEHICLE_META.car;
 
   const { firstPart: pickupMain, secondPart: pickupDetail } =
     formatAddress(pickupAd);
@@ -298,7 +294,9 @@ const RidePopup = (props) => {
             <div className="flex items-center justify-between mt-3 text-sm">
               <span className="text-gray-600">Tu valor:</span>
               <span className="font-bold text-orange-700">
-                {numericCounterValue > 0 ? formatCOP(numericCounterValue) : "$ 0"}
+                {numericCounterValue > 0
+                  ? formatCOP(numericCounterValue)
+                  : "$ 0"}
               </span>
             </div>
 
