@@ -1,7 +1,7 @@
 import React, { useContext, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import "remixicon/fonts/remixicon.css";
-import { CaptainDataContext } from "../context/CaptainContext";
+import { CaptainDataContext } from "../src/context/CaptainContext";
 
 const CaptainDetails = () => {
   const navigate = useNavigate();
