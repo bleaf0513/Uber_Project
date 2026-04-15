@@ -109,17 +109,43 @@ router.get(
     rideController.getRideOffers
 );
 
-router.get(
-    '/start-ride',
+/*
+  Si ya no vas a usar código de seguridad, esta ruta puede quedarse
+  temporalmente o eliminarse después. La dejo comentada para que no choque.
+*/
+// router.get(
+//     '/start-ride',
+//     authMiddleware.authCaptain,
+//     query('rideId')
+//         .isMongoId()
+//         .withMessage('Invalid ride id'),
+//     rideController.startRide
+// );
+
+router.post(
+    '/arrived',
     authMiddleware.authCaptain,
-    query('rideId')
+    body('rideId')
         .isMongoId()
         .withMessage('Invalid ride id'),
-    query('otp')
+    rideController.arrived
+);
+
+router.post(
+    '/cancel-by-captain',
+    authMiddleware.authCaptain,
+    body('rideId')
+        .isMongoId()
+        .withMessage('Invalid ride id'),
+    body('reason')
         .isString()
-        .isLength({ min: 4, max: 4 })
-        .withMessage('Código de seguridad inválido'),
-    rideController.startRide
+        .notEmpty()
+        .withMessage('Invalid reason'),
+    body('notes')
+        .optional()
+        .isString()
+        .withMessage('Invalid notes'),
+    rideController.cancelByCaptain
 );
 
 router.post(

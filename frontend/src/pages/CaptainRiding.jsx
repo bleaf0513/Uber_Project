@@ -38,26 +38,23 @@ const CaptainRiding = () => {
   const navigate = useNavigate();
   const rideData = location.state?.ride || null;
 
-  useGSAP(
-    () => {
-      if (showCancelModal) {
-        gsap.to(cancelModalRef.current, {
-          y: "0%",
-          opacity: 1,
-          duration: 0.25,
-          ease: "power2.out",
-        });
-      } else {
-        gsap.to(cancelModalRef.current, {
-          y: "100%",
-          opacity: 0,
-          duration: 0.2,
-          ease: "power2.inOut",
-        });
-      }
-    },
-    [showCancelModal]
-  );
+  useGSAP(() => {
+    if (showCancelModal) {
+      gsap.to(cancelModalRef.current, {
+        y: "0%",
+        opacity: 1,
+        duration: 0.25,
+        ease: "power2.out",
+      });
+    } else {
+      gsap.to(cancelModalRef.current, {
+        y: "100%",
+        opacity: 0,
+        duration: 0.2,
+        ease: "power2.inOut",
+      });
+    }
+  }, [showCancelModal]);
 
   const formatCOP = (value) => {
     const number = Number(value) || 0;
@@ -70,33 +67,26 @@ const CaptainRiding = () => {
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
-
-    if (!safeAddress) {
-      return { firstPart: "", secondPart: "" };
-    }
+    if (!safeAddress) return { firstPart: "", secondPart: "" };
 
     const firstCommaIndex = safeAddress.indexOf(",");
-
     if (firstCommaIndex === -1) {
       return { firstPart: safeAddress, secondPart: "" };
     }
 
-    const firstPart = safeAddress.substring(0, firstCommaIndex).trim();
-    const secondPart = safeAddress.substring(firstCommaIndex + 1).trim();
-
-    return { firstPart, secondPart };
+    return {
+      firstPart: safeAddress.substring(0, firstCommaIndex).trim(),
+      secondPart: safeAddress.substring(firstCommaIndex + 1).trim(),
+    };
   };
 
-  const getDriverPhoto = () => {
-    return (
-      rideData?.captain?.profileImage ||
-      rideData?.captain?.photo ||
-      rideData?.captain?.avatar ||
-      rideData?.captain?.image ||
-      rideData?.captain?.profilePic ||
-      "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s"
-    );
-  };
+  const getDriverPhoto = () =>
+    rideData?.captain?.profileImage ||
+    rideData?.captain?.photo ||
+    rideData?.captain?.avatar ||
+    rideData?.captain?.image ||
+    rideData?.captain?.profilePic ||
+    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
 
   const getVehicleLabel = (vehicleType) => {
     const labels = {
@@ -106,7 +96,6 @@ const CaptainRiding = () => {
       van: "Furgón / Camioneta",
       truck: "Camión",
     };
-
     return labels[vehicleType] || "Vehículo";
   };
 
@@ -118,9 +107,7 @@ const CaptainRiding = () => {
 
       await axios.post(
         `${getApiBaseUrl()}/rides/arrived`,
-        {
-          rideId: rideData._id,
-        },
+        { rideId: rideData._id },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -188,9 +175,7 @@ const CaptainRiding = () => {
 
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/end-ride`,
-        {
-          rideId: rideData._id,
-        },
+        { rideId: rideData._id },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -218,9 +203,6 @@ const CaptainRiding = () => {
           <h1 className="text-2xl font-bold text-gray-900">
             No hay información del servicio
           </h1>
-          <p className="text-sm text-gray-600 mt-2">
-            Vuelve al panel del conductor e intenta nuevamente.
-          </p>
           <Link
             to="/captain-home"
             className="inline-flex mt-5 rounded-2xl bg-black text-white px-5 py-3 font-semibold"
@@ -236,9 +218,8 @@ const CaptainRiding = () => {
   const destinationAddress = formatAddress(rideData?.destination);
 
   const userFullName =
-    `${rideData?.user?.fullname?.firstname || ""} ${
-      rideData?.user?.fullname?.lastname || ""
-    }`.trim() || "Usuario";
+    `${rideData?.user?.fullname?.firstname || ""} ${rideData?.user?.fullname?.lastname || ""}`.trim() ||
+    "Usuario";
 
   const userPhone =
     rideData?.user?.phone ||
@@ -272,30 +253,12 @@ const CaptainRiding = () => {
   const headerSubtext = driverArrived
     ? "El usuario ya fue notificado."
     : etaInfo?.etaText
-    ? `Tiempo estimado: ${etaInfo.etaText}${
-        etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
-      }`
+    ? `Tiempo estimado: ${etaInfo.etaText}${etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""}`
     : "Dirígete al punto de recogida del usuario.";
 
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
-      <div className="absolute top-0 left-0 ml-7 py-7 z-30">
-        <Link to="/captain-home">
-          <img className="w-32" src="/logo-centralgo.png" alt="Central Go" />
-        </Link>
-      </div>
-
-      <Link
-        to="/captain-logout"
-        className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black flex items-center justify-center z-40"
-      >
-        <i
-          style={{ color: "white" }}
-          className="ri-logout-box-line ri-xl mb mr-0.5"
-        ></i>
-      </Link>
-
-      <div className="absolute w-screen h-[100%] top-0 z-10">
+      <div className="absolute inset-0 z-10">
         <LiveTracking
           pickup={rideData?.pickup || ""}
           selectedCaptainId={rideData?.captain?._id || null}
@@ -306,12 +269,28 @@ const CaptainRiding = () => {
         />
       </div>
 
-      <div className="absolute inset-x-0 top-24 px-4 z-30">
-        <div className="rounded-[28px] bg-white/95 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden">
-          <div className="bg-gradient-to-r from-emerald-500 to-emerald-300 px-5 py-4 text-white">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <p className="text-xs uppercase tracking-wide text-white/85">
+      <div className="absolute top-3 left-3 z-40">
+        <Link
+          to="/captain-home"
+          className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center"
+        >
+          <i className="ri-arrow-left-line text-xl text-gray-900"></i>
+        </Link>
+      </div>
+
+      <Link
+        to="/captain-logout"
+        className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black flex items-center justify-center z-40"
+      >
+        <i className="ri-logout-box-line ri-xl text-white"></i>
+      </Link>
+
+      <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[46vh] overflow-y-auto">
+          <div className="bg-gradient-to-r from-emerald-500 to-emerald-300 px-4 py-4 text-white">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-wide text-white/85">
                   Servicio en curso
                 </p>
                 <h2 className="text-2xl font-extrabold mt-1">
@@ -321,7 +300,7 @@ const CaptainRiding = () => {
               </div>
 
               <div className="text-right shrink-0">
-                <p className="text-xs uppercase tracking-wide text-white/85">
+                <p className="text-[11px] uppercase tracking-wide text-white/85">
                   Valor
                 </p>
                 <p className="text-2xl font-extrabold">{formatCOP(fare)}</p>
@@ -329,8 +308,8 @@ const CaptainRiding = () => {
             </div>
           </div>
 
-          <div className="p-5 space-y-4">
-            <div className="flex items-center gap-4 rounded-3xl border border-gray-200 bg-gray-50 p-4">
+          <div className="p-4 space-y-3">
+            <div className="flex items-center gap-3 rounded-3xl border border-gray-200 bg-gray-50 p-3">
               <img
                 src={getDriverPhoto()}
                 alt="Conductor"
@@ -348,7 +327,7 @@ const CaptainRiding = () => {
               </div>
             </div>
 
-            <div className="rounded-3xl border border-gray-200 bg-white p-4">
+            <div className="rounded-3xl border border-gray-200 bg-white p-3">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
                   <i className="ri-map-pin-range-fill text-lg"></i>
@@ -363,7 +342,7 @@ const CaptainRiding = () => {
                 </div>
               </div>
 
-              <div className="h-6 w-px bg-gray-200 ml-5 my-2"></div>
+              <div className="h-5 w-px bg-gray-200 ml-5 my-2"></div>
 
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
@@ -380,7 +359,7 @@ const CaptainRiding = () => {
               </div>
             </div>
 
-            {etaInfo?.etaText || etaInfo?.distanceText ? (
+            {(etaInfo?.etaText || etaInfo?.distanceText) && (
               <div className="rounded-3xl border border-violet-200 bg-violet-50 px-4 py-3">
                 <p className="text-sm font-bold text-violet-900">
                   Seguimiento en tiempo real
@@ -391,7 +370,7 @@ const CaptainRiding = () => {
                   {etaInfo?.distanceText || ""}
                 </p>
               </div>
-            ) : null}
+            )}
 
             <div className="grid grid-cols-2 gap-3">
               <button

@@ -120,11 +120,15 @@ const rideSchema = new mongoose.Schema(
             type: String,
             default: null,
         },
+
+        // Ya no se usa en el flujo nuevo, pero se deja opcional
+        // por compatibilidad con partes antiguas del sistema.
         otp: {
             type: String,
             select: false,
-            required: true,
+            default: null,
         },
+
         driverOffers: {
             type: [driverOfferSchema],
             default: [],
@@ -139,6 +143,37 @@ const rideSchema = new mongoose.Schema(
             enum: ["open", "driver_selected", "closed"],
             default: "open",
             index: true,
+        },
+
+        // NUEVO: llegada al punto de recogida
+        arrivedAtPickup: {
+            type: Boolean,
+            default: false,
+        },
+        arrivedAtPickupAt: {
+            type: Date,
+            default: null,
+        },
+
+        // NUEVO: cancelación auditada
+        cancelledBy: {
+            type: String,
+            enum: ["user", "captain", null],
+            default: null,
+        },
+        cancelReason: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        cancelNotes: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        cancelledAt: {
+            type: Date,
+            default: null,
         },
     },
     {
