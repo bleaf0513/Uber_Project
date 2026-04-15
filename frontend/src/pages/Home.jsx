@@ -47,6 +47,11 @@ function Home() {
   const [ride, setRide] = useState(null);
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
   const [offerNow, setOfferNow] = useState(Date.now());
+  const [captainArrived, setCaptainArrived] = useState(false);
+  const [etaInfo, setEtaInfo] = useState({
+    etaText: "",
+    distanceText: "",
+  });
 
   const panelRef = useRef(null);
   const titleRef = useRef(null);
@@ -87,6 +92,7 @@ function Home() {
     };
 
     const onRideConfirmed = (rideData) => {
+      setCaptainArrived(false);
       setVehicleFound(false);
       setConfirmRidePanel(false);
       setVehiclePanel(false);
@@ -131,6 +137,8 @@ function Home() {
             payload.vehicleType || (idx >= 0 ? list[idx]?.vehicleType : null),
           profileImage:
             payload.profileImage || (idx >= 0 ? list[idx]?.profileImage : ""),
+          vehicle: payload.vehicle || (idx >= 0 ? list[idx]?.vehicle : null),
+          fullname: payload.fullname || (idx >= 0 ? list[idx]?.fullname : null),
         };
 
         if (idx >= 0) {
@@ -142,11 +150,35 @@ function Home() {
       });
     };
 
+    const onCaptainArrived = (payload) => {
+      setCaptainArrived(true);
+
+      if (payload?.ride) {
+        setRide(payload.ride);
+      }
+
+      alert(payload?.message || "Tu conductor ya llegó al punto de recogida.");
+    };
+
+    const onRideCancelledByCaptain = (payload) => {
+      setCaptainArrived(false);
+      setRide(null);
+      setDriverSelected(false);
+      setVehicleFound(false);
+
+      const reasonText = payload?.reason ? `\nMotivo: ${payload.reason}` : "";
+      alert(
+        (payload?.message || "El conductor canceló la solicitud.") + reasonText
+      );
+    };
+
     socket.on("ride-started", onRideStarted);
     socket.on("ride-confirmed", onRideConfirmed);
     socket.on("ride-offer-updated", onRideOfferUpdated);
     socket.on("nearby-captains", onNearbyCaptains);
     socket.on("captain-location-updated", onCaptainLocationUpdated);
+    socket.on("captain-arrived", onCaptainArrived);
+    socket.on("ride-cancelled-by-captain", onRideCancelledByCaptain);
 
     return () => {
       socket.off("ride-started", onRideStarted);
@@ -154,6 +186,8 @@ function Home() {
       socket.off("ride-offer-updated", onRideOfferUpdated);
       socket.off("nearby-captains", onNearbyCaptains);
       socket.off("captain-location-updated", onCaptainLocationUpdated);
+      socket.off("captain-arrived", onCaptainArrived);
+      socket.off("ride-cancelled-by-captain", onRideCancelledByCaptain);
     };
   }, [socket, navigate]);
 
@@ -269,6 +303,8 @@ function Home() {
     setVehicleFound(false);
     setDriverSelected(false);
     setConfirmRidePanel(false);
+    setCaptainArrived(false);
+    setEtaInfo({ etaText: "", distanceText: "" });
   }, [pickup, destination]);
 
   useEffect(() => {
@@ -406,6 +442,7 @@ function Home() {
       setConfirmRidePanel(false);
       setDriverSelected(false);
       setVehicleFound(true);
+      setCaptainArrived(false);
 
       return rideData;
     } catch (error) {
@@ -499,6 +536,7 @@ function Home() {
       setRide(response?.data || ride);
       setVehicleFound(false);
       setDriverSelected(true);
+      setCaptainArrived(false);
     } catch (error) {
       console.error("Error aceptando oferta:", error);
       alert(
@@ -655,9 +693,12 @@ function Home() {
         }}
       >
         <LiveTracking
-          pickup={pickup}
+          pickup={driverSelected ? ride?.pickup || pickup : pickup}
           nearbyDrivers={nearbyDrivers}
           showPickupRadar={vehicleFound || driverSelected}
+          selectedCaptainId={ride?.captain?._id || null}
+          showRouteToPickup={driverSelected}
+          onEtaUpdate={setEtaInfo}
         />
       </div>
 
@@ -752,6 +793,23 @@ function Home() {
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {driverSelected && (etaInfo?.etaText || etaInfo?.distanceText || captainArrived) && (
+        <div className="absolute top-24 left-3 right-3 z-40">
+          <div className="rounded-3xl bg-white/95 backdrop-blur border border-gray-200 shadow-2xl px-4 py-3">
+            <p className="text-sm font-bold text-gray-900">
+              {captainArrived ? "Tu conductor ya llegó" : "Tu conductor va en camino"}
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              {captainArrived
+                ? "Ya puedes encontrarte con el conductor en el punto de recogida."
+                : `${etaInfo?.etaText ? `Llega en ${etaInfo.etaText}` : ""}${
+                    etaInfo?.etaText && etaInfo?.distanceText ? " · " : ""
+                  }${etaInfo?.distanceText || ""}`}
+            </p>
           </div>
         </div>
       )}
@@ -903,7 +961,7 @@ function Home() {
         ref={driverSelectedRef}
         className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto h-[38%] shadow-2xl"
       >
-        <DriverSelected ride={ride} />
+        <DriverSelected ride={ride} captainArrived={captainArrived} etaInfo={etaInfo} />
       </div>
     </div>
   );

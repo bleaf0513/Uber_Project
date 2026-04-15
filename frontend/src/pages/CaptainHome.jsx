@@ -11,7 +11,6 @@ import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import CaptainDetails from "../../components/CaptainDetails";
 import RidePopup from "../../components/RidePopup";
-import ConfirmRidePickup from "../../components/ConfirmRidePickup";
 import { CaptainDataContext } from "../context/CaptainContext";
 import { SocketContext } from "../context/SocketContext";
 import axios from "axios";
@@ -20,7 +19,6 @@ import LiveTracking from "../../components/LiveTracking";
 
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
-  const confirmRidePickupRef = useRef(null);
   const locationWatchIdRef = useRef(null);
   const locationIntervalRef = useRef(null);
   const lastLocationSentRef = useRef(0);
@@ -32,7 +30,6 @@ const CaptainHome = () => {
 
   const [ridePopup, setRidePopup] = useState(false);
   const [ride, setRide] = useState(null);
-  const [confirmRidePickup, setConfirmRidePickup] = useState(false);
   const [socketReady, setSocketReady] = useState(false);
   const [locationReady, setLocationReady] = useState(false);
   const [processing, setProcessing] = useState(false);
@@ -54,11 +51,6 @@ const CaptainHome = () => {
       return;
     }
 
-    console.log("[captain-home] emit join", {
-      captainId: captain._id,
-      socketId: socket.id,
-    });
-
     socket.emit("join", {
       userId: captain._id,
       userType: "captain",
@@ -68,11 +60,6 @@ const CaptainHome = () => {
   const emitCaptainLocation = useCallback(
     (coords, source = "unknown") => {
       if (!captain?._id || !socket?.connected) {
-        console.warn("[captain-home] no se puede enviar ubicación:", {
-          hasCaptainId: !!captain?._id,
-          socketConnected: !!socket?.connected,
-          source,
-        });
         return;
       }
 
@@ -80,11 +67,6 @@ const CaptainHome = () => {
       const lng = Number(coords?.longitude);
 
       if (!Number.isFinite(ltd) || !Number.isFinite(lng)) {
-        console.warn("[captain-home] ubicación inválida", {
-          source,
-          latitude: coords?.latitude,
-          longitude: coords?.longitude,
-        });
         return;
       }
 
@@ -100,14 +82,6 @@ const CaptainHome = () => {
       setLocationError("");
       setShowGpsPrompt(false);
       setLocationPermission("granted");
-
-      console.log("[captain-home] emit update-location-captain", {
-        captainId: captain._id,
-        socketId: socket.id,
-        source,
-        ltd,
-        lng,
-      });
 
       socket.emit("update-location-captain", {
         userId: captain._id,
@@ -138,7 +112,6 @@ const CaptainHome = () => {
   const requestAndEmitCurrentLocation = useCallback(
     (source = "manual-request", forcePrompt = false) => {
       if (!navigator.geolocation) {
-        console.error("[captain-home] geolocation no soportado");
         setGeoSupported(false);
         setLocationReady(false);
         setShowGpsPrompt(true);
@@ -157,12 +130,6 @@ const CaptainHome = () => {
         },
         (error) => {
           const message = getGeolocationErrorMessage(error);
-
-          console.error("[captain-home] error obteniendo ubicación actual:", {
-            source,
-            code: error?.code,
-            message: error?.message,
-          });
 
           setRequestingLocation(false);
           setLocationReady(false);
@@ -210,11 +177,6 @@ const CaptainHome = () => {
       },
       (error) => {
         const message = getGeolocationErrorMessage(error);
-
-        console.error("[captain-home] error obteniendo ubicación:", {
-          code: error?.code,
-          message: error?.message,
-        });
 
         setLocationReady(false);
         setLocationError(message);
@@ -282,11 +244,7 @@ const CaptainHome = () => {
             }
           };
         })
-        .catch((err) => {
-          console.warn(
-            "[captain-home] no se pudo consultar permiso geolocation",
-            err
-          );
+        .catch(() => {
           setShowGpsPrompt(true);
           requestAndEmitCurrentLocation("initial-auto-request", true);
         });
@@ -300,7 +258,6 @@ const CaptainHome = () => {
     if (!socket) return;
 
     const onConnect = () => {
-      console.log("[captain-home] socket connected:", socket.id);
       setSocketReady(true);
       emitCaptainJoin();
 
@@ -309,30 +266,14 @@ const CaptainHome = () => {
       }, 500);
     };
 
-    const onDisconnect = (reason) => {
-      console.warn("[captain-home] socket disconnected:", reason);
+    const onDisconnect = () => {
       setSocketReady(false);
     };
 
-    const onSocketJoined = (payload) => {
-      console.log("[captain-home] socket-joined:", payload);
-    };
-
-    const onLocationUpdated = (payload) => {
-      console.log("[captain-home] location-updated:", payload);
-    };
-
     const onNewRide = (rideData) => {
-      console.log("[captain-home] new-ride recibido:", {
-        rideId: rideData?._id,
-        pickup: rideData?.pickup,
-        destination: rideData?.destination,
-      });
-
       if (!rideData?._id) return;
 
       setRide(rideData);
-      setConfirmRidePickup(false);
       setRidePopup(true);
     };
 
@@ -343,7 +284,6 @@ const CaptainHome = () => {
       if (currentRideId && payloadRideId && currentRideId === payloadRideId) {
         setRidePopup(false);
         setRide(null);
-        setConfirmRidePickup(false);
         alert(payload?.message || "Este viaje ya fue tomado por otro conductor.");
       }
     };
@@ -364,14 +304,15 @@ const CaptainHome = () => {
       if (acceptedRideId && currentRideId && acceptedRideId === currentRideId) {
         setRide(payload);
         setRidePopup(false);
-        setConfirmRidePickup(true);
+
+        navigate("/captain-riding", {
+          state: { ride: payload },
+        });
       }
     };
 
     socket.off("connect", onConnect);
     socket.off("disconnect", onDisconnect);
-    socket.off("socket-joined", onSocketJoined);
-    socket.off("location-updated", onLocationUpdated);
     socket.off("new-ride", onNewRide);
     socket.off("ride-no-longer-available", onRideNoLongerAvailable);
     socket.off("ride-offer-rejected", onRideOfferRejected);
@@ -379,8 +320,6 @@ const CaptainHome = () => {
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
-    socket.on("socket-joined", onSocketJoined);
-    socket.on("location-updated", onLocationUpdated);
     socket.on("new-ride", onNewRide);
     socket.on("ride-no-longer-available", onRideNoLongerAvailable);
     socket.on("ride-offer-rejected", onRideOfferRejected);
@@ -393,14 +332,12 @@ const CaptainHome = () => {
     return () => {
       socket.off("connect", onConnect);
       socket.off("disconnect", onDisconnect);
-      socket.off("socket-joined", onSocketJoined);
-      socket.off("location-updated", onLocationUpdated);
       socket.off("new-ride", onNewRide);
       socket.off("ride-no-longer-available", onRideNoLongerAvailable);
       socket.off("ride-offer-rejected", onRideOfferRejected);
       socket.off("ride-offer-accepted", onRideOfferAccepted);
     };
-  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, ride?._id]);
+  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, ride?._id, navigate]);
 
   useEffect(() => {
     if (!captain?._id || !socket || !geoSupported) return;
@@ -426,7 +363,6 @@ const CaptainHome = () => {
   const sendRideOffer = async ({ price, message = "" }) => {
     try {
       if (!ride?._id) {
-        console.error("[captain-home] No hay servicio seleccionado para ofertar.");
         return;
       }
 
@@ -451,7 +387,6 @@ const CaptainHome = () => {
 
       alert("Oferta enviada al usuario correctamente.");
     } catch (error) {
-      console.error("[captain-home] Error enviando oferta del conductor:", error);
       alert(
         error?.response?.data?.message ||
           "No se pudo enviar la oferta del viaje."
@@ -464,7 +399,6 @@ const CaptainHome = () => {
   const confirmRide = async () => {
     try {
       if (!ride?._id) {
-        console.error("[captain-home] No hay servicio seleccionado para aceptar.");
         return;
       }
 
@@ -531,26 +465,6 @@ const CaptainHome = () => {
       }
     },
     [ridePopup]
-  );
-
-  useGSAP(
-    () => {
-      if (confirmRidePickup) {
-        gsap.to(confirmRidePickupRef.current, {
-          y: "0%",
-          delay: 0.1,
-          duration: 0.25,
-          ease: "power2.out",
-        });
-      } else {
-        gsap.to(confirmRidePickupRef.current, {
-          y: "100%",
-          duration: 0.2,
-          ease: "power2.inOut",
-        });
-      }
-    },
-    [confirmRidePickup]
   );
 
   const gpsBlocked = !locationReady || locationPermission !== "granted";
@@ -797,24 +711,12 @@ const CaptainHome = () => {
           className="fixed z-[60] bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-scroll shadow-2xl"
         >
           <RidePopup
-            setConfirmRidePickup={setConfirmRidePickup}
             setRidePopup={setRidePopup}
             ride={ride}
             confirmRide={confirmRide}
             onIgnoreRide={ignoreRide}
             onCounterOffer={handleCounterOffer}
             isSubmitting={processing}
-          />
-        </div>
-
-        <div
-          ref={confirmRidePickupRef}
-          className="fixed z-[70] bottom-0 w-screen h-screen translate-y-full rounded-t-[24px] bg-white overflow-scroll shadow-2xl"
-        >
-          <ConfirmRidePickup
-            setConfirmRidePickup={setConfirmRidePickup}
-            setRidePopup={setRidePopup}
-            ride={ride}
           />
         </div>
       </div>

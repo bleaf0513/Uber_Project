@@ -175,8 +175,6 @@ module.exports.createRide = async (req, res) => {
             };
         });
 
-        ride.otp = "";
-
         const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate("user");
 
         if (!rideWithUser) {
@@ -218,7 +216,9 @@ module.exports.createRide = async (req, res) => {
 
         return res.status(201).json(ride);
     } catch (err) {
-        const status = typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
+        const status =
+            typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
+
         if (status) {
             return res.status(status).json({ message: err.message });
         }
@@ -241,7 +241,9 @@ module.exports.getFare = async (req, res) => {
         const fare = await rideService.getFare(pickup, destination);
         return res.status(200).json(fare);
     } catch (err) {
-        const status = typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
+        const status =
+            typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
+
         if (status) {
             return res.status(status).json({ message: err.message });
         }
@@ -435,15 +437,21 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
         ride.fare = Number(selectedOffer.price);
         ride.negotiationStatus = "closed";
         ride.status = "accepted";
+        ride.arrivedAtPickup = false;
 
         ride.driverOffers = ride.driverOffers.map((offer) => {
-            const current = typeof offer.toObject === "function" ? offer.toObject() : offer;
+            const current =
+                typeof offer.toObject === "function" ? offer.toObject() : offer;
             const isTarget =
                 String(current.captain?._id || current.captain) === String(captainId);
 
             return {
                 ...current,
-                status: isTarget ? "accepted" : current.status === "pending" ? "rejected" : current.status,
+                status: isTarget
+                    ? "accepted"
+                    : current.status === "pending"
+                    ? "rejected"
+                    : current.status,
                 respondedAt: new Date(),
             };
         });
@@ -612,27 +620,50 @@ module.exports.confirmRide = async (req, res) => {
     }
 };
 
-module.exports.startRide = async (req, res) => {
+module.exports.arrived = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { rideId, otp } = req.query;
+    const { rideId } = req.body;
 
     try {
-        const ride = await rideService.startRide({
-            rideId,
-            otp,
-            captain: req.captain,
-        });
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                captain: req.captain._id,
+            })
+            .populate("user")
+            .populate("captain");
+
+        if (!ride) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
+        if (!["accepted", "ongoing"].includes(ride.status)) {
+            return res.status(400).json({
+                message: "Este servicio no está listo para marcar llegada.",
+            });
+        }
+
+        ride.arrivedAtPickup = true;
+        ride.arrivedAtPickupAt = new Date();
+        await ride.save();
 
         sendMessageToSocketId(ride.user.socketId, {
-            event: "ride-started",
-            data: ride,
+            event: "captain-arrived",
+            data: {
+                rideId: ride._id,
+                message: "Tu conductor ya llegó al punto de recogida.",
+                ride,
+            },
         });
 
-        return res.status(200).json(ride);
+        return res.status(200).json({
+            message: "Llegada notificada correctamente.",
+            ride,
+        });
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
@@ -683,6 +714,63 @@ module.exports.cancelRide = async (req, res) => {
 
         return res.status(200).json({
             message: "Solicitud cancelada correctamente",
+            ride,
+        });
+    } catch (err) {
+        return res.status(500).json({
+            message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+module.exports.cancelByCaptain = async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId, reason, notes } = req.body;
+
+    try {
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                captain: req.captain._id,
+            })
+            .populate("user")
+            .populate("captain");
+
+        if (!ride) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
+        if (!["accepted", "ongoing"].includes(ride.status)) {
+            return res.status(400).json({
+                message: "Este servicio no se puede cancelar en el estado actual.",
+            });
+        }
+
+        ride.status = "cancelled";
+        ride.negotiationStatus = "closed";
+        ride.cancelledBy = "captain";
+        ride.cancelReason = reason || "Sin motivo";
+        ride.cancelNotes = notes || "";
+        ride.cancelledAt = new Date();
+
+        await ride.save();
+
+        sendMessageToSocketId(ride.user.socketId, {
+            event: "ride-cancelled-by-captain",
+            data: {
+                rideId: ride._id,
+                reason: ride.cancelReason,
+                notes: ride.cancelNotes,
+                message: "El conductor canceló la solicitud.",
+            },
+        });
+
+        return res.status(200).json({
+            message: "Solicitud cancelada correctamente por el conductor.",
             ride,
         });
     } catch (err) {

@@ -4,6 +4,7 @@ import {
   Marker,
   Circle,
   OverlayView,
+  DirectionsRenderer,
 } from "@react-google-maps/api";
 import { useGoogleMapsScript } from "../src/context/GoogleMapsLoadContext";
 import axios from "axios";
@@ -42,6 +43,9 @@ const LiveTracking = ({
   zoom = 15,
   autoFetchNearbyDrivers = true,
   nearbyDriversRefreshMs = 8000,
+  selectedCaptainId = null,
+  showRouteToPickup = false,
+  onEtaUpdate = null,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
@@ -56,9 +60,14 @@ const LiveTracking = ({
   const [pulseRadiusA, setPulseRadiusA] = useState(140);
   const [pulseRadiusB, setPulseRadiusB] = useState(260);
 
+  const [directions, setDirections] = useState(null);
+  const [etaText, setEtaText] = useState("");
+  const [distanceText, setDistanceText] = useState("");
+
   const watchIdRef = useRef(null);
   const driversIntervalRef = useRef(null);
   const geocoderRequestIdRef = useRef(0);
+  const directionsRequestIdRef = useRef(0);
 
   const hasAutoFittedRef = useRef(false);
   const isUserInteractingRef = useRef(false);
@@ -122,7 +131,7 @@ const LiveTracking = ({
             : "Conductor activo";
 
         return {
-          id,
+          id: String(id),
           lat,
           lng,
           rotation:
@@ -139,6 +148,14 @@ const LiveTracking = ({
       })
       .filter(Boolean);
   }, [mergedNearbyDrivers]);
+
+  const selectedDriver = useMemo(() => {
+    if (!selectedCaptainId) return safeNearbyDrivers[0] || null;
+    return (
+      safeNearbyDrivers.find((d) => String(d.id) === String(selectedCaptainId)) ||
+      null
+    );
+  }, [safeNearbyDrivers, selectedCaptainId]);
 
   const markUserInteraction = () => {
     isUserInteractingRef.current = true;
@@ -287,6 +304,63 @@ const LiveTracking = ({
   ]);
 
   useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !showRouteToPickup) {
+      setDirections(null);
+      setEtaText("");
+      setDistanceText("");
+      if (typeof onEtaUpdate === "function") {
+        onEtaUpdate({ etaText: "", distanceText: "" });
+      }
+      return;
+    }
+
+    if (!pickupPosition || !selectedDriver) {
+      setDirections(null);
+      setEtaText("");
+      setDistanceText("");
+      if (typeof onEtaUpdate === "function") {
+        onEtaUpdate({ etaText: "", distanceText: "" });
+      }
+      return;
+    }
+
+    const currentRequestId = ++directionsRequestIdRef.current;
+    const directionsService = new window.google.maps.DirectionsService();
+
+    directionsService.route(
+      {
+        origin: { lat: selectedDriver.lat, lng: selectedDriver.lng },
+        destination: pickupPosition,
+        travelMode: window.google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (currentRequestId !== directionsRequestIdRef.current) return;
+
+        if (status === "OK" && result?.routes?.[0]?.legs?.[0]) {
+          const leg = result.routes[0].legs[0];
+          setDirections(result);
+          setEtaText(leg.duration?.text || "");
+          setDistanceText(leg.distance?.text || "");
+
+          if (typeof onEtaUpdate === "function") {
+            onEtaUpdate({
+              etaText: leg.duration?.text || "",
+              distanceText: leg.distance?.text || "",
+            });
+          }
+        } else {
+          setDirections(null);
+          setEtaText("");
+          setDistanceText("");
+          if (typeof onEtaUpdate === "function") {
+            onEtaUpdate({ etaText: "", distanceText: "" });
+          }
+        }
+      }
+    );
+  }, [mapsApiLoaded, pickupPosition, selectedDriver, showRouteToPickup, onEtaUpdate]);
+
+  useEffect(() => {
     if (!map || !mapsApiLoaded || !window.google?.maps) return;
     if (isUserInteractingRef.current) return;
 
@@ -328,6 +402,14 @@ const LiveTracking = ({
         lat: Number(d.lat).toFixed(5),
         lng: Number(d.lng).toFixed(5),
       })),
+      routeToPickup: !!showRouteToPickup,
+      selectedDriver: selectedDriver
+        ? {
+            id: selectedDriver.id,
+            lat: Number(selectedDriver.lat).toFixed(5),
+            lng: Number(selectedDriver.lng).toFixed(5),
+          }
+        : null,
     });
 
     const shouldRefocus =
@@ -335,7 +417,16 @@ const LiveTracking = ({
 
     if (!shouldRefocus) return;
 
-    if (pickupPosition && (currentPosition || safeNearbyDrivers.length > 0)) {
+    if (showRouteToPickup && selectedDriver && pickupPosition) {
+      bounds.extend({ lat: selectedDriver.lat, lng: selectedDriver.lng });
+      bounds.extend(pickupPosition);
+      map.fitBounds(bounds, {
+        top: 110,
+        right: 60,
+        bottom: 250,
+        left: 60,
+      });
+    } else if (pickupPosition && (currentPosition || safeNearbyDrivers.length > 0)) {
       map.fitBounds(bounds, {
         top: 80,
         right: 60,
@@ -349,7 +440,16 @@ const LiveTracking = ({
 
     hasAutoFittedRef.current = true;
     lastFocusKeyRef.current = focusKey;
-  }, [map, currentPosition, pickupPosition, safeNearbyDrivers, mapsApiLoaded, zoom]);
+  }, [
+    map,
+    currentPosition,
+    pickupPosition,
+    safeNearbyDrivers,
+    mapsApiLoaded,
+    zoom,
+    showRouteToPickup,
+    selectedDriver,
+  ]);
 
   useEffect(() => {
     return () => {
@@ -444,6 +544,20 @@ const LiveTracking = ({
       onClick={markUserInteraction}
       options={mapOptions}
     >
+      {directions && showRouteToPickup && (
+        <DirectionsRenderer
+          directions={directions}
+          options={{
+            suppressMarkers: true,
+            polylineOptions: {
+              strokeColor: "#7c3aed",
+              strokeOpacity: 0.85,
+              strokeWeight: 6,
+            },
+          }}
+        />
+      )}
+
       {currentPosition && (
         <>
           <Circle
@@ -541,6 +655,32 @@ const LiveTracking = ({
             title={driver.name}
           />
         ))}
+
+      {showRouteToPickup && selectedDriver && pickupPosition && (etaText || distanceText) && (
+        <OverlayView
+          position={pickupPosition}
+          mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+        >
+          <div
+            style={{
+              transform: "translate(-50%, 18px)",
+              background: "rgba(255,255,255,0.96)",
+              color: "#111827",
+              padding: "10px 14px",
+              borderRadius: "16px",
+              fontSize: "12px",
+              fontWeight: 700,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+              whiteSpace: "nowrap",
+              border: "1px solid #e5e7eb",
+            }}
+          >
+            {etaText ? `Llega en ${etaText}` : ""}
+            {etaText && distanceText ? " · " : ""}
+            {distanceText || ""}
+          </div>
+        </OverlayView>
+      )}
     </GoogleMap>
   );
 };
