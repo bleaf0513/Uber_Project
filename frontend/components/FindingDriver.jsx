@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useState } from "react";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
 
@@ -30,19 +30,8 @@ const VEHICLE_META = {
   },
 };
 
-const OFFER_TTL_MS = 7000;
-
 const FindingDriver = (props) => {
   const [cancelling, setCancelling] = useState(false);
-  const [nowMs, setNowMs] = useState(Date.now());
-
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNowMs(Date.now());
-    }, 500);
-
-    return () => clearInterval(timer);
-  }, []);
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
@@ -70,19 +59,6 @@ const FindingDriver = (props) => {
       currency: "COP",
       maximumFractionDigits: 0,
     }).format(Math.ceil(number));
-  };
-
-  const getExpiresAtMs = (offer) => {
-    if (offer?.expiresAt) {
-      const t = new Date(offer.expiresAt).getTime();
-      if (Number.isFinite(t)) return t;
-    }
-
-    const createdAt = offer?.createdAt
-      ? new Date(offer.createdAt).getTime()
-      : Date.now();
-
-    return createdAt + OFFER_TTL_MS;
   };
 
   const closePanelsSafely = () => {
@@ -146,24 +122,6 @@ const FindingDriver = (props) => {
     props?.selectedPrice ??
     0;
 
-  const liveOffers = useMemo(() => {
-    const offers =
-      props?.ride?.activeDriverOffers ||
-      props?.ride?.driverOffers ||
-      [];
-
-    return (Array.isArray(offers) ? offers : [])
-      .filter((offer) => {
-        if (offer?.status !== "pending") return false;
-        return getExpiresAtMs(offer) > nowMs;
-      })
-      .map((offer) => ({
-        ...offer,
-        remainingMs: Math.max(0, getExpiresAtMs(offer) - nowMs),
-      }))
-      .sort((a, b) => Number(a.price || 0) - Number(b.price || 0));
-  }, [props?.ride, nowMs]);
-
   return (
     <div className="bg-white rounded-t-[24px] h-full flex flex-col">
       <div className="flex items-center justify-center pt-3 pb-2">
@@ -174,12 +132,10 @@ const FindingDriver = (props) => {
         <div className="flex items-center justify-between">
           <div>
             <p className="text-xs font-semibold text-blue-700">
-              {liveOffers.length > 0 ? "Ofertas en tiempo real" : "Buscando transportador"}
+              Buscando transportador
             </p>
             <h2 className="text-xl font-bold text-gray-900">
-              {liveOffers.length > 0
-                ? `${liveOffers.length} oferta${liveOffers.length === 1 ? "" : "s"} recibida${liveOffers.length === 1 ? "" : "s"}`
-                : "Buscando conductores"}
+              Buscando conductores
             </h2>
           </div>
 
@@ -253,67 +209,14 @@ const FindingDriver = (props) => {
             </div>
           </div>
 
-          {liveOffers.length > 0 && (
-            <div className="pt-2">
-              <p className="text-sm font-bold text-gray-900 mb-3">
-                Ofertas vigentes
-              </p>
-
-              <div className="space-y-3">
-                {liveOffers.map((offer, index) => {
-                  const captainName = `${
-                    offer?.captain?.fullname?.firstname || "Conductor"
-                  } ${offer?.captain?.fullname?.lastname || ""}`.trim();
-
-                  const secondsLeft = Math.max(
-                    0,
-                    Math.ceil(offer.remainingMs / 1000)
-                  );
-
-                  return (
-                    <div
-                      key={offer?._id || `${offer?.captain?._id || "captain"}-${index}`}
-                      className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4"
-                    >
-                      <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-bold text-emerald-900">
-                            {captainName}
-                          </p>
-                          <p className="text-xs text-emerald-700 mt-1">
-                            Expira en {secondsLeft}s
-                          </p>
-                        </div>
-
-                        <div className="text-right">
-                          <p className="text-lg font-extrabold text-emerald-900">
-                            {formatCOP(offer?.price)}
-                          </p>
-                        </div>
-                      </div>
-
-                      {!!offer?.message && (
-                        <p className="text-sm text-gray-700 mt-3">
-                          {offer.message}
-                        </p>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          )}
-
-          {liveOffers.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 mt-2">
-              <p className="text-sm font-semibold text-gray-800">
-                Aún no llegan ofertas
-              </p>
-              <p className="text-xs text-gray-600 mt-1">
-                Cuando los conductores envíen propuestas, aparecerán aquí y cada una durará 7 segundos.
-              </p>
-            </div>
-          )}
+          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 mt-2">
+            <p className="text-sm font-semibold text-gray-800">
+              Esperando ofertas
+            </p>
+            <p className="text-xs text-gray-600 mt-1">
+              Las ofertas activas aparecerán flotando arriba del mapa durante 10 segundos.
+            </p>
+          </div>
         </div>
       </div>
 

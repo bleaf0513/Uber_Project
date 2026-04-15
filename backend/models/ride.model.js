@@ -28,7 +28,7 @@ const driverOfferSchema = new mongoose.Schema(
         },
         expiresAt: {
             type: Date,
-            default: () => new Date(Date.now() + 7000),
+            default: () => new Date(Date.now() + 10000),
         },
         respondedAt: {
             type: Date,
@@ -125,7 +125,6 @@ const rideSchema = new mongoose.Schema(
             select: false,
             required: true,
         },
-
         driverOffers: {
             type: [driverOfferSchema],
             default: [],

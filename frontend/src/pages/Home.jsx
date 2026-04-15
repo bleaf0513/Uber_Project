@@ -1,4 +1,4 @@
-import React, { useEffect, useContext, useState, useRef, useCallback } from "react";
+import React, { useEffect, useContext, useState, useRef, useCallback, useMemo } from "react";
 import { useGSAP } from "@gsap/react";
 import { Link, useNavigate } from "react-router-dom";
 import gsap from "gsap";
@@ -14,6 +14,8 @@ import { UserDataContext } from "../context/UserContext";
 import LiveTracking from "../../components/LiveTracking";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
+
+const OFFER_TTL_MS = 10000;
 
 function Home() {
   const submitHandler = (e) => {
@@ -37,6 +39,7 @@ function Home() {
   const [offeredPrice, setOfferedPrice] = useState(null);
   const [ride, setRide] = useState(null);
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
+  const [offerNow, setOfferNow] = useState(Date.now());
 
   const panelRef = useRef(null);
   const titleRef = useRef(null);
@@ -53,6 +56,14 @@ function Home() {
   const { user } = useContext(UserDataContext);
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setOfferNow(Date.now());
+    }, 500);
+
+    return () => clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     if (!user?._id) return;
@@ -98,8 +109,7 @@ function Home() {
       setNearbyDrivers((prev) => {
         const list = Array.isArray(prev) ? [...prev] : [];
         const idx = list.findIndex(
-          (d) =>
-            String(d?._id || d?.captainId) === String(payload.captainId)
+          (d) => String(d?._id || d?.captainId) === String(payload.captainId)
         );
 
         const updatedDriver = {
@@ -111,11 +121,9 @@ function Home() {
             lng: Number(payload.location.lng),
           },
           vehicleType:
-            payload.vehicleType ||
-            (idx >= 0 ? list[idx]?.vehicleType : null),
+            payload.vehicleType || (idx >= 0 ? list[idx]?.vehicleType : null),
           profileImage:
-            payload.profileImage ||
-            (idx >= 0 ? list[idx]?.profileImage : ""),
+            payload.profileImage || (idx >= 0 ? list[idx]?.profileImage : ""),
         };
 
         if (idx >= 0) {
@@ -190,10 +198,7 @@ function Home() {
             return;
           }
         } catch (error) {
-          console.warn(
-            "Places autocomplete failed, using server fallback:",
-            error?.message || error
-          );
+          console.warn("Places autocomplete failed, using server fallback:", error?.message || error);
         }
       }
 
@@ -358,7 +363,6 @@ function Home() {
     }
 
     if (!selectedVehicle) {
-      console.error("No vehicle selected");
       throw new Error("No has seleccionado un vehículo.");
     }
 
@@ -411,17 +415,66 @@ function Home() {
     navigate("/available-offers");
   };
 
+  const getOfferExpiresAtMs = (offer) => {
+    if (offer?.expiresAt) {
+      const t = new Date(offer.expiresAt).getTime();
+      if (Number.isFinite(t)) return t;
+    }
+
+    const createdAt = offer?.createdAt
+      ? new Date(offer.createdAt).getTime()
+      : Date.now();
+
+    return createdAt + OFFER_TTL_MS;
+  };
+
+  const liveOffers = useMemo(() => {
+    const offers = ride?.activeDriverOffers || ride?.driverOffers || [];
+
+    return (Array.isArray(offers) ? offers : [])
+      .filter((offer) => {
+        if (offer?.status !== "pending") return false;
+        return getOfferExpiresAtMs(offer) > offerNow;
+      })
+      .map((offer) => ({
+        ...offer,
+        remainingMs: Math.max(0, getOfferExpiresAtMs(offer) - offerNow),
+      }))
+      .sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
+  }, [ride, offerNow]);
+
+  const getCaptainPhoto = (captain) =>
+    captain?.profileImage ||
+    captain?.photo ||
+    captain?.avatar ||
+    captain?.image ||
+    captain?.profilePic ||
+    "";
+
+  const getVehicleColor = (captain) =>
+    captain?.vehicle?.color ||
+    captain?.vehicleColor ||
+    captain?.color ||
+    "";
+
+  const getVehiclePlate = (captain) =>
+    captain?.vehicle?.plate ||
+    captain?.plate ||
+    "";
+
+  const getVehicleName = (captain) =>
+    captain?.vehicle?.vehicleType ||
+    captain?.vehicle?.type ||
+    captain?.vehicleType ||
+    selectedVehicle ||
+    "car";
+
   useGSAP(
     () => {
       if (vehiclePanel) {
-        gsap.to(vehicleRef.current, {
-          y: "0%",
-          delay: 0.3,
-        });
+        gsap.to(vehicleRef.current, { y: "0%", delay: 0.3 });
       } else {
-        gsap.to(vehicleRef.current, {
-          y: "100%",
-        });
+        gsap.to(vehicleRef.current, { y: "100%" });
       }
     },
     [vehiclePanel]
@@ -430,14 +483,9 @@ function Home() {
   useGSAP(
     () => {
       if (driverSelected) {
-        gsap.to(driverSelectedRef.current, {
-          y: "0%",
-          delay: 0.3,
-        });
+        gsap.to(driverSelectedRef.current, { y: "0%", delay: 0.3 });
       } else {
-        gsap.to(driverSelectedRef.current, {
-          y: "100%",
-        });
+        gsap.to(driverSelectedRef.current, { y: "100%" });
       }
     },
     [driverSelected]
@@ -446,14 +494,9 @@ function Home() {
   useGSAP(
     () => {
       if (vehicleFound) {
-        gsap.to(vehicleFoundRef.current, {
-          y: "0%",
-          delay: 0.3,
-        });
+        gsap.to(vehicleFoundRef.current, { y: "0%", delay: 0.3 });
       } else {
-        gsap.to(vehicleFoundRef.current, {
-          y: "100%",
-        });
+        gsap.to(vehicleFoundRef.current, { y: "100%" });
       }
     },
     [vehicleFound]
@@ -462,14 +505,9 @@ function Home() {
   useGSAP(
     () => {
       if (confirmRidePanel) {
-        gsap.to(confirmRidePanelRef.current, {
-          y: "0%",
-          delay: 0.3,
-        });
+        gsap.to(confirmRidePanelRef.current, { y: "0%", delay: 0.3 });
       } else {
-        gsap.to(confirmRidePanelRef.current, {
-          y: "100%",
-        });
+        gsap.to(confirmRidePanelRef.current, { y: "100%" });
       }
     },
     [confirmRidePanel]
@@ -575,6 +613,79 @@ function Home() {
           showPickupRadar={vehicleFound || driverSelected}
         />
       </div>
+
+      {vehicleFound && liveOffers.length > 0 && (
+        <div className="absolute top-24 left-0 right-0 z-40 px-3">
+          <div className="flex gap-3 overflow-x-auto pb-1">
+            {liveOffers.map((offer, index) => {
+              const captain = offer?.captain || {};
+              const captainName = `${
+                captain?.fullname?.firstname || "Conductor"
+              } ${captain?.fullname?.lastname || ""}`.trim();
+
+              const photo = getCaptainPhoto(captain);
+              const plate = getVehiclePlate(captain);
+              const color = getVehicleColor(captain);
+              const vehicleName = getVehicleName(captain);
+              const secondsLeft = Math.max(
+                0,
+                Math.ceil((offer?.remainingMs || 0) / 1000)
+              );
+
+              return (
+                <div
+                  key={offer?._id || `${captain?._id || "captain"}-${index}`}
+                  className="min-w-[290px] max-w-[290px] rounded-3xl bg-white/95 backdrop-blur shadow-2xl border border-gray-200 p-4"
+                >
+                  <div className="flex items-start gap-3">
+                    {photo ? (
+                      <img
+                        src={photo}
+                        alt={captainName}
+                        className="w-14 h-14 rounded-2xl object-cover"
+                      />
+                    ) : (
+                      <div className="w-14 h-14 rounded-2xl bg-gray-200 flex items-center justify-center">
+                        <i className="ri-user-3-line text-2xl text-gray-600"></i>
+                      </div>
+                    )}
+
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-bold text-gray-900 truncate">
+                        {captainName}
+                      </p>
+                      <p className="text-xs text-gray-600 truncate">
+                        {vehicleName}
+                        {color ? ` · ${color}` : ""}
+                        {plate ? ` · ${plate}` : ""}
+                      </p>
+                      <p className="text-xs text-orange-600 font-semibold mt-1">
+                        Expira en {secondsLeft}s
+                      </p>
+                    </div>
+
+                    <div className="text-right">
+                      <p className="text-lg font-extrabold text-emerald-700">
+                        {new Intl.NumberFormat("es-CO", {
+                          style: "currency",
+                          currency: "COP",
+                          maximumFractionDigits: 0,
+                        }).format(Math.ceil(Number(offer?.price || 0)))}
+                      </p>
+                    </div>
+                  </div>
+
+                  {!!offer?.message && (
+                    <p className="text-sm text-gray-700 mt-3 line-clamp-2">
+                      {offer.message}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       <div
         ref={searchRef}
@@ -705,7 +816,7 @@ function Home() {
 
       <div
         ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[55%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[40%] shadow-2xl"
       >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}

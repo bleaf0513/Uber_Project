@@ -4,7 +4,7 @@ const mapService = require("./maps.service");
 const crypto = require("crypto");
 const userModel = require("../models/user.model");
 
-const OFFER_TTL_MS = 7000;
+const OFFER_TTL_MS = 10000;
 
 function getOtp(num) {
     function generateOtp(num) {
