@@ -19,12 +19,16 @@ const driverOfferSchema = new mongoose.Schema(
         },
         status: {
             type: String,
-            enum: ["pending", "accepted", "rejected", "withdrawn"],
+            enum: ["pending", "accepted", "rejected", "withdrawn", "expired"],
             default: "pending",
         },
         createdAt: {
             type: Date,
             default: Date.now,
+        },
+        expiresAt: {
+            type: Date,
+            default: () => new Date(Date.now() + 7000),
         },
         respondedAt: {
             type: Date,
@@ -122,7 +126,6 @@ const rideSchema = new mongoose.Schema(
             required: true,
         },
 
-        // NUEVO: negociación estilo InDriver
         driverOffers: {
             type: [driverOfferSchema],
             default: [],

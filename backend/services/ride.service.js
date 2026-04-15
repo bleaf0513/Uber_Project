@@ -4,9 +4,13 @@ const mapService = require("./maps.service");
 const crypto = require("crypto");
 const userModel = require("../models/user.model");
 
+const OFFER_TTL_MS = 7000;
+
 function getOtp(num) {
     function generateOtp(num) {
-        return crypto.randomInt(Math.pow(10, num - 1), Math.pow(10, num)).toString();
+        return crypto
+            .randomInt(Math.pow(10, num - 1), Math.pow(10, num))
+            .toString();
     }
     return generateOtp(num);
 }
@@ -14,6 +18,65 @@ function getOtp(num) {
 function safeNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
+}
+
+function getOfferExpiresAt(offer) {
+    if (offer?.expiresAt) {
+        const expiresAt = new Date(offer.expiresAt).getTime();
+        if (Number.isFinite(expiresAt)) return expiresAt;
+    }
+
+    const createdAt = offer?.createdAt
+        ? new Date(offer.createdAt).getTime()
+        : Date.now();
+
+    return createdAt + OFFER_TTL_MS;
+}
+
+function isOfferExpired(offer, now = Date.now()) {
+    return getOfferExpiresAt(offer) <= now;
+}
+
+function getActiveDriverOffers(ride, now = Date.now()) {
+    return (ride?.driverOffers || []).filter((offer) => {
+        return offer?.status === "pending" && !isOfferExpired(offer, now);
+    });
+}
+
+async function expirePendingOffers(ride, now = Date.now()) {
+    if (!ride) return false;
+
+    let changed = false;
+
+    for (const offer of ride.driverOffers || []) {
+        if (!offer.expiresAt) {
+            offer.expiresAt = new Date(getOfferExpiresAt(offer));
+            changed = true;
+        }
+
+        if (offer.status === "pending" && isOfferExpired(offer, now)) {
+            offer.status = "expired";
+            offer.respondedAt = offer.respondedAt || new Date(now);
+            changed = true;
+        }
+    }
+
+    const activeOffers = getActiveDriverOffers(ride, now);
+
+    if (
+        ride.negotiationStatus === "open" &&
+        ride.status === "negotiating" &&
+        activeOffers.length === 0
+    ) {
+        ride.status = "pending";
+        changed = true;
+    }
+
+    if (changed) {
+        await ride.save();
+    }
+
+    return changed;
 }
 
 const getFare = async (pickup, destination) => {
@@ -67,28 +130,28 @@ const getFare = async (pickup, destination) => {
     const fares = {
         motorcycle: Math.round(
             baseFare.motorcycle +
-            perKmRate.motorcycle * distanceKm +
-            perMinuteRate.motorcycle * durationMin
+                perKmRate.motorcycle * distanceKm +
+                perMinuteRate.motorcycle * durationMin
         ),
         car: Math.round(
             baseFare.car +
-            perKmRate.car * distanceKm +
-            perMinuteRate.car * durationMin
+                perKmRate.car * distanceKm +
+                perMinuteRate.car * durationMin
         ),
         light_cargo: Math.round(
             baseFare.light_cargo +
-            perKmRate.light_cargo * distanceKm +
-            perMinuteRate.light_cargo * durationMin
+                perKmRate.light_cargo * distanceKm +
+                perMinuteRate.light_cargo * durationMin
         ),
         van: Math.round(
             baseFare.van +
-            perKmRate.van * distanceKm +
-            perMinuteRate.van * durationMin
+                perKmRate.van * distanceKm +
+                perMinuteRate.van * durationMin
         ),
         truck: Math.round(
             baseFare.truck +
-            perKmRate.truck * distanceKm +
-            perMinuteRate.truck * durationMin
+                perKmRate.truck * distanceKm +
+                perMinuteRate.truck * durationMin
         ),
     };
 
@@ -167,6 +230,9 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         vehicleType: vehicle,
         distance: Number.isFinite(meters) ? meters : null,
         duration: Number.isFinite(seconds) ? seconds : null,
+        driverOffers: [],
+        negotiationStatus: "open",
+        status: "pending",
     });
 
     return ride;
@@ -273,27 +339,52 @@ const cancelRide = async ({ rideId, user }) => {
     const ride = await rideModel.findOne({
         _id: rideId,
         user: user._id || user,
-    }).populate("user").populate("captain");
+    })
+        .populate("user")
+        .populate("captain");
 
     if (!ride) {
         throw new Error("Ride not found");
     }
 
-    if (ride.status !== "pending") {
-        throw new Error("Only pending rides can be cancelled");
+    await expirePendingOffers(ride);
+
+    if (!["pending", "negotiating"].includes(ride.status)) {
+        throw new Error("Solo se pueden cancelar solicitudes en búsqueda u oferta");
     }
 
-    ride.status = "rejected";
+    ride.status = "cancelled";
+    ride.negotiationStatus = "closed";
+
+    ride.driverOffers = (ride.driverOffers || []).map((offer) => {
+        const current = typeof offer.toObject === "function" ? offer.toObject() : offer;
+
+        if (current.status === "pending") {
+            return {
+                ...current,
+                status: "withdrawn",
+                respondedAt: new Date(),
+            };
+        }
+
+        return current;
+    });
+
     await ride.save();
 
     return ride;
 };
 
 module.exports = {
+    OFFER_TTL_MS,
     getFare,
     createRide,
     confirmRide,
     startRide,
     endRide,
     cancelRide,
+    expirePendingOffers,
+    getActiveDriverOffers,
+    isOfferExpired,
+    getOfferExpiresAt,
 };

@@ -36,8 +36,6 @@ function Home() {
   const [selectedPrice, setSelectedPrice] = useState(null);
   const [offeredPrice, setOfferedPrice] = useState(null);
   const [ride, setRide] = useState(null);
-
-  // Conductores cercanos / activos en tiempo real
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
 
   const panelRef = useRef(null);
@@ -78,12 +76,22 @@ function Home() {
       setRide(rideData || null);
     };
 
-    // Lista inicial de conductores cercanos/activos
+    const onRideOfferUpdated = (rideData) => {
+      const nextRide = rideData || null;
+      setRide(nextRide);
+
+      if (nextRide?._id) {
+        setVehiclePanel(false);
+        setConfirmRidePanel(false);
+        setDriverSelected(false);
+        setVehicleFound(true);
+      }
+    };
+
     const onNearbyCaptains = (drivers) => {
       setNearbyDrivers(Array.isArray(drivers) ? drivers : []);
     };
 
-    // Actualización en tiempo real de posición de conductores
     const onCaptainLocationUpdated = (payload) => {
       if (!payload?.captainId || !payload?.location) return;
 
@@ -121,12 +129,14 @@ function Home() {
 
     socket.on("ride-started", onRideStarted);
     socket.on("ride-confirmed", onRideConfirmed);
+    socket.on("ride-offer-updated", onRideOfferUpdated);
     socket.on("nearby-captains", onNearbyCaptains);
     socket.on("captain-location-updated", onCaptainLocationUpdated);
 
     return () => {
       socket.off("ride-started", onRideStarted);
       socket.off("ride-confirmed", onRideConfirmed);
+      socket.off("ride-offer-updated", onRideOfferUpdated);
       socket.off("nearby-captains", onNearbyCaptains);
       socket.off("captain-location-updated", onCaptainLocationUpdated);
     };
@@ -381,8 +391,6 @@ function Home() {
       setVehiclePanel(false);
       setConfirmRidePanel(false);
       setDriverSelected(false);
-
-      // IMPORTANTE: activar estado de búsqueda
       setVehicleFound(true);
 
       return rideData;
@@ -697,7 +705,7 @@ function Home() {
 
       <div
         ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[38%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[55%] shadow-2xl"
       >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
