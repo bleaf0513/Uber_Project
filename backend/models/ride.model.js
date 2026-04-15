@@ -121,8 +121,7 @@ const rideSchema = new mongoose.Schema(
             default: null,
         },
 
-        // Ya no se usa en el flujo nuevo, pero se deja opcional
-        // por compatibilidad con partes antiguas del sistema.
+        // Se deja opcional solo por compatibilidad con partes antiguas.
         otp: {
             type: String,
             select: false,
