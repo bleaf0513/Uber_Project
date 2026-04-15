@@ -223,7 +223,7 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         user: latestUser._id,
         pickup,
         destination,
-        otp: getOtp(6),
+        otp: getOtp(4),
         suggestedFare,
         offeredFare: finalFare,
         fare: finalFare,

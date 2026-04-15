@@ -29,10 +29,14 @@ const VEHICLE_META = {
 
 const ConfirmRidePickup = (props) => {
   const navigate = useNavigate();
-  const [otp, setOtp] = React.useState("");
+  const [securityCode, setSecurityCode] = React.useState("");
 
   if (props.ride == null) {
-    return <div className="p-6 text-center text-gray-600">Cargando servicio...</div>;
+    return (
+      <div className="p-6 text-center text-gray-600">
+        Cargando servicio...
+      </div>
+    );
   }
 
   const formatCOP = (value) => {
@@ -64,7 +68,7 @@ const ConfirmRidePickup = (props) => {
       const response = await axios.get(`${getApiBaseUrl()}/rides/start-ride`, {
         params: {
           rideId: props.ride._id,
-          otp,
+          otp: securityCode,
         },
         headers: {
           Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -78,7 +82,7 @@ const ConfirmRidePickup = (props) => {
       console.error("Error al iniciar el servicio:", error);
       alert(
         error?.response?.data?.message ||
-          "No se pudo iniciar el servicio. Verifica el OTP."
+          "No se pudo iniciar el servicio. Verifica el código de seguridad."
       );
     }
   };
@@ -145,17 +149,20 @@ const ConfirmRidePickup = (props) => {
         <div className="w-full flex justify-center items-center px-[15px] mb-4">
           <div className="w-full max-w-md">
             <label className="block text-sm font-semibold text-gray-700 mb-2 text-center">
-              Ingresa el código OTP para comenzar
+              Ingresa el código de seguridad para comenzar
             </label>
+
             <input
-              value={otp}
-              onChange={(e) => setOtp(e.target.value)}
-              className="text-center w-full bg-gray-100 border border-gray-200 py-3 rounded-2xl text-lg font-semibold font-mono outline-none focus:ring-2 focus:ring-emerald-500"
+              value={securityCode}
+              onChange={(e) =>
+                setSecurityCode(e.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+              className="text-center w-full bg-gray-100 border border-gray-200 py-3 rounded-2xl text-lg font-semibold font-mono outline-none focus:ring-2 focus:ring-emerald-500 tracking-[0.35em]"
               type="text"
               inputMode="numeric"
-              maxLength={6}
+              maxLength={4}
               required
-              placeholder="Ingresa OTP"
+              placeholder="0000"
             />
           </div>
         </div>
@@ -167,7 +174,9 @@ const ConfirmRidePickup = (props) => {
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
               <h2 className="text-xl font-semibold">{firstPart}</h2>
-              <h4 className="text-sm text-gray-600">{secondPart || "Punto de recogida"}</h4>
+              <h4 className="text-sm text-gray-600">
+                {secondPart || "Punto de recogida"}
+              </h4>
               <div
                 className="my-2"
                 style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -181,7 +190,9 @@ const ConfirmRidePickup = (props) => {
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
               <h2 className="text-xl font-semibold">{firstPartDest}</h2>
-              <h4 className="text-sm text-gray-600">{secondPartDest || "Destino"}</h4>
+              <h4 className="text-sm text-gray-600">
+                {secondPartDest || "Destino"}
+              </h4>
               <div
                 className="my-2"
                 style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -195,7 +206,9 @@ const ConfirmRidePickup = (props) => {
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
               <h2 className="text-xl font-semibold">{vehicleInfo.label}</h2>
-              <h4 className="text-sm text-gray-600">{vehicleInfo.description}</h4>
+              <h4 className="text-sm text-gray-600">
+                {vehicleInfo.description}
+              </h4>
               <div
                 className="my-2"
                 style={{ height: "2px", width: "100%", background: "#D6D6D6" }}
@@ -208,7 +221,9 @@ const ConfirmRidePickup = (props) => {
               <i className="ri-bank-card-2-fill ri-xl"></i>
             </div>
             <div className="flex flex-col justify-start items-start w-full mr-5">
-              <h2 className="text-xl font-semibold">{formatCOP(props.ride.fare)}</h2>
+              <h2 className="text-xl font-semibold">
+                {formatCOP(props.ride.fare)}
+              </h2>
               <h4 className="text-sm text-gray-600">Pago contra servicio</h4>
               <div
                 className="my-2"

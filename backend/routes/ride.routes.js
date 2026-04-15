@@ -117,8 +117,8 @@ router.get(
         .withMessage('Invalid ride id'),
     query('otp')
         .isString()
-        .isLength({ min: 6, max: 6 })
-        .withMessage('Invalid OTP'),
+        .isLength({ min: 4, max: 4 })
+        .withMessage('Código de seguridad inválido'),
     rideController.startRide
 );
 
