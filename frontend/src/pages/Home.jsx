@@ -1,4 +1,11 @@
-import React, { useEffect, useContext, useState, useRef, useCallback, useMemo } from "react";
+import React, {
+  useEffect,
+  useContext,
+  useState,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
 import { useGSAP } from "@gsap/react";
 import { Link, useNavigate } from "react-router-dom";
 import gsap from "gsap";
@@ -198,7 +205,10 @@ function Home() {
             return;
           }
         } catch (error) {
-          console.warn("Places autocomplete failed, using server fallback:", error?.message || error);
+          console.warn(
+            "Places autocomplete failed, using server fallback:",
+            error?.message || error
+          );
         }
       }
 
@@ -469,90 +479,127 @@ function Home() {
     selectedVehicle ||
     "car";
 
-  useGSAP(
-    () => {
-      if (vehiclePanel) {
-        gsap.to(vehicleRef.current, { y: "0%", delay: 0.3 });
-      } else {
-        gsap.to(vehicleRef.current, { y: "100%" });
-      }
-    },
-    [vehiclePanel]
-  );
+  const acceptOffer = async (captainId) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!ride?._id || !captainId) return;
 
-  useGSAP(
-    () => {
-      if (driverSelected) {
-        gsap.to(driverSelectedRef.current, { y: "0%", delay: 0.3 });
-      } else {
-        gsap.to(driverSelectedRef.current, { y: "100%" });
-      }
-    },
-    [driverSelected]
-  );
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/respond-offer`,
+        {
+          rideId: ride._id,
+          captainId,
+          action: "accepted",
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
 
-  useGSAP(
-    () => {
-      if (vehicleFound) {
-        gsap.to(vehicleFoundRef.current, { y: "0%", delay: 0.3 });
-      } else {
-        gsap.to(vehicleFoundRef.current, { y: "100%" });
-      }
-    },
-    [vehicleFound]
-  );
+      setRide(response?.data || ride);
+      setVehicleFound(false);
+      setDriverSelected(true);
+    } catch (error) {
+      console.error("Error aceptando oferta:", error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo aceptar la oferta."
+      );
+    }
+  };
 
-  useGSAP(
-    () => {
-      if (confirmRidePanel) {
-        gsap.to(confirmRidePanelRef.current, { y: "0%", delay: 0.3 });
-      } else {
-        gsap.to(confirmRidePanelRef.current, { y: "100%" });
-      }
-    },
-    [confirmRidePanel]
-  );
+  const rejectOffer = async (captainId) => {
+    try {
+      const token = localStorage.getItem("token");
+      if (!ride?._id || !captainId) return;
 
-  useGSAP(
-    () => {
-      if (panelOpen) {
-        gsap.to(titleRef.current, {
-          display: "none",
-          duration: 0.3,
-        });
-        gsap.to(panelRef.current, {
-          height: "68%",
-          display: "flex",
-          duration: 0.5,
-          delay: 0.2,
-          opacity: 1,
-        });
-        gsap.to(arrowRef.current, {
-          display: "block",
-          duration: 0.5,
-          delay: 0.5,
-        });
-      } else {
-        gsap.to(arrowRef.current, {
-          display: "none",
-          duration: 0.3,
-        });
-        gsap.to(panelRef.current, {
-          height: "0%",
-          display: "none",
-          duration: 0.5,
-          delay: 0.2,
-          opacity: 0,
-        });
-        gsap.to(titleRef.current, {
-          display: "block",
-          duration: 0.5,
-          delay: 0.3,
-        });
-      }
-    },
-    [panelOpen]
-  );
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/respond-offer`,
+        {
+          rideId: ride._id,
+          captainId,
+          action: "rejected",
+        },
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      setRide(response?.data || ride);
+    } catch (error) {
+      console.error("Error rechazando oferta:", error);
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo rechazar la oferta."
+      );
+    }
+  };
+
+  useGSAP(() => {
+    if (vehiclePanel) {
+      gsap.to(vehicleRef.current, { y: "0%", delay: 0.3 });
+    } else {
+      gsap.to(vehicleRef.current, { y: "100%" });
+    }
+  }, [vehiclePanel]);
+
+  useGSAP(() => {
+    if (driverSelected) {
+      gsap.to(driverSelectedRef.current, { y: "0%", delay: 0.3 });
+    } else {
+      gsap.to(driverSelectedRef.current, { y: "100%" });
+    }
+  }, [driverSelected]);
+
+  useGSAP(() => {
+    if (vehicleFound) {
+      gsap.to(vehicleFoundRef.current, { y: "0%", delay: 0.3 });
+    } else {
+      gsap.to(vehicleFoundRef.current, { y: "100%" });
+    }
+  }, [vehicleFound]);
+
+  useGSAP(() => {
+    if (confirmRidePanel) {
+      gsap.to(confirmRidePanelRef.current, { y: "0%", delay: 0.3 });
+    } else {
+      gsap.to(confirmRidePanelRef.current, { y: "100%" });
+    }
+  }, [confirmRidePanel]);
+
+  useGSAP(() => {
+    if (panelOpen) {
+      gsap.to(titleRef.current, { display: "none", duration: 0.3 });
+      gsap.to(panelRef.current, {
+        height: "68%",
+        display: "flex",
+        duration: 0.5,
+        delay: 0.2,
+        opacity: 1,
+      });
+      gsap.to(arrowRef.current, {
+        display: "block",
+        duration: 0.5,
+        delay: 0.5,
+      });
+    } else {
+      gsap.to(arrowRef.current, { display: "none", duration: 0.3 });
+      gsap.to(panelRef.current, {
+        height: "0%",
+        display: "none",
+        duration: 0.5,
+        delay: 0.2,
+        opacity: 0,
+      });
+      gsap.to(titleRef.current, {
+        display: "block",
+        duration: 0.5,
+        delay: 0.3,
+      });
+    }
+  }, [panelOpen]);
 
   useEffect(() => {
     if (!user?._id || !navigator.geolocation) return;
@@ -619,6 +666,7 @@ function Home() {
           <div className="flex gap-3 overflow-x-auto pb-1">
             {liveOffers.map((offer, index) => {
               const captain = offer?.captain || {};
+              const captainId = captain?._id || offer?.captain;
               const captainName = `${
                 captain?.fullname?.firstname || "Conductor"
               } ${captain?.fullname?.lastname || ""}`.trim();
@@ -635,7 +683,7 @@ function Home() {
               return (
                 <div
                   key={offer?._id || `${captain?._id || "captain"}-${index}`}
-                  className="min-w-[290px] max-w-[290px] rounded-3xl bg-white/95 backdrop-blur shadow-2xl border border-gray-200 p-4"
+                  className="min-w-[310px] max-w-[310px] rounded-3xl bg-white/95 backdrop-blur shadow-2xl border border-gray-200 p-4"
                 >
                   <div className="flex items-start gap-3">
                     {photo ? (
@@ -676,10 +724,31 @@ function Home() {
                   </div>
 
                   {!!offer?.message && (
-                    <p className="text-sm text-gray-700 mt-3 line-clamp-2">
+                    <p className="text-sm text-gray-700 mt-3">
                       {offer.message}
                     </p>
                   )}
+
+                  <div className="grid grid-cols-2 gap-2 mt-4">
+                    <button
+                      type="button"
+                      onClick={() => rejectOffer(captainId)}
+                      className="w-full rounded-2xl border border-gray-300 bg-white py-2.5 text-sm font-semibold text-gray-700"
+                    >
+                      Rechazar
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => acceptOffer(captainId)}
+                      className="w-full rounded-2xl py-2.5 text-sm font-semibold text-white"
+                      style={{
+                        background: "linear-gradient(to right, #1d976c, #93f9b9)",
+                      }}
+                    >
+                      Aceptar
+                    </button>
+                  </div>
                 </div>
               );
             })}

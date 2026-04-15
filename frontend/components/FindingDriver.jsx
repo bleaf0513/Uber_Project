@@ -211,10 +211,10 @@ const FindingDriver = (props) => {
 
           <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 mt-2">
             <p className="text-sm font-semibold text-gray-800">
-              Esperando ofertas
+              Esperando tu decisión
             </p>
             <p className="text-xs text-gray-600 mt-1">
-              Las ofertas activas aparecerán flotando arriba del mapa durante 10 segundos.
+              Las ofertas activas aparecen arriba del mapa. Puedes aceptarlas o rechazarlas desde allí.
             </p>
           </div>
         </div>
