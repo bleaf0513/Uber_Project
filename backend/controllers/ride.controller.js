@@ -194,6 +194,15 @@ module.exports.createRide = async (req, res) => {
             });
         }
 
+        console.log(
+            "[createRide] captainsInRadius:",
+            (captainsInRadius || []).map((captain) => ({
+                captainId: String(captain?._id || ""),
+                socketId: captain?.socketId || null,
+                status: captain?.status || null,
+            }))
+        );
+
         let emittedCount = 0;
 
         for (const captain of captainsInRadius || []) {
@@ -203,6 +212,12 @@ module.exports.createRide = async (req, res) => {
             const sent = sendMessageToSocketId(socketId, {
                 event: "new-ride",
                 data: rideWithUser,
+            });
+
+            console.log("[createRide] notify captain:", {
+                captainId: String(captain?._id || ""),
+                socketId,
+                sent,
             });
 
             if (sent) emittedCount += 1;
@@ -218,14 +233,21 @@ module.exports.createRide = async (req, res) => {
             });
         }
 
+        // No bloquear la creación del ride solo porque la notificación realtime falló
         if ((captainsInRadius || []).length > 0 && emittedCount === 0) {
-            return res.status(503).json({
-                message: "Se encontraron conductores, pero no fue posible notificarles.",
+            return res.status(201).json({
+                ...rideWithUser.toObject(),
+                warning:
+                    "Se encontraron conductores, pero no fue posible notificarlos en tiempo real.",
                 code: "CAPTAINS_FOUND_BUT_NOT_NOTIFIED",
+                emittedCount,
             });
         }
 
-        return res.status(201).json(rideWithUser);
+        return res.status(201).json({
+            ...rideWithUser.toObject(),
+            emittedCount,
+        });
     } catch (err) {
         const status =
             typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
@@ -688,14 +710,18 @@ module.exports.confirmRide = async (req, res) => {
             captain: req.captain,
         });
 
+        let notified = false;
         if (ride?.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, {
+            notified = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-confirmed",
                 data: ride,
             });
         }
 
-        return res.status(200).json(ride);
+        return res.status(200).json({
+            ...ride.toObject(),
+            userNotified: notified,
+        });
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
@@ -741,8 +767,9 @@ module.exports.arrived = async (req, res) => {
             });
         }
 
+        let notified = false;
         if (updatedRide.user?.socketId) {
-            sendMessageToSocketId(updatedRide.user.socketId, {
+            notified = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "captain-arrived",
                 data: {
                     rideId: updatedRide._id,
@@ -753,7 +780,10 @@ module.exports.arrived = async (req, res) => {
         }
 
         return res.status(200).json({
-            message: "Llegada notificada correctamente.",
+            message: notified
+                ? "Llegada notificada correctamente."
+                : "Llegada registrada, pero no se pudo notificar al usuario en tiempo real.",
+            userNotified: notified,
             ride: updatedRide,
         });
     } catch (err) {
@@ -777,14 +807,18 @@ module.exports.endRide = async (req, res) => {
             captain: req.captain,
         });
 
+        let notified = false;
         if (ride?.user?.socketId) {
-            sendMessageToSocketId(ride.user.socketId, {
+            notified = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-ended",
                 data: ride,
             });
         }
 
-        return res.status(200).json(ride);
+        return res.status(200).json({
+            ...ride.toObject(),
+            userNotified: notified,
+        });
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
@@ -858,8 +892,9 @@ module.exports.cancelByCaptain = async (req, res) => {
             });
         }
 
+        let notified = false;
         if (updatedRide.user?.socketId) {
-            sendMessageToSocketId(updatedRide.user.socketId, {
+            notified = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "ride-cancelled-by-captain",
                 data: {
                     rideId: updatedRide._id,
@@ -871,7 +906,10 @@ module.exports.cancelByCaptain = async (req, res) => {
         }
 
         return res.status(200).json({
-            message: "Solicitud cancelada correctamente por el conductor.",
+            message: notified
+                ? "Solicitud cancelada correctamente por el conductor."
+                : "Solicitud cancelada, pero no se pudo notificar al usuario en tiempo real.",
+            userNotified: notified,
             ride: updatedRide,
         });
     } catch (err) {

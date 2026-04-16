@@ -8,17 +8,16 @@ function buildSocketOptions() {
   const base = {
     path: "/socket.io/",
     withCredentials: false,
+    reconnection: true,
+    reconnectionAttempts: Infinity,
     reconnectionDelay: 2000,
     reconnectionDelayMax: 12000,
-    reconnectionAttempts: Infinity,
-    // Handshake can exceed 25s while a Render dyno cold-starts.
+    randomizationFactor: 0.5,
     timeout: import.meta.env.PROD ? 60000 : 25000,
     autoConnect: true,
+    forceNew: false,
   };
 
-  // Prefer WebSocket in production: repeated long-polling GET/POST with sid often hits Render 502s
-  // (proxy drops long-held polls; error pages have no CORS → "blocked by CORS policy").
-  // Socket.IO falls back to polling automatically if the upgrade fails (e.g. restrictive networks).
   if (import.meta.env.PROD) {
     return {
       ...base,
@@ -27,6 +26,7 @@ function buildSocketOptions() {
       rememberUpgrade: true,
     };
   }
+
   return {
     ...base,
     transports: ["polling", "websocket"],
@@ -37,10 +37,11 @@ function buildSocketOptions() {
 
 const socket = io(getSocketBaseUrl(), buildSocketOptions());
 
-/** Render free tier: HTTP GET wakes the dyno so Socket.IO is less likely to time out during cold start. */
 function wakeBackendRoot(baseUrl) {
   if (!baseUrl || import.meta.env.DEV) return;
+
   const root = String(baseUrl).replace(/\/+$/, "");
+
   fetch(`${root}/`, {
     method: "GET",
     mode: "cors",
@@ -51,62 +52,145 @@ function wakeBackendRoot(baseUrl) {
 
 const SocketProvider = ({ children }) => {
   useEffect(() => {
+    const url = getSocketBaseUrl();
+
     if (import.meta.env.PROD) {
-      const url = getSocketBaseUrl();
       wakeBackendRoot(url);
       window.setTimeout(() => wakeBackendRoot(url), 3000);
       window.setTimeout(() => wakeBackendRoot(url), 10000);
     }
 
-    // Cold start (Render): nudge reconnect after wake requests start the dyno.
+    const safeReconnect = (label) => {
+      try {
+        if (socket.connected) return;
+
+        console.log(`[socket-context] ${label}: forcing reconnect`, {
+          url,
+          connected: socket.connected,
+          id: socket.id || null,
+        });
+
+        socket.connect();
+      } catch (error) {
+        console.error(`[socket-context] ${label}: reconnect error`, error);
+      }
+    };
+
     const nudge = window.setTimeout(() => {
-      if (!socket.connected) {
-        socket.connect();
-      }
+      safeReconnect("nudge-1");
     }, 1500);
+
     const nudge2 = window.setTimeout(() => {
-      if (!socket.connected) {
-        socket.connect();
-      }
+      safeReconnect("nudge-2");
     }, 8000);
+
+    const nudge3 = window.setTimeout(() => {
+      safeReconnect("nudge-3");
+    }, 15000);
 
     let warned = false;
     let warnTimer = null;
-    // Free Render cold starts often exceed 12s; warn only after a longer grace period.
     const warnAfterMs = import.meta.env.PROD ? 55000 : 12000;
-    const onConnectError = () => {
-      if (warned || socket.connected) return;
-      // Do not reset on every reconnect attempt — otherwise the warning never fires.
-      if (warnTimer != null) return;
-      warnTimer = window.setTimeout(() => {
-        warnTimer = null;
-        if (socket.connected || warned) return;
-        warned = true;
-        const url = getSocketBaseUrl();
-        console.warn(
-          `[socket] Still not connected to ${url} after ${warnAfterMs / 1000}s. ` +
-            `Render free: cold start can take 60s — wait or open ${url} in a tab to wake the API. ` +
-            `Confirm VITE_BASE_URL on the frontend matches this host. Local API: cd backend && npm run dev.`
-        );
-      }, warnAfterMs);
-    };
 
     const onConnect = () => {
+      console.log("[socket-context] connected", {
+        id: socket.id,
+        url,
+        transport: socket.io.engine?.transport?.name || "unknown",
+      });
+
       if (warnTimer != null) {
         window.clearTimeout(warnTimer);
         warnTimer = null;
       }
+
       warned = false;
     };
 
-    socket.on("connect_error", onConnectError);
+    const onDisconnect = (reason) => {
+      console.warn("[socket-context] disconnected", {
+        reason,
+        id: socket.id || null,
+      });
+    };
+
+    const onConnectError = (error) => {
+      console.warn("[socket-context] connect_error", {
+        message: error?.message || "unknown",
+        url,
+      });
+
+      if (warned || socket.connected) return;
+      if (warnTimer != null) return;
+
+      warnTimer = window.setTimeout(() => {
+        warnTimer = null;
+
+        if (socket.connected || warned) return;
+
+        warned = true;
+        console.warn(
+          `[socket] Still not connected to ${url} after ${
+            warnAfterMs / 1000
+          }s. Render cold start may still be waking up.`
+        );
+      }, warnAfterMs);
+    };
+
+    const onReconnect = (attempt) => {
+      console.log("[socket-context] reconnect", {
+        attempt,
+        id: socket.id,
+      });
+    };
+
+    const onReconnectAttempt = (attempt) => {
+      console.log("[socket-context] reconnect_attempt", {
+        attempt,
+        connected: socket.connected,
+      });
+    };
+
+    const onReconnectError = (error) => {
+      console.warn("[socket-context] reconnect_error", {
+        message: error?.message || "unknown",
+      });
+    };
+
+    const onReconnectFailed = () => {
+      console.error("[socket-context] reconnect_failed");
+    };
+
     socket.on("connect", onConnect);
+    socket.on("disconnect", onDisconnect);
+    socket.on("connect_error", onConnectError);
+
+    socket.io.on("reconnect", onReconnect);
+    socket.io.on("reconnect_attempt", onReconnectAttempt);
+    socket.io.on("reconnect_error", onReconnectError);
+    socket.io.on("reconnect_failed", onReconnectFailed);
+
+    if (!socket.connected) {
+      safeReconnect("initial");
+    }
+
     return () => {
       window.clearTimeout(nudge);
       window.clearTimeout(nudge2);
-      if (warnTimer != null) window.clearTimeout(warnTimer);
-      socket.off("connect_error", onConnectError);
+      window.clearTimeout(nudge3);
+
+      if (warnTimer != null) {
+        window.clearTimeout(warnTimer);
+      }
+
       socket.off("connect", onConnect);
+      socket.off("disconnect", onDisconnect);
+      socket.off("connect_error", onConnectError);
+
+      socket.io.off("reconnect", onReconnect);
+      socket.io.off("reconnect_attempt", onReconnectAttempt);
+      socket.io.off("reconnect_error", onReconnectError);
+      socket.io.off("reconnect_failed", onReconnectFailed);
     };
   }, []);
 
