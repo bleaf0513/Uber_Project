@@ -77,10 +77,49 @@ function Home() {
     return () => clearInterval(timer);
   }, []);
 
+  // FIX CLAVE: volver a hacer join cada vez que conecte o reconecte el socket
   useEffect(() => {
-    if (!user?._id) return;
-    socket.emit("join", { userType: "user", userId: user._id });
-  }, [user?._id, socket]);
+    if (!socket || !user?._id) return;
+
+    const emitJoin = () => {
+      try {
+        socket.emit("join", {
+          userType: "user",
+          userId: user._id,
+        });
+      } catch (error) {
+        console.error("Error enviando join del usuario:", error);
+      }
+    };
+
+    const onConnect = () => {
+      console.log("[user socket] connected:", socket.id);
+      emitJoin();
+    };
+
+    const onReconnect = () => {
+      console.log("[user socket] reconnected:", socket.id);
+      emitJoin();
+    };
+
+    const onSocketJoined = (payload) => {
+      console.log("[user socket] socket-joined:", payload);
+    };
+
+    if (socket.connected) {
+      emitJoin();
+    }
+
+    socket.on("connect", onConnect);
+    socket.io?.on?.("reconnect", onReconnect);
+    socket.on("socket-joined", onSocketJoined);
+
+    return () => {
+      socket.off("connect", onConnect);
+      socket.io?.off?.("reconnect", onReconnect);
+      socket.off("socket-joined", onSocketJoined);
+    };
+  }, [socket, user?._id]);
 
   useEffect(() => {
     const onRideStarted = (rideData) => {
@@ -151,6 +190,7 @@ function Home() {
     };
 
     const onCaptainArrived = (payload) => {
+      console.log("[user socket] captain-arrived:", payload);
       setCaptainArrived(true);
 
       if (payload?.ride) {
@@ -161,6 +201,7 @@ function Home() {
     };
 
     const onRideCancelledByCaptain = (payload) => {
+      console.log("[user socket] ride-cancelled-by-captain:", payload);
       setCaptainArrived(false);
       setRide(null);
       setDriverSelected(false);
@@ -487,7 +528,7 @@ function Home() {
         ...offer,
         remainingMs: Math.max(0, getOfferExpiresAtMs(offer) - offerNow),
       }))
-      .sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
+      .sort((a, b) => Number(a?.price || 0) - Number(a?.price || 0));
   }, [ride, offerNow]);
 
   const getCaptainPhoto = (captain) =>

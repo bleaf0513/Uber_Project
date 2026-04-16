@@ -73,7 +73,6 @@ function isValidLongitude(lng) {
 }
 
 function isColombiaCoordinate(lat, lng) {
-    // Rango amplio y seguro para Colombia
     return lat >= -4.5 && lat <= 16.5 && lng >= -81.9 && lng <= -66.0;
 }
 
@@ -104,6 +103,25 @@ async function clearUserSocketIfMatches(userId, socketId) {
     await userModel.findOneAndUpdate(
         { _id: userId, socketId },
         { $set: { socketId: null } }
+    );
+}
+
+async function setUserSocket(userId, socketId) {
+    return userModel.findByIdAndUpdate(
+        userId,
+        { socketId },
+        { new: true }
+    );
+}
+
+async function setCaptainSocket(userId, socketId) {
+    return captainModel.findByIdAndUpdate(
+        userId,
+        {
+            socketId,
+            'onlineSession.lastSeenAt': new Date(),
+        },
+        { new: true }
     );
 }
 
@@ -144,11 +162,7 @@ function initializeSocket(server) {
                 socket.data.userType = String(userType);
 
                 if (userType === 'user') {
-                    const updatedUser = await userModel.findByIdAndUpdate(
-                        userId,
-                        { socketId: socket.id },
-                        { new: true }
-                    );
+                    const updatedUser = await setUserSocket(userId, socket.id);
 
                     if (!updatedUser) {
                         console.warn('[socket] join user not found:', userId);
@@ -163,14 +177,7 @@ function initializeSocket(server) {
                         userId: String(userId),
                     });
                 } else if (userType === 'captain') {
-                    const updatedCaptain = await captainModel.findByIdAndUpdate(
-                        userId,
-                        {
-                            socketId: socket.id,
-                            'onlineSession.lastSeenAt': new Date(),
-                        },
-                        { new: true }
-                    );
+                    const updatedCaptain = await setCaptainSocket(userId, socket.id);
 
                     if (!updatedCaptain) {
                         console.warn('[socket] join captain not found:', userId);
@@ -298,6 +305,16 @@ function initializeSocket(server) {
     });
 }
 
+function getSocketById(socketId) {
+    if (!io || !socketId) return null;
+
+    try {
+        return io.sockets.sockets.get(String(socketId)) || null;
+    } catch {
+        return null;
+    }
+}
+
 const sendMessageToSocketId = (socketId, messageObject) => {
     if (!socketId) {
         console.warn('[socket] sendMessageToSocketId skipped: empty socketId');
@@ -314,12 +331,22 @@ const sendMessageToSocketId = (socketId, messageObject) => {
         return false;
     }
 
+    const targetSocket = getSocketById(socketId);
+
+    if (!targetSocket) {
+        console.warn('[socket] sendMessageToSocketId skipped: socket not connected', {
+            socketId,
+            event: messageObject.event,
+        });
+        return false;
+    }
+
     console.log('[socket] emitting event:', {
         socketId,
         event: messageObject.event,
     });
 
-    io.to(socketId).emit(messageObject.event, messageObject.data);
+    targetSocket.emit(messageObject.event, messageObject.data);
     return true;
 };
 
