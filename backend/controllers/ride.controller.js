@@ -78,6 +78,11 @@ function ridePayloadWithActiveOffers(rideDoc) {
     };
 }
 
+function normalizeOffer(offer) {
+    if (!offer) return offer;
+    return typeof offer.toObject === "function" ? offer.toObject() : { ...offer };
+}
+
 module.exports.createRide = async (req, res) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
@@ -95,9 +100,15 @@ module.exports.createRide = async (req, res) => {
             offeredFare,
         });
 
-        ride.status = "pending";
-        ride.negotiationStatus = "open";
-        await ride.save();
+        await rideModel.updateOne(
+            { _id: ride._id },
+            {
+                $set: {
+                    status: "pending",
+                    negotiationStatus: "open",
+                },
+            }
+        );
 
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
 
@@ -214,7 +225,7 @@ module.exports.createRide = async (req, res) => {
             });
         }
 
-        return res.status(201).json(ride);
+        return res.status(201).json(rideWithUser);
     } catch (err) {
         const status =
             typeof mapsErrorStatus === "function" ? mapsErrorStatus(err) : null;
@@ -263,7 +274,7 @@ module.exports.captainOfferRide = async (req, res) => {
     const { rideId, price, message } = req.body;
 
     try {
-        const ride = await rideModel
+        let ride = await rideModel
             .findById(rideId)
             .populate("user", "fullname email socketId")
             .populate("captain", "fullname email socketId");
@@ -290,6 +301,15 @@ module.exports.captainOfferRide = async (req, res) => {
 
         await rideService.expirePendingOffers(ride);
 
+        ride = await rideModel
+            .findById(rideId)
+            .populate("user", "fullname email socketId")
+            .populate("captain", "fullname email socketId");
+
+        if (!ride) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
         const captainId = String(req.captain._id);
         const numericPrice = Number(price);
 
@@ -297,21 +317,25 @@ module.exports.captainOfferRide = async (req, res) => {
             return res.status(400).json({ message: "Precio inválido." });
         }
 
-        const existingOfferIndex = ride.driverOffers.findIndex(
+        const currentOffers = (ride.driverOffers || []).map(normalizeOffer);
+        const existingOfferIndex = currentOffers.findIndex(
             (offer) => String(offer.captain) === captainId
         );
 
         const newExpiry = new Date(Date.now() + rideService.OFFER_TTL_MS);
 
         if (existingOfferIndex >= 0) {
-            ride.driverOffers[existingOfferIndex].price = numericPrice;
-            ride.driverOffers[existingOfferIndex].message = message || "";
-            ride.driverOffers[existingOfferIndex].status = "pending";
-            ride.driverOffers[existingOfferIndex].createdAt = new Date();
-            ride.driverOffers[existingOfferIndex].expiresAt = newExpiry;
-            ride.driverOffers[existingOfferIndex].respondedAt = null;
+            currentOffers[existingOfferIndex] = {
+                ...currentOffers[existingOfferIndex],
+                price: numericPrice,
+                message: message || "",
+                status: "pending",
+                createdAt: new Date(),
+                expiresAt: newExpiry,
+                respondedAt: null,
+            };
         } else {
-            ride.driverOffers.push({
+            currentOffers.push({
                 captain: req.captain._id,
                 price: numericPrice,
                 message: message || "",
@@ -322,18 +346,35 @@ module.exports.captainOfferRide = async (req, res) => {
             });
         }
 
-        ride.status = "negotiating";
-        await ride.save();
+        const updateResult = await rideModel.updateOne(
+            {
+                _id: rideId,
+                negotiationStatus: "open",
+                status: { $nin: ["cancelled", "completed", "ongoing"] },
+            },
+            {
+                $set: {
+                    driverOffers: currentOffers,
+                    status: "negotiating",
+                },
+            }
+        );
 
-        const updatedRide = await rideModel
-            .findById(ride._id)
+        if (!updateResult.matchedCount) {
+            return res.status(409).json({
+                message: "El viaje cambió de estado. Intenta de nuevo.",
+            });
+        }
+
+        let refreshedRide = await rideModel
+            .findById(rideId)
             .populate("user", "fullname email socketId")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
 
-        await rideService.expirePendingOffers(updatedRide);
+        await rideService.expirePendingOffers(refreshedRide);
 
-        const refreshedRide = await rideModel
-            .findById(ride._id)
+        refreshedRide = await rideModel
+            .findById(rideId)
             .populate("user", "fullname email socketId")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
 
@@ -361,7 +402,7 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
     const { rideId, captainId, action } = req.body;
 
     try {
-        const ride = await rideModel
+        let ride = await rideModel
             .findById(rideId)
             .populate("user", "fullname email socketId")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
@@ -378,7 +419,18 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
         await rideService.expirePendingOffers(ride);
 
-        const offerIndex = ride.driverOffers.findIndex(
+        ride = await rideModel
+            .findById(rideId)
+            .populate("user", "fullname email socketId")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        if (!ride) {
+            return res.status(404).json({ message: "Ride not found." });
+        }
+
+        const currentOffers = (ride.driverOffers || []).map(normalizeOffer);
+
+        const offerIndex = currentOffers.findIndex(
             (offer) =>
                 String(offer.captain?._id || offer.captain) === String(captainId)
         );
@@ -387,7 +439,7 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
             return res.status(404).json({ message: "Oferta del conductor no encontrada." });
         }
 
-        const selectedOffer = ride.driverOffers[offerIndex];
+        const selectedOffer = currentOffers[offerIndex];
 
         if (
             selectedOffer.status !== "pending" ||
@@ -399,12 +451,25 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
         }
 
         if (action === "rejected") {
-            selectedOffer.status = "rejected";
-            selectedOffer.respondedAt = new Date();
-            await ride.save();
+            currentOffers[offerIndex] = {
+                ...selectedOffer,
+                status: "rejected",
+                respondedAt: new Date(),
+            };
+
+            const rejectResult = await rideModel.updateOne(
+                { _id: rideId, user: req.user._id },
+                { $set: { driverOffers: currentOffers } }
+            );
+
+            if (!rejectResult.matchedCount) {
+                return res.status(409).json({
+                    message: "El viaje cambió mientras respondías la oferta.",
+                });
+            }
 
             const populatedRide = await rideModel
-                .findById(ride._id)
+                .findById(rideId)
                 .populate("user", "fullname email socketId")
                 .populate("driverOffers.captain", "fullname email vehicle socketId");
 
@@ -432,34 +497,50 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
             });
         }
 
-        ride.selectedOfferCaptain = captainId;
-        ride.captain = captainId;
-        ride.fare = Number(selectedOffer.price);
-        ride.negotiationStatus = "closed";
-        ride.status = "accepted";
-        ride.arrivedAtPickup = false;
-
-        ride.driverOffers = ride.driverOffers.map((offer) => {
-            const current =
-                typeof offer.toObject === "function" ? offer.toObject() : offer;
+        const updatedOffers = currentOffers.map((offer) => {
             const isTarget =
-                String(current.captain?._id || current.captain) === String(captainId);
+                String(offer.captain?._id || offer.captain) === String(captainId);
 
             return {
-                ...current,
+                ...offer,
                 status: isTarget
                     ? "accepted"
-                    : current.status === "pending"
+                    : offer.status === "pending"
                     ? "rejected"
-                    : current.status,
+                    : offer.status,
                 respondedAt: new Date(),
             };
         });
 
-        await ride.save();
+        const acceptResult = await rideModel.updateOne(
+            {
+                _id: rideId,
+                user: req.user._id,
+                negotiationStatus: "open",
+                status: { $in: ["pending", "negotiating"] },
+            },
+            {
+                $set: {
+                    selectedOfferCaptain: captainId,
+                    captain: captainId,
+                    fare: Number(selectedOffer.price),
+                    negotiationStatus: "closed",
+                    status: "accepted",
+                    arrivedAtPickup: false,
+                    arrivedAtPickupAt: null,
+                    driverOffers: updatedOffers,
+                },
+            }
+        );
+
+        if (!acceptResult.matchedCount) {
+            return res.status(409).json({
+                message: "La negociación cambió antes de aceptar la oferta.",
+            });
+        }
 
         const populatedRide = await rideModel
-            .findById(ride._id)
+            .findById(rideId)
             .populate("user")
             .populate("captain")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
@@ -503,7 +584,7 @@ module.exports.getMyActiveRide = async (req, res) => {
             .findOne({
                 user: req.user._id,
                 status: {
-                    $in: ["pending", "negotiating", "accepted", "ongoing"],
+                    $in: ["pending", "negotiating", "accepted", "arrived", "ongoing"],
                 },
             })
             .sort({ createdAt: -1 })
@@ -607,10 +688,12 @@ module.exports.confirmRide = async (req, res) => {
             captain: req.captain,
         });
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: "ride-confirmed",
-            data: ride,
-        });
+        if (ride?.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, {
+                event: "ride-confirmed",
+                data: ride,
+            });
+        }
 
         return res.status(200).json(ride);
     } catch (err) {
@@ -629,40 +712,49 @@ module.exports.arrived = async (req, res) => {
     const { rideId } = req.body;
 
     try {
-        const ride = await rideModel
-            .findOne({
-                _id: rideId,
-                captain: req.captain._id,
-            })
+        const updatedRide = await rideModel
+            .findOneAndUpdate(
+                {
+                    _id: rideId,
+                    captain: req.captain._id,
+                    status: { $in: ["accepted", "ongoing"] },
+                    cancelledAt: null,
+                },
+                {
+                    $set: {
+                        arrivedAtPickup: true,
+                        arrivedAtPickupAt: new Date(),
+                        status: "arrived",
+                    },
+                },
+                {
+                    new: true,
+                }
+            )
             .populate("user")
             .populate("captain");
 
-        if (!ride) {
-            return res.status(404).json({ message: "Ride not found." });
-        }
-
-        if (!["accepted", "ongoing"].includes(ride.status)) {
-            return res.status(400).json({
-                message: "Este servicio no está listo para marcar llegada.",
+        if (!updatedRide) {
+            return res.status(404).json({
+                message:
+                    "Ride not found o el servicio ya no está disponible para marcar llegada.",
             });
         }
 
-        ride.arrivedAtPickup = true;
-        ride.arrivedAtPickupAt = new Date();
-        await ride.save();
-
-        sendMessageToSocketId(ride.user.socketId, {
-            event: "captain-arrived",
-            data: {
-                rideId: ride._id,
-                message: "Tu conductor ya llegó al punto de recogida.",
-                ride,
-            },
-        });
+        if (updatedRide.user?.socketId) {
+            sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "captain-arrived",
+                data: {
+                    rideId: updatedRide._id,
+                    message: "Tu conductor ya llegó al punto de recogida.",
+                    ride: updatedRide,
+                },
+            });
+        }
 
         return res.status(200).json({
             message: "Llegada notificada correctamente.",
-            ride,
+            ride: updatedRide,
         });
     } catch (err) {
         return res.status(500).json({
@@ -685,10 +777,12 @@ module.exports.endRide = async (req, res) => {
             captain: req.captain,
         });
 
-        sendMessageToSocketId(ride.user.socketId, {
-            event: "ride-ended",
-            data: ride,
-        });
+        if (ride?.user?.socketId) {
+            sendMessageToSocketId(ride.user.socketId, {
+                event: "ride-ended",
+                data: ride,
+            });
+        }
 
         return res.status(200).json(ride);
     } catch (err) {
@@ -732,46 +826,53 @@ module.exports.cancelByCaptain = async (req, res) => {
     const { rideId, reason, notes } = req.body;
 
     try {
-        const ride = await rideModel
-            .findOne({
-                _id: rideId,
-                captain: req.captain._id,
-            })
+        const updatedRide = await rideModel
+            .findOneAndUpdate(
+                {
+                    _id: rideId,
+                    captain: req.captain._id,
+                    status: { $in: ["accepted", "ongoing", "arrived"] },
+                    cancelledAt: null,
+                },
+                {
+                    $set: {
+                        status: "cancelled",
+                        negotiationStatus: "closed",
+                        cancelledBy: "captain",
+                        cancelReason: reason || "Sin motivo",
+                        cancelNotes: notes || "",
+                        cancelledAt: new Date(),
+                    },
+                },
+                {
+                    new: true,
+                }
+            )
             .populate("user")
             .populate("captain");
 
-        if (!ride) {
-            return res.status(404).json({ message: "Ride not found." });
-        }
-
-        if (!["accepted", "ongoing"].includes(ride.status)) {
-            return res.status(400).json({
-                message: "Este servicio no se puede cancelar en el estado actual.",
+        if (!updatedRide) {
+            return res.status(404).json({
+                message:
+                    "Ride not found o el servicio ya no se puede cancelar en el estado actual.",
             });
         }
 
-        ride.status = "cancelled";
-        ride.negotiationStatus = "closed";
-        ride.cancelledBy = "captain";
-        ride.cancelReason = reason || "Sin motivo";
-        ride.cancelNotes = notes || "";
-        ride.cancelledAt = new Date();
-
-        await ride.save();
-
-        sendMessageToSocketId(ride.user.socketId, {
-            event: "ride-cancelled-by-captain",
-            data: {
-                rideId: ride._id,
-                reason: ride.cancelReason,
-                notes: ride.cancelNotes,
-                message: "El conductor canceló la solicitud.",
-            },
-        });
+        if (updatedRide.user?.socketId) {
+            sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "ride-cancelled-by-captain",
+                data: {
+                    rideId: updatedRide._id,
+                    reason: updatedRide.cancelReason,
+                    notes: updatedRide.cancelNotes,
+                    message: "El conductor canceló la solicitud.",
+                },
+            });
+        }
 
         return res.status(200).json({
             message: "Solicitud cancelada correctamente por el conductor.",
-            ride,
+            ride: updatedRide,
         });
     } catch (err) {
         return res.status(500).json({

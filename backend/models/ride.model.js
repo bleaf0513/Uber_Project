@@ -61,10 +61,11 @@ const rideSchema = new mongoose.Schema(
                 "pending",
                 "negotiating",
                 "accepted",
-                "rejected",
+                "arrived",
                 "ongoing",
                 "completed",
                 "cancelled",
+                "rejected",
             ],
             default: "pending",
             index: true,
@@ -121,7 +122,6 @@ const rideSchema = new mongoose.Schema(
             default: null,
         },
 
-        // Se deja opcional solo por compatibilidad con partes antiguas.
         otp: {
             type: String,
             select: false,
@@ -144,7 +144,6 @@ const rideSchema = new mongoose.Schema(
             index: true,
         },
 
-        // NUEVO: llegada al punto de recogida
         arrivedAtPickup: {
             type: Boolean,
             default: false,
@@ -154,7 +153,6 @@ const rideSchema = new mongoose.Schema(
             default: null,
         },
 
-        // NUEVO: cancelación auditada
         cancelledBy: {
             type: String,
             enum: ["user", "captain", null],
