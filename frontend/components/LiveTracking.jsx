@@ -179,33 +179,46 @@ const LiveTracking = ({
 
     const handlePositionUpdate = (position) => {
       const { latitude, longitude } = position.coords;
+
       setCurrentPosition({
         lat: latitude,
         lng: longitude,
       });
+
       setIsLoading(false);
       setError(null);
     };
 
     const handleGeoError = (err) => {
-      setError(err?.message || "No se pudo obtener la ubicación.");
+      const code = err?.code;
+      let customMessage = "No se pudo obtener la ubicación.";
+
+      if (code === 1) {
+        customMessage = "Permiso de ubicación denegado.";
+      } else if (code === 2) {
+        customMessage = "Ubicación no disponible.";
+      } else if (code === 3) {
+        customMessage = "La ubicación tardó demasiado en responder.";
+      }
+
+      setError(`${customMessage} (${err?.message || "sin detalle"})`);
       setIsLoading(false);
       console.error("Geolocation error:", err);
     };
 
     navigator.geolocation.getCurrentPosition(handlePositionUpdate, handleGeoError, {
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 5000,
+      enableHighAccuracy: false,
+      timeout: 30000,
+      maximumAge: 0,
     });
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePositionUpdate,
       handleGeoError,
       {
-        enableHighAccuracy: true,
-        timeout: 15000,
-        maximumAge: 5000,
+        enableHighAccuracy: false,
+        timeout: 30000,
+        maximumAge: 0,
       }
     );
 
@@ -520,7 +533,7 @@ const LiveTracking = ({
   if (error && !currentPosition) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-100 text-sm text-gray-700 px-4 text-center">
-        Error: {error}. Activa los permisos de ubicación.
+        Error: {error}. Verifica que el GPS del celular esté activado y que la app tenga permisos de ubicación.
       </div>
     );
   }
