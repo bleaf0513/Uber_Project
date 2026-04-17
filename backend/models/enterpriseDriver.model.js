@@ -57,6 +57,17 @@ const enterpriseDriverSchema = new mongoose.Schema(
         type: Number,
         default: null,
       },
+      updatedAt: {
+        type: Date,
+        default: null,
+      },
+    },
+
+    activeShiftId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "EnterpriseDriverShift",
+      default: null,
+      index: true,
     },
   },
   {

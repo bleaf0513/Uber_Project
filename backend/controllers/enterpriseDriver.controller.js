@@ -1,5 +1,7 @@
 const jwt = require('jsonwebtoken');
 const EnterpriseDriver = require('../models/enterpriseDriver.model');
+const EnterpriseDriverShift = require('../models/enterpriseDriverShift.model');
+const EnterpriseDriverRoutePoint = require('../models/enterpriseDriverRoutePoint.model');
 
 function normalizeCedula(value) {
     return String(value || '')
@@ -7,6 +9,83 @@ function normalizeCedula(value) {
         .replace(/-/g, '')
         .replace(/\s+/g, '')
         .trim();
+}
+
+function haversineDistanceKm(a, b) {
+    const toRad = (deg) => (deg * Math.PI) / 180;
+    const R = 6371;
+
+    const dLat = toRad(Number(b.lat) - Number(a.lat));
+    const dLng = toRad(Number(b.lng) - Number(a.lng));
+    const lat1 = toRad(Number(a.lat));
+    const lat2 = toRad(Number(b.lat));
+
+    const aa =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.sin(dLng / 2) *
+            Math.sin(dLng / 2) *
+            Math.cos(lat1) *
+            Math.cos(lat2);
+
+    const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+    return R * c;
+}
+
+function isValidCoordinate(lat, lng) {
+    return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+}
+
+function shouldPersistNewPoint(previousPoint, nextPoint) {
+    if (!previousPoint) return true;
+
+    const distanceKm = haversineDistanceKm(previousPoint, nextPoint);
+    return distanceKm >= 0.03; // 30 metros aprox
+}
+
+async function getOrCreateActiveShift(driver) {
+    if (!driver?.enterprise || !driver?._id) return null;
+
+    let shift = null;
+
+    if (driver.activeShiftId) {
+        shift = await EnterpriseDriverShift.findOne({
+            _id: driver.activeShiftId,
+            driverId: driver._id,
+            status: 'Activa',
+        });
+    }
+
+    if (!shift) {
+        shift = await EnterpriseDriverShift.findOne({
+            enterprise: driver.enterprise,
+            driverId: driver._id,
+            status: 'Activa',
+        }).sort({ startedAt: -1 });
+    }
+
+    if (!shift) {
+        shift = await EnterpriseDriverShift.create({
+            enterprise: driver.enterprise,
+            driverId: driver._id,
+            driverName: driver.name || '',
+            status: 'Activa',
+            startedAt: new Date(),
+            startedLocation: {
+                lat: driver.currentLocation?.lat ?? null,
+                lng: driver.currentLocation?.lng ?? null,
+            },
+            totalPoints: 0,
+            totalDistanceKm: 0,
+        });
+    }
+
+    if (String(driver.activeShiftId || '') !== String(shift._id)) {
+        await EnterpriseDriver.findByIdAndUpdate(driver._id, {
+            activeShiftId: shift._id,
+        });
+    }
+
+    return shift;
 }
 
 module.exports.createDriver = async (req, res) => {
@@ -56,6 +135,7 @@ module.exports.createDriver = async (req, res) => {
                 lng: null,
                 updatedAt: null,
             },
+            activeShiftId: null,
             active: true,
         });
 
@@ -175,15 +255,63 @@ module.exports.updateDriverLocation = async (req, res) => {
             });
         }
 
-        if (
-            lat === undefined ||
-            lng === undefined ||
-            !Number.isFinite(Number(lat)) ||
-            !Number.isFinite(Number(lng))
-        ) {
+        if (!isValidCoordinate(lat, lng)) {
             return res.status(400).json({
                 success: false,
                 message: 'Latitud y longitud válidas son obligatorias.',
+            });
+        }
+
+        const driver = await EnterpriseDriver.findOne({
+            _id: id,
+            active: true,
+        });
+
+        if (!driver) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado.',
+            });
+        }
+
+        const numericLat = Number(lat);
+        const numericLng = Number(lng);
+        const now = new Date();
+
+        const shift = await getOrCreateActiveShift(driver);
+
+        const lastPoint = await EnterpriseDriverRoutePoint.findOne({
+            driverId: driver._id,
+            shiftId: shift._id,
+        }).sort({ recordedAt: -1 });
+
+        const nextPoint = { lat: numericLat, lng: numericLng };
+        let totalDistanceKm = Number(shift.totalDistanceKm || 0);
+        let totalPoints = Number(shift.totalPoints || 0);
+
+        if (shouldPersistNewPoint(lastPoint, nextPoint)) {
+            await EnterpriseDriverRoutePoint.create({
+                enterprise: driver.enterprise,
+                driverId: driver._id,
+                shiftId: shift._id,
+                lat: numericLat,
+                lng: numericLng,
+                recordedAt: now,
+                source: 'gps',
+            });
+
+            if (lastPoint) {
+                totalDistanceKm += haversineDistanceKm(
+                    { lat: lastPoint.lat, lng: lastPoint.lng },
+                    nextPoint
+                );
+            }
+
+            totalPoints += 1;
+
+            await EnterpriseDriverShift.findByIdAndUpdate(shift._id, {
+                totalPoints,
+                totalDistanceKm: Number(totalDistanceKm.toFixed(4)),
             });
         }
 
@@ -194,25 +322,24 @@ module.exports.updateDriverLocation = async (req, res) => {
             },
             {
                 currentLocation: {
-                    lat: Number(lat),
-                    lng: Number(lng),
-                    updatedAt: new Date(),
+                    lat: numericLat,
+                    lng: numericLng,
+                    updatedAt: now,
                 },
+                activeShiftId: shift._id,
             },
             { new: true }
         );
-
-        if (!updatedDriver) {
-            return res.status(404).json({
-                success: false,
-                message: 'Conductor no encontrado.',
-            });
-        }
 
         return res.status(200).json({
             success: true,
             message: 'Ubicación actualizada correctamente.',
             driver: updatedDriver,
+            shift: {
+                _id: shift._id,
+                totalPoints,
+                totalDistanceKm: Number(totalDistanceKm.toFixed(4)),
+            },
         });
     } catch (error) {
         console.error('Error en updateDriverLocation:', error);
@@ -251,23 +378,39 @@ module.exports.updateDriverStatus = async (req, res) => {
             });
         }
 
-        const updatedDriver = await EnterpriseDriver.findOneAndUpdate(
-            {
-                _id: id,
-                active: true,
-            },
-            {
-                status,
-            },
-            { new: true }
-        );
+        const updatePayload = { status };
+        const driver = await EnterpriseDriver.findOne({ _id: id, active: true });
 
-        if (!updatedDriver) {
+        if (!driver) {
             return res.status(404).json({
                 success: false,
                 message: 'Conductor no encontrado.',
             });
         }
+
+        if (status === 'Disponible' && driver.activeShiftId) {
+            const endedLocation = {
+                lat: driver.currentLocation?.lat ?? null,
+                lng: driver.currentLocation?.lng ?? null,
+            };
+
+            await EnterpriseDriverShift.findByIdAndUpdate(driver.activeShiftId, {
+                status: 'Finalizada',
+                endedAt: new Date(),
+                endedLocation,
+            });
+
+            updatePayload.activeShiftId = null;
+        }
+
+        const updatedDriver = await EnterpriseDriver.findOneAndUpdate(
+            {
+                _id: id,
+                active: true,
+            },
+            updatePayload,
+            { new: true }
+        );
 
         return res.status(200).json({
             success: true,
