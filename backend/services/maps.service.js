@@ -1,7 +1,7 @@
 const axios = require('axios');
 const captainModel = require('../models/captain.model');
 
-console.log('🇨🇴 MAPS SERVICE COLOMBIA DEFINITIVO ACTIVO 🇨🇴');
+console.log('🇨🇴 MAPS SERVICE COLOMBIA SIMPLE ACTIVO 🇨🇴');
 
 function normalizeAddressQuery(value) {
     if (value == null) return '';
@@ -212,21 +212,9 @@ function looksLikeStreetAddress(text) {
     );
 }
 
-function hasCityOrRegionContext(text) {
+function hasCountryContext(text) {
     const s = normalizeLooseText(text);
-    return (
-        s.includes('colombia') ||
-        s.includes('antioquia') ||
-        s.includes('medellin') ||
-        s.includes('itagui') ||
-        s.includes('envigado') ||
-        s.includes('sabaneta') ||
-        s.includes('bello') ||
-        s.includes('bogota') ||
-        s.includes('cali') ||
-        s.includes('barranquilla') ||
-        s.includes('cartagena')
-    );
+    return s.includes('colombia');
 }
 
 function expandColombianStreetFormats(input) {
@@ -234,12 +222,8 @@ function expandColombianStreetFormats(input) {
     if (!raw) return [];
 
     const set = new Set([raw]);
+    const t = raw.replace(/\s+/g, ' ').trim();
 
-    let t = raw;
-
-    t = t.replace(/\s+/g, ' ').trim();
-
-    // calle 37 a 61 18 -> calle 37A # 61-18
     let m = t.match(
         /^(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\s+(\d+)\s*([a-zA-Z])?\s+(\d+)\s+(\d+)\s*$/i
     );
@@ -253,10 +237,8 @@ function expandColombianStreetFormats(input) {
         set.add(`${via} ${n1}${letra} # ${n2}-${n3}`);
         set.add(`${via} ${n1}${letra} #${n2}-${n3}`);
         set.add(`${via} ${n1}${letra} ${n2} ${n3}`);
-        set.add(`${via} ${n1}${letra}, # ${n2}-${n3}`);
     }
 
-    // calle 37a # 61 18 -> calle 37A # 61-18
     m = t.match(
         /^(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\s+(\d+)\s*([a-zA-Z])?\s*#?\s*(\d+)\s*-?\s*(\d+)\s*$/i
     );
@@ -275,26 +257,46 @@ function expandColombianStreetFormats(input) {
     return [...set];
 }
 
-function buildAddressVariants(address) {
+function buildSuggestionVariants(address) {
     const clean = normalizeAddressQuery(address);
     if (!clean) return [];
 
-    const variants = new Set();
+    const set = new Set();
     const streetVariants = expandColombianStreetFormats(clean);
-    const hasContext = hasCityOrRegionContext(clean);
-    const streetLike = looksLikeStreetAddress(clean);
 
     for (const item of streetVariants) {
-        variants.add(item);
+        set.add(item);
     }
 
-    if (!hasContext) {
+    if (!hasCountryContext(clean)) {
         for (const item of streetVariants) {
-            variants.add(`${item}, Colombia`);
+            set.add(`${item}, Colombia`);
         }
     }
 
-    if (!hasContext && streetLike) {
+    return [...set].slice(0, 6);
+}
+
+function buildCoordinateVariants(address) {
+    const clean = normalizeAddressQuery(address);
+    if (!clean) return [];
+
+    const set = new Set();
+    const streetVariants = expandColombianStreetFormats(clean);
+    const streetLike = looksLikeStreetAddress(clean);
+    const normalized = normalizeLooseText(clean);
+
+    for (const item of streetVariants) {
+        set.add(item);
+    }
+
+    if (!hasCountryContext(clean)) {
+        for (const item of streetVariants) {
+            set.add(`${item}, Colombia`);
+        }
+    }
+
+    if (streetLike && !/medellin|itagui|envigado|sabaneta|bello|bogota|cali|barranquilla|cartagena/.test(normalized)) {
         const cities = [
             'Medellín, Antioquia, Colombia',
             'Itagüí, Antioquia, Colombia',
@@ -303,18 +305,16 @@ function buildAddressVariants(address) {
             'Bello, Antioquia, Colombia',
             'Bogotá, Colombia',
             'Cali, Colombia',
-            'Barranquilla, Colombia',
-            'Cartagena, Colombia',
         ];
 
         for (const item of streetVariants) {
             for (const city of cities) {
-                variants.add(`${item}, ${city}`);
+                set.add(`${item}, ${city}`);
             }
         }
     }
 
-    return [...variants].slice(0, 20);
+    return [...set].slice(0, 20);
 }
 
 function pushUniqueSuggestion(results, seen, item) {
@@ -441,7 +441,7 @@ module.exports.getAddressCoordinates = async (address) => {
     }
 
     const key = serverMapsKey();
-    const variants = buildAddressVariants(addrRaw);
+    const variants = buildCoordinateVariants(addrRaw);
     const rough = roughCoordsForColombia(addrRaw);
 
     if (!key) {
@@ -524,12 +524,12 @@ module.exports.getDistance = async (origin, destination) => {
 
 module.exports.getSuggestions = async (address) => {
     const addr = normalizeAddressQuery(address);
-    if (!addr || addr.length < 2) return [];
+    if (!addr || addr.length < 3) return [];
 
     const key = serverMapsKey();
     const results = [];
     const seen = new Set();
-    const variants = buildAddressVariants(addr);
+    const variants = buildSuggestionVariants(addr);
 
     if (key) {
         for (const variant of variants) {
@@ -543,7 +543,7 @@ module.exports.getSuggestions = async (address) => {
             }
         }
 
-        for (const variant of variants.slice(0, 10)) {
+        for (const variant of variants) {
             try {
                 const rows = await findPlaceSearch(variant);
                 for (const row of rows) {
@@ -554,7 +554,7 @@ module.exports.getSuggestions = async (address) => {
             }
         }
 
-        for (const variant of variants.slice(0, 10)) {
+        for (const variant of variants) {
             try {
                 const rows = await geocodeSearch(variant);
                 for (const row of rows) {
