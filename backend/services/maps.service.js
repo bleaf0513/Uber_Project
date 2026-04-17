@@ -1,7 +1,7 @@
 const axios = require('axios');
 const captainModel = require('../models/captain.model');
 
-console.log('🇨🇴 MAPS SERVICE COLOMBIA SIMPLE ACTIVO 🇨🇴');
+console.log('🇨🇴 MAPS SERVICE COLOMBIA MEJORADO ACTIVO 🇨🇴');
 
 function normalizeAddressQuery(value) {
     if (value == null) return '';
@@ -127,6 +127,10 @@ function approxDistanceElement(straightLineMeters) {
 function roughCoordsForColombia(address) {
     const s = normalizeLooseText(address);
 
+    if (/ditaires/.test(s) || (/itagui/.test(s) && /ditaires/.test(s))) {
+        return { ltd: 6.1687, lng: -75.6203 };
+    }
+
     if (/itagui/.test(s)) return { ltd: 6.1719, lng: -75.6114 };
     if (/sabaneta/.test(s)) return { ltd: 6.1515, lng: -75.6167 };
     if (/envigado/.test(s)) return { ltd: 6.1700, lng: -75.5917 };
@@ -163,12 +167,17 @@ function buildLocalSuggestion(description, placeId) {
     };
 }
 
-function localSuggestionsForColombia(address) {
-    const q = normalizeLooseText(address);
-    if (!q || q.length < 2) return [];
-
-    const catalog = [
+function getLocalCatalog() {
+    return [
+        // Antioquia / Valle de Aburrá
         'Itagüí, Antioquia, Colombia',
+        'Ditaires, Itagüí, Antioquia, Colombia',
+        'Centro de la Moda, Itagüí, Antioquia, Colombia',
+        'Santa María, Itagüí, Antioquia, Colombia',
+        'San Pío, Itagüí, Antioquia, Colombia',
+        'Suramérica, Itagüí, Antioquia, Colombia',
+        'Calatrava, Itagüí, Antioquia, Colombia',
+        'Samaria, Itagüí, Antioquia, Colombia',
         'Sabaneta, Antioquia, Colombia',
         'Envigado, Antioquia, Colombia',
         'Medellín, Antioquia, Colombia',
@@ -178,31 +187,107 @@ function localSuggestionsForColombia(address) {
         'Caldas, Antioquia, Colombia',
         'Girardota, Antioquia, Colombia',
         'Barbosa, Antioquia, Colombia',
-        'Bogotá, Colombia',
-        'Cali, Valle del Cauca, Colombia',
-        'Barranquilla, Atlántico, Colombia',
-        'Cartagena, Bolívar, Colombia',
+
+        // Medellín barrios/zonas
         'El Poblado, Medellín, Antioquia, Colombia',
         'Laureles, Medellín, Antioquia, Colombia',
         'Belén, Medellín, Antioquia, Colombia',
         'Centro, Medellín, Antioquia, Colombia',
         'San Javier, Medellín, Antioquia, Colombia',
         'Robledo, Medellín, Antioquia, Colombia',
+        'Castilla, Medellín, Antioquia, Colombia',
+        'Buenos Aires, Medellín, Antioquia, Colombia',
+        'Aranjuez, Medellín, Antioquia, Colombia',
+        'Manrique, Medellín, Antioquia, Colombia',
+
+        // Otras ciudades
+        'Bogotá, Colombia',
+        'Cali, Valle del Cauca, Colombia',
+        'Barranquilla, Atlántico, Colombia',
+        'Cartagena, Bolívar, Colombia',
     ];
+}
 
-    const starts = [];
-    const contains = [];
+function localSuggestionsForColombia(address) {
+    const q = normalizeLooseText(address);
+    if (!q || q.length < 2) return [];
 
-    for (const item of catalog) {
+    const catalog = getLocalCatalog();
+    const queryParts = q.split(' ').filter(Boolean);
+
+    const rows = catalog.map((item) => {
         const itemNorm = normalizeLooseText(item);
-        if (itemNorm.startsWith(q)) {
-            starts.push(buildLocalSuggestion(item, `local_${itemNorm.replace(/\s+/g, '_')}`));
-        } else if (itemNorm.includes(q)) {
-            contains.push(buildLocalSuggestion(item, `local_${itemNorm.replace(/\s+/g, '_')}`));
+
+        let score = 0;
+        if (itemNorm === q) score += 300;
+        if (itemNorm.startsWith(q)) score += 180;
+        if (itemNorm.includes(q)) score += 120;
+
+        let matched = 0;
+        for (const part of queryParts) {
+            if (itemNorm.includes(part)) {
+                matched += 1;
+                score += part.length >= 4 ? 20 : 8;
+            }
         }
+
+        if (queryParts.length) {
+            score += (matched / queryParts.length) * 100;
+        }
+
+        if (/ditaires/.test(itemNorm)) score += 25;
+        if (/itagui/.test(itemNorm) && /itagui/.test(q)) score += 25;
+
+        return {
+            item,
+            score,
+        };
+    });
+
+    const ranked = rows
+        .filter((r) => r.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8)
+        .map((r) =>
+            buildLocalSuggestion(
+                r.item,
+                `local_${normalizeLooseText(r.item).replace(/\s+/g, '_')}`
+            )
+        );
+
+    if (ranked.length > 0) {
+        return ranked;
     }
 
-    return [...starts, ...contains].slice(0, 8);
+    // fallback sintético útil para barrio + ciudad
+    if (q.includes('ditaires')) {
+        return [
+            buildLocalSuggestion(
+                'Ditaires, Itagüí, Antioquia, Colombia',
+                'local_ditaires_itagui_antioquia_colombia'
+            ),
+        ];
+    }
+
+    if (q.includes('itagui')) {
+        return [
+            buildLocalSuggestion(
+                'Itagüí, Antioquia, Colombia',
+                'local_itagui_antioquia_colombia'
+            ),
+        ];
+    }
+
+    if (q.includes('medellin')) {
+        return [
+            buildLocalSuggestion(
+                'Medellín, Antioquia, Colombia',
+                'local_medellin_antioquia_colombia'
+            ),
+        ];
+    }
+
+    return [];
 }
 
 function looksLikeStreetAddress(text) {
@@ -368,7 +453,7 @@ function rankSuggestions(rows, originalQuery) {
 
         if (row?.source === 'geocode') value += 20;
         if (row?.source === 'findplace') value += 15;
-        if (row?.source === 'local') value -= 40;
+        if (row?.source === 'local') value -= 20;
 
         return value;
     };
