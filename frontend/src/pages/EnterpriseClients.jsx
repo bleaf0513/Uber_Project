@@ -50,34 +50,42 @@ const EnterpriseClients = () => {
     }
   };
 
+  const normalizeText = (value) =>
+    String(value || "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[#,.-]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+
   const buildAddressQueries = (query) => {
     const clean = String(query || "").trim();
     if (!clean) return [];
 
-    const lowered = clean.toLowerCase();
+    const lowered = normalizeText(clean);
 
-    const hasContext =
-      lowered.includes("colombia") ||
-      lowered.includes("antioquia") ||
-      lowered.includes("medellín") ||
+    const hasCountry = lowered.includes("colombia");
+    const hasKnownCity =
       lowered.includes("medellin") ||
-      lowered.includes("itagüí") ||
       lowered.includes("itagui") ||
       lowered.includes("envigado") ||
       lowered.includes("sabaneta") ||
       lowered.includes("bello") ||
-      lowered.includes("bogotá") ||
       lowered.includes("bogota") ||
       lowered.includes("cali") ||
       lowered.includes("barranquilla") ||
-      lowered.includes("cartagena");
+      lowered.includes("cartagena") ||
+      lowered.includes("antioquia");
 
     const queries = [clean];
 
-    if (!hasContext) {
+    if (!hasCountry) {
       queries.push(`${clean}, Colombia`);
-      queries.push(`${clean}, Antioquia, Colombia`);
-      queries.push(`${clean}, Medellín, Antioquia, Colombia`);
+    }
+
+    if (hasKnownCity && !hasCountry) {
+      queries.push(clean);
     }
 
     return [...new Set(queries)];
@@ -126,37 +134,44 @@ const EnterpriseClients = () => {
   };
 
   const rankSuggestions = (rows, originalQuery) => {
-    const q = String(originalQuery || "").trim().toLowerCase();
-    if (!q) return rows;
+    const nq = normalizeText(originalQuery);
+    const queryParts = nq.split(" ").filter(Boolean);
 
-    const normalize = (text) =>
-      String(text || "")
-        .toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "");
+    const scoreFor = (item) => {
+      const text = normalizeText(item?.description);
 
-    const nq = normalize(q);
+      let score = 0;
 
-    return [...rows].sort((a, b) => {
-      const da = normalize(a.description);
-      const db = normalize(b.description);
+      if (text === nq) score += 200;
+      if (text.startsWith(nq)) score += 120;
+      if (text.includes(nq)) score += 80;
 
-      const score = (text) => {
-        let s = 0;
-        if (text === nq) s += 100;
-        if (text.startsWith(nq)) s += 60;
-        if (text.includes(nq)) s += 30;
-
-        const queryParts = nq.split(/\s+/).filter(Boolean);
-        for (const part of queryParts) {
-          if (text.includes(part)) s += 5;
+      let matchedParts = 0;
+      for (const part of queryParts) {
+        if (text.includes(part)) {
+          matchedParts += 1;
+          score += part.length >= 4 ? 15 : 6;
         }
+      }
 
-        return s;
-      };
+      const coverage = queryParts.length ? matchedParts / queryParts.length : 0;
+      score += coverage * 100;
 
-      return score(db) - score(da);
-    });
+      const looksTooGeneric =
+        text === "medellin antioquia colombia" ||
+        text === "itagui antioquia colombia" ||
+        text === "envigado antioquia colombia" ||
+        text === "sabaneta antioquia colombia" ||
+        text === "colombia";
+
+      if (looksTooGeneric && queryParts.length >= 3) {
+        score -= 80;
+      }
+
+      return score;
+    };
+
+    return [...rows].sort((a, b) => scoreFor(b) - scoreFor(a));
   };
 
   const fetchClients = useCallback(async () => {
@@ -249,11 +264,12 @@ const EnterpriseClients = () => {
         return extractSuggestionRows(item.data);
       });
 
-      console.log("maps/get-suggestions merged rows:", mergedRows);
-
       const normalized = normalizeSuggestionRows(mergedRows);
       const deduped = dedupeSuggestions(normalized);
       const ranked = rankSuggestions(deduped, query).slice(0, 8);
+
+      console.log("maps/get-suggestions merged rows:", mergedRows);
+      console.log("maps/get-suggestions ranked:", ranked);
 
       setAddressSuggestions(ranked);
       setShowSuggestions(true);
