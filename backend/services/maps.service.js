@@ -194,6 +194,7 @@ function buildLocalSuggestion(description, placeId) {
     return {
         description,
         place_id: placeId,
+        structured_formatting: null,
     };
 }
 
@@ -216,6 +217,12 @@ function localSuggestionsForColombia(address) {
         'Cali, Valle del Cauca, Colombia',
         'Barranquilla, Atlántico, Colombia',
         'Cartagena, Bolívar, Colombia',
+        'El Poblado, Medellín, Antioquia, Colombia',
+        'Laureles, Medellín, Antioquia, Colombia',
+        'Belén, Medellín, Antioquia, Colombia',
+        'Centro, Medellín, Antioquia, Colombia',
+        'San Javier, Medellín, Antioquia, Colombia',
+        'Robledo, Medellín, Antioquia, Colombia',
     ];
 
     const normalizedQuery = q.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
@@ -234,23 +241,25 @@ function localSuggestionsForColombia(address) {
     }
 
     const combined = [...starts, ...contains];
-
     if (combined.length > 0) return combined.slice(0, 8);
 
     if (/itag/.test(normalizedQuery)) {
         return [buildLocalSuggestion('Itagüí, Antioquia, Colombia', 'local_itagui_antioquia_colombia')];
     }
-
     if (/mede/.test(normalizedQuery)) {
         return [buildLocalSuggestion('Medellín, Antioquia, Colombia', 'local_medellin_antioquia_colombia')];
     }
-
     if (/saba/.test(normalizedQuery)) {
         return [buildLocalSuggestion('Sabaneta, Antioquia, Colombia', 'local_sabaneta_antioquia_colombia')];
     }
-
     if (/envi/.test(normalizedQuery)) {
         return [buildLocalSuggestion('Envigado, Antioquia, Colombia', 'local_envigado_antioquia_colombia')];
+    }
+    if (/pobla/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('El Poblado, Medellín, Antioquia, Colombia', 'local_el_poblado_medellin')];
+    }
+    if (/laur/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('Laureles, Medellín, Antioquia, Colombia', 'local_laureles_medellin')];
     }
 
     return [];
@@ -378,6 +387,25 @@ module.exports.getSuggestions = async (address) => {
     if (!addr) return [];
 
     const key = serverMapsKey();
+    const results = [];
+    const seen = new Set();
+
+    const pushSuggestion = (item) => {
+        const description = String(item?.description || '').trim();
+        const placeId = String(item?.place_id || '').trim();
+
+        if (!description) return;
+
+        const dedupeKey = `${description.toLowerCase()}|${placeId}`;
+        if (seen.has(dedupeKey)) return;
+
+        seen.add(dedupeKey);
+        results.push({
+            description,
+            place_id: placeId,
+            structured_formatting: item?.structured_formatting || null,
+        });
+    };
 
     if (key) {
         try {
@@ -395,27 +423,103 @@ module.exports.getSuggestions = async (address) => {
                 }
             );
 
-            console.log('[maps] suggestions Google status:', data?.status);
-            console.log('[maps] suggestions Google predictions:', data?.predictions?.length || 0);
+            console.log('[maps] autocomplete status:', data?.status);
+            console.log('[maps] autocomplete predictions:', data?.predictions?.length || 0);
 
-            if (data?.status === 'OK' && Array.isArray(data.predictions) && data.predictions.length) {
-                return data.predictions.map((item) => ({
-                    description: item?.description || '',
-                    place_id: item?.place_id || '',
-                    structured_formatting: item?.structured_formatting || null,
-                }));
+            if (data?.status === 'OK' && Array.isArray(data.predictions)) {
+                for (const item of data.predictions) {
+                    pushSuggestion({
+                        description: item?.description || '',
+                        place_id: item?.place_id || '',
+                        structured_formatting: item?.structured_formatting || null,
+                    });
+                }
+            } else {
+                console.warn(
+                    '[maps] Google Place Autocomplete:',
+                    data?.status,
+                    data?.error_message || ''
+                );
             }
-
-            console.warn(
-                '[maps] Google Place Autocomplete:',
-                data?.status,
-                data?.error_message || ''
-            );
         } catch (error) {
-            console.error('[maps] suggestions Google:', error.message);
+            console.error('[maps] autocomplete error:', error.message);
+        }
+
+        try {
+            const { data } = await axios.get(
+                'https://maps.googleapis.com/maps/api/place/textsearch/json',
+                {
+                    params: {
+                        query: addr,
+                        key,
+                        language: 'es',
+                        region: 'co',
+                    },
+                    timeout: 15000,
+                }
+            );
+
+            console.log('[maps] textsearch status:', data?.status);
+            console.log('[maps] textsearch results:', data?.results?.length || 0);
+
+            if (data?.status === 'OK' && Array.isArray(data.results)) {
+                for (const item of data.results.slice(0, 8)) {
+                    pushSuggestion({
+                        description:
+                            item?.formatted_address ||
+                            [item?.name, item?.vicinity].filter(Boolean).join(', ') ||
+                            item?.name ||
+                            '',
+                        place_id: item?.place_id || '',
+                        structured_formatting: item?.name
+                            ? {
+                                  main_text: item.name,
+                                  secondary_text: item.formatted_address || item.vicinity || '',
+                              }
+                            : null,
+                    });
+                }
+            } else if (data?.status && data?.status !== 'ZERO_RESULTS') {
+                console.warn(
+                    '[maps] Google Place Text Search:',
+                    data?.status,
+                    data?.error_message || ''
+                );
+            }
+        } catch (error) {
+            console.error('[maps] textsearch error:', error.message);
+        }
+
+        if (results.length === 0) {
+            try {
+                const geoData = await googleMapsFormPost('geocode/json', {
+                    address: addr,
+                    components: 'country:CO',
+                });
+
+                console.log('[maps] geocode fallback status:', geoData?.status);
+                console.log('[maps] geocode fallback results:', geoData?.results?.length || 0);
+
+                if (geoData?.status === 'OK' && Array.isArray(geoData.results)) {
+                    for (const item of geoData.results.slice(0, 8)) {
+                        pushSuggestion({
+                            description: item?.formatted_address || '',
+                            place_id: item?.place_id || '',
+                            structured_formatting: null,
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('[maps] geocode fallback suggestions error:', error.message);
+            }
         }
     } else {
         console.warn('[maps] getSuggestions without Google key — usando fallback local');
+    }
+
+    if (results.length > 0) {
+        console.log('[maps] final suggestions:', results.length);
+        return results.slice(0, 8);
     }
 
     const fallback = localSuggestionsForColombia(addr);
