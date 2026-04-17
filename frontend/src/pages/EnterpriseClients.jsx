@@ -55,16 +55,23 @@ const EnterpriseClients = () => {
       .toLowerCase()
       .normalize("NFD")
       .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[#,.-]/g, " ")
+      .replace(/[#,.;/-]/g, " ")
       .replace(/\s+/g, " ")
       .trim();
+
+  const looksLikeStreetAddress = (value) => {
+    const s = String(value || "");
+    return (
+      /\b(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\b/i.test(s) ||
+      /\d/.test(s)
+    );
+  };
 
   const buildAddressQueries = (query) => {
     const clean = String(query || "").trim();
     if (!clean) return [];
 
     const lowered = normalizeText(clean);
-
     const hasCountry = lowered.includes("colombia");
     const hasKnownCity =
       lowered.includes("medellin") ||
@@ -78,17 +85,40 @@ const EnterpriseClients = () => {
       lowered.includes("cartagena") ||
       lowered.includes("antioquia");
 
-    const queries = [clean];
+    const variants = new Set([clean]);
 
+    // Variante simple con Colombia
     if (!hasCountry) {
-      queries.push(`${clean}, Colombia`);
+      variants.add(`${clean}, Colombia`);
     }
 
-    if (hasKnownCity && !hasCountry) {
-      queries.push(clean);
+    // Variante para nomenclatura colombiana: calle 37 a 61 18 -> calle 37A # 61-18
+    const match = clean.match(
+      /^(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\s+(\d+)\s*([a-zA-Z])?\s+(\d+)\s+(\d+)$/i
+    );
+
+    if (match) {
+      const via = match[1];
+      const n1 = match[2];
+      const letra = (match[3] || "").toUpperCase();
+      const n2 = match[4];
+      const n3 = match[5];
+
+      variants.add(`${via} ${n1}${letra} # ${n2}-${n3}`);
+      variants.add(`${via} ${n1}${letra} #${n2}-${n3}`);
     }
 
-    return [...new Set(queries)];
+    if (!hasKnownCity && looksLikeStreetAddress(clean)) {
+      variants.add(`${clean}, Medellín, Antioquia, Colombia`);
+      variants.add(`${clean}, Itagüí, Antioquia, Colombia`);
+      variants.add(`${clean}, Envigado, Antioquia, Colombia`);
+      variants.add(`${clean}, Sabaneta, Antioquia, Colombia`);
+      variants.add(`${clean}, Bello, Antioquia, Colombia`);
+      variants.add(`${clean}, Bogotá, Colombia`);
+      variants.add(`${clean}, Cali, Colombia`);
+    }
+
+    return [...variants].slice(0, 12);
   };
 
   const extractSuggestionRows = (raw) => {
@@ -110,8 +140,12 @@ const EnterpriseClients = () => {
           row?.name ||
           row?.structured_formatting?.main_text ||
           "",
-        place_id: row?.place_id || row?.placeId || "",
+        place_id:
+          row?.place_id ||
+          row?.placeId ||
+          (row?.description ? `synthetic:${String(row.description).toLowerCase()}` : ""),
         structured_formatting: row?.structured_formatting || null,
+        source: row?.source || "",
       }))
       .filter((item) => item.description);
   };
@@ -139,7 +173,6 @@ const EnterpriseClients = () => {
 
     const scoreFor = (item) => {
       const text = normalizeText(item?.description);
-
       let score = 0;
 
       if (text === nq) score += 200;
@@ -156,6 +189,15 @@ const EnterpriseClients = () => {
 
       const coverage = queryParts.length ? matchedParts / queryParts.length : 0;
       score += coverage * 100;
+
+      if (looksLikeStreetAddress(originalQuery) && /\d/.test(text)) {
+        score += 50;
+      }
+
+      const source = String(item?.source || "").toLowerCase();
+      if (source === "geocode") score += 15;
+      if (source === "findplace") score += 10;
+      if (source === "local") score -= 30;
 
       const looksTooGeneric =
         text === "medellin antioquia colombia" ||
@@ -292,7 +334,7 @@ const EnterpriseClients = () => {
   const fetchSuggestions = (query) => {
     const clean = String(query || "").trim();
 
-    if (clean.length < 3) {
+    if (clean.length < 2) {
       if (suggestionTimerRef.current) {
         clearTimeout(suggestionTimerRef.current);
         suggestionTimerRef.current = null;
@@ -613,11 +655,7 @@ const EnterpriseClients = () => {
                     value={formData.address}
                     onChange={handleChange}
                     onFocus={() => {
-                      if (
-                        addressSuggestions.length > 0 ||
-                        addressLoading ||
-                        addressNoResults
-                      ) {
+                      if (addressSuggestions.length > 0 || addressLoading || addressNoResults) {
                         setShowSuggestions(true);
                       }
                     }}
@@ -665,7 +703,7 @@ const EnterpriseClients = () => {
                   </p>
                 ) : addressTouched ? (
                   <p className="text-xs font-medium text-orange-600">
-                    Escribe mínimo 3 letras y selecciona la dirección desde la lista.
+                    Escribe mínimo 2 letras y selecciona la dirección desde la lista.
                   </p>
                 ) : (
                   <p className="text-xs font-medium text-slate-500">
