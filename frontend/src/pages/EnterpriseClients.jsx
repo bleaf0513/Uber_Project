@@ -50,23 +50,37 @@ const EnterpriseClients = () => {
     }
   };
 
-  const normalizeAddressQuery = (query) => {
+  const buildAddressQueries = (query) => {
     const clean = String(query || "").trim();
-    if (!clean) return "";
+    if (!clean) return [];
 
     const lowered = clean.toLowerCase();
-    if (
+
+    const hasContext =
       lowered.includes("colombia") ||
+      lowered.includes("antioquia") ||
       lowered.includes("medellín") ||
       lowered.includes("medellin") ||
       lowered.includes("itagüí") ||
       lowered.includes("itagui") ||
-      lowered.includes("antioquia")
-    ) {
-      return clean;
+      lowered.includes("envigado") ||
+      lowered.includes("sabaneta") ||
+      lowered.includes("bello") ||
+      lowered.includes("bogotá") ||
+      lowered.includes("bogota") ||
+      lowered.includes("cali") ||
+      lowered.includes("barranquilla") ||
+      lowered.includes("cartagena");
+
+    const queries = [clean];
+
+    if (!hasContext) {
+      queries.push(`${clean}, Colombia`);
+      queries.push(`${clean}, Antioquia, Colombia`);
+      queries.push(`${clean}, Medellín, Antioquia, Colombia`);
     }
 
-    return `${clean}, Colombia`;
+    return [...new Set(queries)];
   };
 
   const extractSuggestionRows = (raw) => {
@@ -79,32 +93,70 @@ const EnterpriseClients = () => {
   };
 
   const normalizeSuggestionRows = (rows) => {
-    const normalized = (Array.isArray(rows) ? rows : [])
+    return (Array.isArray(rows) ? rows : [])
       .map((row) => ({
         description:
           row?.description ||
-          row?.structured_formatting?.main_text ||
           row?.formatted_address ||
           row?.address ||
           row?.name ||
+          row?.structured_formatting?.main_text ||
           "",
         place_id: row?.place_id || row?.placeId || "",
+        structured_formatting: row?.structured_formatting || null,
       }))
       .filter((item) => item.description);
+  };
 
-    const priorityMatches = normalized.filter((item) => {
-      const text = item.description.toLowerCase();
-      return (
-        text.includes("colombia") ||
-        text.includes("antioquia") ||
-        text.includes("medellín") ||
-        text.includes("medellin") ||
-        text.includes("itagüí") ||
-        text.includes("itagui")
-      );
+  const dedupeSuggestions = (rows) => {
+    const seen = new Set();
+    const result = [];
+
+    for (const item of rows) {
+      const description = String(item?.description || "").trim();
+      const placeId = String(item?.place_id || "").trim();
+      const key = `${description.toLowerCase()}|${placeId}`;
+
+      if (!description || seen.has(key)) continue;
+      seen.add(key);
+      result.push(item);
+    }
+
+    return result;
+  };
+
+  const rankSuggestions = (rows, originalQuery) => {
+    const q = String(originalQuery || "").trim().toLowerCase();
+    if (!q) return rows;
+
+    const normalize = (text) =>
+      String(text || "")
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "");
+
+    const nq = normalize(q);
+
+    return [...rows].sort((a, b) => {
+      const da = normalize(a.description);
+      const db = normalize(b.description);
+
+      const score = (text) => {
+        let s = 0;
+        if (text === nq) s += 100;
+        if (text.startsWith(nq)) s += 60;
+        if (text.includes(nq)) s += 30;
+
+        const queryParts = nq.split(/\s+/).filter(Boolean);
+        for (const part of queryParts) {
+          if (text.includes(part)) s += 5;
+        }
+
+        return s;
+      };
+
+      return score(db) - score(da);
     });
-
-    return priorityMatches.length > 0 ? priorityMatches : normalized;
   };
 
   const fetchClients = useCallback(async () => {
@@ -160,29 +212,52 @@ const EnterpriseClients = () => {
     const seq = ++suggestionSeqRef.current;
 
     try {
-      const searchQuery = normalizeAddressQuery(query);
       setAddressLoading(true);
       setAddressNoResults(false);
 
-      const response = await axios.get(`${API_BASE}/maps/get-suggestions`, {
-        params: { address: searchQuery },
-        timeout: 18000,
-        withCredentials: true,
-      });
+      const queries = buildAddressQueries(query);
+
+      const responses = await Promise.all(
+        queries.map((addressQuery) =>
+          axios
+            .get(`${API_BASE}/maps/get-suggestions`, {
+              params: { address: addressQuery },
+              timeout: 18000,
+              withCredentials: true,
+            })
+            .then((response) => ({
+              ok: true,
+              query: addressQuery,
+              data: response?.data,
+            }))
+            .catch((error) => {
+              console.error("Error fetching address suggestions for:", addressQuery, error);
+              return {
+                ok: false,
+                query: addressQuery,
+                data: [],
+              };
+            })
+        )
+      );
 
       if (seq !== suggestionSeqRef.current) return;
 
-      const raw = response?.data;
-      const rows = extractSuggestionRows(raw);
+      const mergedRows = responses.flatMap((item) => {
+        console.log("maps/get-suggestions query:", item.query);
+        console.log("maps/get-suggestions raw:", item.data);
+        return extractSuggestionRows(item.data);
+      });
 
-      console.log("maps/get-suggestions raw:", raw);
-      console.log("maps/get-suggestions rows:", rows);
+      console.log("maps/get-suggestions merged rows:", mergedRows);
 
-      const normalized = normalizeSuggestionRows(rows);
+      const normalized = normalizeSuggestionRows(mergedRows);
+      const deduped = dedupeSuggestions(normalized);
+      const ranked = rankSuggestions(deduped, query).slice(0, 8);
 
-      setAddressSuggestions(normalized);
+      setAddressSuggestions(ranked);
       setShowSuggestions(true);
-      setAddressNoResults(normalized.length === 0);
+      setAddressNoResults(ranked.length === 0);
     } catch (error) {
       console.error("Error fetching address suggestions:", error);
 
@@ -219,7 +294,7 @@ const EnterpriseClients = () => {
     suggestionTimerRef.current = setTimeout(() => {
       suggestionTimerRef.current = null;
       runFetchSuggestions(clean);
-    }, 280);
+    }, 320);
   };
 
   const resetForm = () => {
@@ -561,7 +636,7 @@ const EnterpriseClients = () => {
                       ) : addressNoResults ? (
                         <div className="px-4 py-4 text-sm text-slate-500">
                           No se encontraron direcciones. Prueba con más detalle, por ejemplo:
-                          calle, carrera, barrio, ciudad.
+                          calle, carrera, barrio, ciudad o nombre del negocio.
                         </div>
                       ) : null}
                     </div>
