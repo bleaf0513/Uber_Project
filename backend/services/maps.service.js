@@ -49,7 +49,6 @@ function isValidLatLng(lat, lng) {
 }
 
 function isColombiaCoordinate(lat, lng) {
-    // Rango amplio y seguro para Colombia
     return isValidLatLng(lat, lng) && lat >= -4.5 && lat <= 16.5 && lng >= -81.9 && lng <= -66.0;
 }
 
@@ -191,6 +190,72 @@ function approxDistanceElement(straightLineMeters) {
     };
 }
 
+function buildLocalSuggestion(description, placeId) {
+    return {
+        description,
+        place_id: placeId,
+    };
+}
+
+function localSuggestionsForColombia(address) {
+    const q = normalizeAddressQuery(address).toLowerCase();
+    if (!q || q.length < 3) return [];
+
+    const catalog = [
+        'Itagüí, Antioquia, Colombia',
+        'Sabaneta, Antioquia, Colombia',
+        'Envigado, Antioquia, Colombia',
+        'Medellín, Antioquia, Colombia',
+        'Bello, Antioquia, Colombia',
+        'Copacabana, Antioquia, Colombia',
+        'La Estrella, Antioquia, Colombia',
+        'Caldas, Antioquia, Colombia',
+        'Girardota, Antioquia, Colombia',
+        'Barbosa, Antioquia, Colombia',
+        'Bogotá, Colombia',
+        'Cali, Valle del Cauca, Colombia',
+        'Barranquilla, Atlántico, Colombia',
+        'Cartagena, Bolívar, Colombia',
+    ];
+
+    const normalizedQuery = q.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+    const starts = [];
+    const contains = [];
+
+    for (const item of catalog) {
+        const itemNorm = item.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+
+        if (itemNorm.startsWith(normalizedQuery)) {
+            starts.push(buildLocalSuggestion(item, `local_${itemNorm.replace(/\s+/g, '_')}`));
+        } else if (itemNorm.includes(normalizedQuery)) {
+            contains.push(buildLocalSuggestion(item, `local_${itemNorm.replace(/\s+/g, '_')}`));
+        }
+    }
+
+    const combined = [...starts, ...contains];
+
+    if (combined.length > 0) return combined.slice(0, 8);
+
+    if (/itag/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('Itagüí, Antioquia, Colombia', 'local_itagui_antioquia_colombia')];
+    }
+
+    if (/mede/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('Medellín, Antioquia, Colombia', 'local_medellin_antioquia_colombia')];
+    }
+
+    if (/saba/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('Sabaneta, Antioquia, Colombia', 'local_sabaneta_antioquia_colombia')];
+    }
+
+    if (/envi/.test(normalizedQuery)) {
+        return [buildLocalSuggestion('Envigado, Antioquia, Colombia', 'local_envigado_antioquia_colombia')];
+    }
+
+    return [];
+}
+
 module.exports.getAddressCoordinates = async (address) => {
     const addrRaw = normalizeAddressQuery(address);
     if (!addrRaw) {
@@ -323,13 +388,22 @@ module.exports.getSuggestions = async (address) => {
                         input: addr,
                         key,
                         components: 'country:co',
+                        language: 'es',
+                        types: 'geocode',
                     },
                     timeout: 15000,
                 }
             );
 
-            if (data.status === 'OK' && data.predictions?.length) {
-                return data.predictions;
+            console.log('[maps] suggestions Google status:', data?.status);
+            console.log('[maps] suggestions Google predictions:', data?.predictions?.length || 0);
+
+            if (data?.status === 'OK' && Array.isArray(data.predictions) && data.predictions.length) {
+                return data.predictions.map((item) => ({
+                    description: item?.description || '',
+                    place_id: item?.place_id || '',
+                    structured_formatting: item?.structured_formatting || null,
+                }));
             }
 
             console.warn(
@@ -340,9 +414,13 @@ module.exports.getSuggestions = async (address) => {
         } catch (error) {
             console.error('[maps] suggestions Google:', error.message);
         }
+    } else {
+        console.warn('[maps] getSuggestions without Google key — usando fallback local');
     }
 
-    return [];
+    const fallback = localSuggestionsForColombia(addr);
+    console.log('[maps] local fallback suggestions:', fallback.length);
+    return fallback;
 };
 
 module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm) => {

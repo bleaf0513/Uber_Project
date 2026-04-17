@@ -29,6 +29,9 @@ const EnterpriseClients = () => {
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressSelected, setAddressSelected] = useState(false);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [addressTouched, setAddressTouched] = useState(false);
+  const [addressNoResults, setAddressNoResults] = useState(false);
 
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
@@ -66,15 +69,26 @@ const EnterpriseClients = () => {
     return `${clean}, Colombia`;
   };
 
+  const extractSuggestionRows = (raw) => {
+    if (Array.isArray(raw)) return raw;
+    if (Array.isArray(raw?.suggestions)) return raw.suggestions;
+    if (Array.isArray(raw?.predictions)) return raw.predictions;
+    if (Array.isArray(raw?.results)) return raw.results;
+    if (Array.isArray(raw?.data)) return raw.data;
+    return [];
+  };
+
   const normalizeSuggestionRows = (rows) => {
     const normalized = (Array.isArray(rows) ? rows : [])
       .map((row) => ({
         description:
-          row.description ||
-          row.structured_formatting?.main_text ||
-          row.formatted_address ||
+          row?.description ||
+          row?.structured_formatting?.main_text ||
+          row?.formatted_address ||
+          row?.address ||
+          row?.name ||
           "",
-        place_id: row.place_id || "",
+        place_id: row?.place_id || row?.placeId || "",
       }))
       .filter((item) => item.description);
 
@@ -147,8 +161,10 @@ const EnterpriseClients = () => {
 
     try {
       const searchQuery = normalizeAddressQuery(query);
+      setAddressLoading(true);
+      setAddressNoResults(false);
 
-      const { data } = await axios.get(`${API_BASE}/maps/get-suggestions`, {
+      const response = await axios.get(`${API_BASE}/maps/get-suggestions`, {
         params: { address: searchQuery },
         timeout: 18000,
         withCredentials: true,
@@ -156,26 +172,45 @@ const EnterpriseClients = () => {
 
       if (seq !== suggestionSeqRef.current) return;
 
-      const normalized = normalizeSuggestionRows(data);
+      const raw = response?.data;
+      const rows = extractSuggestionRows(raw);
+
+      console.log("maps/get-suggestions raw:", raw);
+      console.log("maps/get-suggestions rows:", rows);
+
+      const normalized = normalizeSuggestionRows(rows);
+
       setAddressSuggestions(normalized);
       setShowSuggestions(true);
+      setAddressNoResults(normalized.length === 0);
     } catch (error) {
       console.error("Error fetching address suggestions:", error);
+
       if (seq === suggestionSeqRef.current) {
         setAddressSuggestions([]);
-        setShowSuggestions(false);
+        setAddressNoResults(true);
+        setShowSuggestions(true);
+      }
+    } finally {
+      if (seq === suggestionSeqRef.current) {
+        setAddressLoading(false);
       }
     }
   }, []);
 
   const fetchSuggestions = (query) => {
-    if (query.length < 3) {
+    const clean = String(query || "").trim();
+
+    if (clean.length < 3) {
       if (suggestionTimerRef.current) {
         clearTimeout(suggestionTimerRef.current);
         suggestionTimerRef.current = null;
       }
+
       setAddressSuggestions([]);
       setShowSuggestions(false);
+      setAddressLoading(false);
+      setAddressNoResults(false);
       return;
     }
 
@@ -183,7 +218,7 @@ const EnterpriseClients = () => {
 
     suggestionTimerRef.current = setTimeout(() => {
       suggestionTimerRef.current = null;
-      runFetchSuggestions(query);
+      runFetchSuggestions(clean);
     }, 280);
   };
 
@@ -193,6 +228,9 @@ const EnterpriseClients = () => {
     setAddressSuggestions([]);
     setShowSuggestions(false);
     setAddressSelected(false);
+    setAddressLoading(false);
+    setAddressTouched(false);
+    setAddressNoResults(false);
   };
 
   const handleAddressSelect = (suggestion) => {
@@ -203,7 +241,9 @@ const EnterpriseClients = () => {
     }));
 
     setAddressSelected(true);
+    setAddressTouched(true);
     setAddressSuggestions([]);
+    setAddressNoResults(false);
     setShowSuggestions(false);
   };
 
@@ -219,6 +259,8 @@ const EnterpriseClients = () => {
       if (name === "address") {
         next.placeId = "";
         setAddressSelected(false);
+        setAddressTouched(true);
+        setAddressNoResults(false);
         fetchSuggestions(value);
       }
 
@@ -239,6 +281,12 @@ const EnterpriseClients = () => {
       isActive: Boolean(client?.isActive ?? true),
     });
     setAddressSelected(Boolean(client?.address && client?.placeId));
+    setAddressTouched(Boolean(client?.address));
+    setAddressSuggestions([]);
+    setShowSuggestions(false);
+    setAddressLoading(false);
+    setAddressNoResults(false);
+
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -435,7 +483,7 @@ const EnterpriseClients = () => {
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-5">
           <div className="xl:col-span-2">
             <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-              <div className="flex items-center justify-between gap-3 mb-5">
+              <div className="mb-5 flex items-center justify-between gap-3">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-900">
                     {editingClientId ? "Editar cliente" : "Nuevo cliente"}
@@ -474,31 +522,48 @@ const EnterpriseClients = () => {
                     value={formData.address}
                     onChange={handleChange}
                     onFocus={() => {
-                      if (addressSuggestions.length > 0) setShowSuggestions(true);
+                      if (
+                        addressSuggestions.length > 0 ||
+                        addressLoading ||
+                        addressNoResults
+                      ) {
+                        setShowSuggestions(true);
+                      }
                     }}
                     autoComplete="off"
                     className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 outline-none"
                   />
 
-                  {showSuggestions && addressSuggestions.length > 0 && (
-                    <div className="absolute z-50 mt-2 w-full max-h-80 overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
-                      {addressSuggestions.map((suggestion, index) => (
-                        <button
-                          key={`${suggestion.place_id || suggestion.description}-${index}`}
-                          type="button"
-                          onClick={() => handleAddressSelect(suggestion)}
-                          className="w-full border-b last:border-b-0 px-4 py-4 text-left hover:bg-slate-50"
-                        >
-                          <div className="flex items-start gap-3">
-                            <div className="mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-100">
-                              📍
+                  {showSuggestions && (
+                    <div className="absolute z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
+                      {addressLoading ? (
+                        <div className="px-4 py-4 text-sm text-slate-500">
+                          Buscando direcciones...
+                        </div>
+                      ) : addressSuggestions.length > 0 ? (
+                        addressSuggestions.map((suggestion, index) => (
+                          <button
+                            key={`${suggestion.place_id || suggestion.description}-${index}`}
+                            type="button"
+                            onClick={() => handleAddressSelect(suggestion)}
+                            className="w-full border-b px-4 py-4 text-left last:border-b-0 hover:bg-slate-50"
+                          >
+                            <div className="flex items-start gap-3">
+                              <div className="mt-1 flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full bg-slate-100">
+                                📍
+                              </div>
+                              <div className="text-sm text-slate-800">
+                                {suggestion.description}
+                              </div>
                             </div>
-                            <div className="text-sm text-slate-800">
-                              {suggestion.description}
-                            </div>
-                          </div>
-                        </button>
-                      ))}
+                          </button>
+                        ))
+                      ) : addressNoResults ? (
+                        <div className="px-4 py-4 text-sm text-slate-500">
+                          No se encontraron direcciones. Prueba con más detalle, por ejemplo:
+                          calle, carrera, barrio, ciudad.
+                        </div>
+                      ) : null}
                     </div>
                   )}
                 </div>
@@ -507,9 +572,13 @@ const EnterpriseClients = () => {
                   <p className="text-xs font-medium text-green-600">
                     Dirección seleccionada correctamente.
                   </p>
-                ) : (
+                ) : addressTouched ? (
                   <p className="text-xs font-medium text-orange-600">
                     Escribe mínimo 3 letras y selecciona la dirección desde la lista.
+                  </p>
+                ) : (
+                  <p className="text-xs font-medium text-slate-500">
+                    Empieza escribiendo la dirección para ver sugerencias.
                   </p>
                 )}
 
@@ -576,7 +645,7 @@ const EnterpriseClients = () => {
 
           <div className="xl:col-span-3">
             <div className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between mb-5">
+              <div className="mb-5 flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-900">
                     Clientes registrados
@@ -591,7 +660,7 @@ const EnterpriseClients = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3 mb-5">
+              <div className="mb-5 grid grid-cols-1 gap-3 md:grid-cols-3">
                 <input
                   type="text"
                   placeholder="Buscar por nombre, teléfono o dirección"

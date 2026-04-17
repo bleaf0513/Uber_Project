@@ -10,6 +10,10 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@capacitor/android": "^8.3.1",
+    "@capacitor/cli": "^8.3.1",
+    "@capacitor/core": "^8.3.1",
+    "@capacitor/geolocation": "^8.2.0",
     "@coreui/coreui": "^5.2.0",
     "@coreui/react": "^5.4.1",
     "@gsap/react": "^2.1.1",
