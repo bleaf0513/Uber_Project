@@ -296,7 +296,10 @@ function buildCoordinateVariants(address) {
         }
     }
 
-    if (streetLike && !/medellin|itagui|envigado|sabaneta|bello|bogota|cali|barranquilla|cartagena/.test(normalized)) {
+    if (
+        streetLike &&
+        !/medellin|itagui|envigado|sabaneta|bello|bogota|cali|barranquilla|cartagena/.test(normalized)
+    ) {
         const cities = [
             'Medellín, Antioquia, Colombia',
             'Itagüí, Antioquia, Colombia',
@@ -381,6 +384,13 @@ async function autocompleteSearch(variant) {
         region: 'co',
     });
 
+    console.log('[maps][autocomplete]', {
+        variant,
+        status: data?.status,
+        error_message: data?.error_message || '',
+        count: Array.isArray(data?.predictions) ? data.predictions.length : 0,
+    });
+
     if (!Array.isArray(data?.predictions)) return [];
 
     return data.predictions.map((item) => ({
@@ -397,6 +407,13 @@ async function geocodeSearch(variant) {
         components: 'country:CO',
         language: 'es',
         region: 'co',
+    });
+
+    console.log('[maps][geocode]', {
+        variant,
+        status: data?.status,
+        error_message: data?.error_message || '',
+        count: Array.isArray(data?.results) ? data.results.length : 0,
     });
 
     if (!Array.isArray(data?.results)) return [];
@@ -417,6 +434,13 @@ async function findPlaceSearch(variant) {
         inputtype: 'textquery',
         fields: 'place_id,formatted_address,name',
         language: 'es',
+    });
+
+    console.log('[maps][findplace]', {
+        variant,
+        status: data?.status,
+        error_message: data?.error_message || '',
+        count: Array.isArray(data?.candidates) ? data.candidates.length : 0,
     });
 
     if (!Array.isArray(data?.candidates)) return [];
@@ -531,6 +555,8 @@ module.exports.getSuggestions = async (address) => {
     const seen = new Set();
     const variants = buildSuggestionVariants(addr);
 
+    console.log('[maps] getSuggestions variants:', variants);
+
     if (key) {
         for (const variant of variants) {
             try {
@@ -564,6 +590,8 @@ module.exports.getSuggestions = async (address) => {
                 console.warn('[maps] geocode search failed:', variant, error.message);
             }
         }
+    } else {
+        console.warn('[maps] getSuggestions without Google key');
     }
 
     if (results.length === 0) {
@@ -573,7 +601,10 @@ module.exports.getSuggestions = async (address) => {
         }
     }
 
-    return rankSuggestions(results, addr).slice(0, 8);
+    const ranked = rankSuggestions(results, addr).slice(0, 8);
+    console.log('[maps] getSuggestions final count:', ranked.length);
+
+    return ranked;
 };
 
 module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm) => {
