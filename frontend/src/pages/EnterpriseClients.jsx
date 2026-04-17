@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
+import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 
 const API_BASE = getApiBaseUrl();
 
@@ -37,6 +37,8 @@ const EnterpriseClients = () => {
   const suggestionSeqRef = useRef(0);
   const addressBoxRef = useRef(null);
 
+  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
+
   const parseJsonSafe = async (response, label = "API") => {
     const text = await response.text();
     console.log(`${label} raw response:`, text);
@@ -48,105 +50,6 @@ const EnterpriseClients = () => {
         `La API no devolvió JSON válido en ${label}. Respuesta: ${text.slice(0, 150)}`
       );
     }
-  };
-
-  const normalizeText = (value) =>
-    String(value || "")
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[#,.-]/g, " ")
-      .replace(/\s+/g, " ")
-      .trim();
-
-  // Se deja simple, igual que en Home: una consulta limpia
-  const buildAddressQueries = (query) => {
-    const clean = String(query || "").trim();
-    if (!clean) return [];
-    return [clean];
-  };
-
-  const extractSuggestionRows = (raw) => {
-    if (Array.isArray(raw)) return raw;
-    if (Array.isArray(raw?.suggestions)) return raw.suggestions;
-    if (Array.isArray(raw?.predictions)) return raw.predictions;
-    if (Array.isArray(raw?.results)) return raw.results;
-    if (Array.isArray(raw?.data)) return raw.data;
-    return [];
-  };
-
-  const normalizeSuggestionRows = (rows) => {
-    return (Array.isArray(rows) ? rows : [])
-      .map((row) => ({
-        description:
-          row?.description ||
-          row?.formatted_address ||
-          row?.address ||
-          row?.name ||
-          row?.structured_formatting?.main_text ||
-          "",
-        place_id: row?.place_id || row?.placeId || "",
-        structured_formatting: row?.structured_formatting || null,
-      }))
-      .filter((item) => item.description);
-  };
-
-  const dedupeSuggestions = (rows) => {
-    const seen = new Set();
-    const result = [];
-
-    for (const item of rows) {
-      const description = String(item?.description || "").trim();
-      const placeId = String(item?.place_id || "").trim();
-      const key = `${description.toLowerCase()}|${placeId}`;
-
-      if (!description || seen.has(key)) continue;
-      seen.add(key);
-      result.push(item);
-    }
-
-    return result;
-  };
-
-  const rankSuggestions = (rows, originalQuery) => {
-    const nq = normalizeText(originalQuery);
-    const queryParts = nq.split(" ").filter(Boolean);
-
-    const scoreFor = (item) => {
-      const text = normalizeText(item?.description);
-
-      let score = 0;
-
-      if (text === nq) score += 200;
-      if (text.startsWith(nq)) score += 120;
-      if (text.includes(nq)) score += 80;
-
-      let matchedParts = 0;
-      for (const part of queryParts) {
-        if (text.includes(part)) {
-          matchedParts += 1;
-          score += part.length >= 4 ? 15 : 6;
-        }
-      }
-
-      const coverage = queryParts.length ? matchedParts / queryParts.length : 0;
-      score += coverage * 100;
-
-      const looksTooGeneric =
-        text === "medellin antioquia colombia" ||
-        text === "itagui antioquia colombia" ||
-        text === "envigado antioquia colombia" ||
-        text === "sabaneta antioquia colombia" ||
-        text === "colombia";
-
-      if (looksTooGeneric && queryParts.length >= 3) {
-        score -= 80;
-      }
-
-      return score;
-    };
-
-    return [...rows].sort((a, b) => scoreFor(b) - scoreFor(a));
   };
 
   const fetchClients = useCallback(async () => {
@@ -198,73 +101,71 @@ const EnterpriseClients = () => {
     };
   }, []);
 
-  const runFetchSuggestions = useCallback(async (query) => {
-    const seq = ++suggestionSeqRef.current;
+  const runFetchSuggestions = useCallback(
+    async (query) => {
+      const seq = ++suggestionSeqRef.current;
 
-    try {
-      setAddressLoading(true);
-      setAddressNoResults(false);
+      try {
+        setAddressLoading(true);
+        setAddressNoResults(false);
 
-      const queries = buildAddressQueries(query);
+        if (!mapsApiLoaded || !window.google?.maps) {
+          if (seq === suggestionSeqRef.current) {
+            setAddressSuggestions([]);
+            setShowSuggestions(true);
+            setAddressNoResults(true);
+          }
+          return;
+        }
 
-      const responses = await Promise.all(
-        queries.map((addressQuery) =>
-          axios
-            .get(`${API_BASE}/maps/get-suggestions`, {
-              params: { address: addressQuery },
-              timeout: 18000,
-              withCredentials: true,
-            })
-            .then((response) => ({
-              ok: true,
-              query: addressQuery,
-              data: response?.data,
-            }))
-            .catch((error) => {
-              console.error("Error fetching address suggestions for:", addressQuery, error);
-              return {
-                ok: false,
-                query: addressQuery,
-                data: [],
-              };
-            })
-        )
-      );
+        const { AutocompleteSuggestion } = await google.maps.importLibrary("places");
 
-      if (seq !== suggestionSeqRef.current) return;
+        const request = {
+          input: query,
+        };
 
-      const mergedRows = responses.flatMap((item) => {
-        console.log("maps/get-suggestions query:", item.query);
-        console.log("maps/get-suggestions raw:", item.data);
-        return extractSuggestionRows(item.data);
-      });
+        const response = await AutocompleteSuggestion.fetchAutocompleteSuggestions(request);
+        const raw = response?.suggestions || [];
 
-      const normalized = normalizeSuggestionRows(mergedRows);
-      const deduped = dedupeSuggestions(normalized);
-      const ranked = rankSuggestions(deduped, query).slice(0, 8);
+        const mapped = raw
+          .map((item) => item?.placePrediction)
+          .filter(Boolean)
+          .map((prediction) => {
+            const description =
+              prediction?.text?.text ||
+              [prediction?.mainText?.text, prediction?.secondaryText?.text]
+                .filter(Boolean)
+                .join(", ");
 
-      console.log("maps/get-suggestions merged rows:", mergedRows);
-      console.log("maps/get-suggestions ranked:", ranked);
+            return {
+              description: description || "",
+              place_id: prediction?.placeId || "",
+            };
+          })
+          .filter((item) => item.description);
 
-      setAddressSuggestions(ranked);
-      setShowSuggestions(true);
-      setAddressNoResults(ranked.length === 0);
-    } catch (error) {
-      console.error("Error fetching address suggestions:", error);
+        if (seq !== suggestionSeqRef.current) return;
 
-      if (seq === suggestionSeqRef.current) {
-        setAddressSuggestions([]);
-        setAddressNoResults(true);
+        setAddressSuggestions(mapped.slice(0, 8));
         setShowSuggestions(true);
-      }
-    } finally {
-      if (seq === suggestionSeqRef.current) {
-        setAddressLoading(false);
-      }
-    }
-  }, []);
+        setAddressNoResults(mapped.length === 0);
+      } catch (error) {
+        console.error("Error consultando Google Places:", error);
 
-  // Igual que Home: mínimo 3 letras
+        if (seq === suggestionSeqRef.current) {
+          setAddressSuggestions([]);
+          setAddressNoResults(true);
+          setShowSuggestions(true);
+        }
+      } finally {
+        if (seq === suggestionSeqRef.current) {
+          setAddressLoading(false);
+        }
+      }
+    },
+    [mapsApiLoaded]
+  );
+
   const fetchSuggestions = (query) => {
     const clean = String(query || "").trim();
 
@@ -281,7 +182,9 @@ const EnterpriseClients = () => {
       return;
     }
 
-    if (suggestionTimerRef.current) clearTimeout(suggestionTimerRef.current);
+    if (suggestionTimerRef.current) {
+      clearTimeout(suggestionTimerRef.current);
+    }
 
     suggestionTimerRef.current = setTimeout(() => {
       suggestionTimerRef.current = null;
@@ -377,7 +280,7 @@ const EnterpriseClients = () => {
     }
 
     if (!addressSelected && !payload.placeId) {
-      alert("Debes escoger la dirección desde la lista de sugerencias.");
+      alert("Debes escoger la dirección desde la lista de Google Maps.");
       return;
     }
 
@@ -540,7 +443,7 @@ const EnterpriseClients = () => {
             <div className="rounded-3xl border border-white/10 bg-white/10 p-5 shadow-[0_12px_30px_rgba(0,0,0,0.18)] backdrop-blur">
               <p className="text-sm text-white/80">Búsqueda rápida</p>
               <p className="mt-3 text-2xl font-extrabold">Nombre · Teléfono · Dirección</p>
-              <p className="mt-2 text-sm text-white/70">Funciona bien en celular, tablet y PC</p>
+              <p className="mt-2 text-sm text-white/70">Conectado a Google Maps</p>
             </div>
           </div>
         </div>
@@ -556,7 +459,7 @@ const EnterpriseClients = () => {
                     {editingClientId ? "Editar cliente" : "Nuevo cliente"}
                   </h2>
                   <p className="mt-1 text-sm text-slate-500">
-                    Registra datos listos para autollenar futuras entregas.
+                    Dirección tomada directamente de Google Maps.
                   </p>
                 </div>
 
@@ -585,15 +488,11 @@ const EnterpriseClients = () => {
                   <input
                     name="address"
                     type="text"
-                    placeholder="Dirección conectada a Google Maps"
+                    placeholder="Buscar dirección en Google Maps"
                     value={formData.address}
                     onChange={handleChange}
                     onFocus={() => {
-                      if (
-                        addressSuggestions.length > 0 ||
-                        addressLoading ||
-                        addressNoResults
-                      ) {
+                      if (addressSuggestions.length > 0 || addressLoading || addressNoResults) {
                         setShowSuggestions(true);
                       }
                     }}
@@ -605,7 +504,7 @@ const EnterpriseClients = () => {
                     <div className="absolute z-50 mt-2 max-h-80 w-full overflow-y-auto rounded-2xl border border-slate-200 bg-white shadow-xl">
                       {addressLoading ? (
                         <div className="px-4 py-4 text-sm text-slate-500">
-                          Buscando direcciones...
+                          Buscando en Google Maps...
                         </div>
                       ) : addressSuggestions.length > 0 ? (
                         addressSuggestions.map((suggestion, index) => (
@@ -627,8 +526,7 @@ const EnterpriseClients = () => {
                         ))
                       ) : addressNoResults ? (
                         <div className="px-4 py-4 text-sm text-slate-500">
-                          No se encontraron direcciones. Prueba con más detalle, por ejemplo:
-                          calle, carrera, barrio, ciudad o nombre del negocio.
+                          Google Maps no devolvió resultados para esa búsqueda.
                         </div>
                       ) : null}
                     </div>
@@ -637,15 +535,15 @@ const EnterpriseClients = () => {
 
                 {addressSelected ? (
                   <p className="text-xs font-medium text-green-600">
-                    Dirección seleccionada correctamente.
+                    Dirección seleccionada correctamente desde Google Maps.
                   </p>
                 ) : addressTouched ? (
                   <p className="text-xs font-medium text-orange-600">
-                    Escribe mínimo 3 letras y selecciona la dirección desde la lista.
+                    Escribe mínimo 3 letras y selecciona una opción de Google Maps.
                   </p>
                 ) : (
                   <p className="text-xs font-medium text-slate-500">
-                    Empieza escribiendo la dirección para ver sugerencias.
+                    Empieza escribiendo la dirección para ver sugerencias reales.
                   </p>
                 )}
 
