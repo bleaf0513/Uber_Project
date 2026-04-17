@@ -27,6 +27,16 @@ function normalizeAddressQuery(s) {
     return t.trim();
 }
 
+function normalizeLooseText(s) {
+    return String(s || '')
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[#,.;]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
 function serverMapsKey() {
     return process.env.GOOGLE_MAPS_SERVER_API || process.env.GOOGLE_MAPS_API;
 }
@@ -265,6 +275,45 @@ function localSuggestionsForColombia(address) {
     return [];
 }
 
+function buildAddressVariants(addr) {
+    const normalized = normalizeLooseText(addr);
+
+    const hasContext =
+        normalized.includes('colombia') ||
+        normalized.includes('antioquia') ||
+        normalized.includes('medellin') ||
+        normalized.includes('itagui') ||
+        normalized.includes('envigado') ||
+        normalized.includes('sabaneta') ||
+        normalized.includes('bello') ||
+        normalized.includes('bogota') ||
+        normalized.includes('cali') ||
+        normalized.includes('barranquilla') ||
+        normalized.includes('cartagena');
+
+    const looksLikeStreetAddress =
+        /\b(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\b/i.test(addr) ||
+        /\d/.test(addr);
+
+    const variants = [addr];
+
+    if (!hasContext) {
+        variants.push(`${addr}, Colombia`);
+    }
+
+    if (!hasContext && looksLikeStreetAddress) {
+        variants.push(`${addr}, Medellín, Antioquia, Colombia`);
+        variants.push(`${addr}, Itagüí, Antioquia, Colombia`);
+        variants.push(`${addr}, Envigado, Antioquia, Colombia`);
+        variants.push(`${addr}, Sabaneta, Antioquia, Colombia`);
+        variants.push(`${addr}, Bello, Antioquia, Colombia`);
+        variants.push(`${addr}, Bogotá, Colombia`);
+        variants.push(`${addr}, Cali, Colombia`);
+    }
+
+    return [...new Set(variants)];
+}
+
 module.exports.getAddressCoordinates = async (address) => {
     const addrRaw = normalizeAddressQuery(address);
     if (!addrRaw) {
@@ -407,110 +456,143 @@ module.exports.getSuggestions = async (address) => {
         });
     };
 
+    const variants = buildAddressVariants(addr);
+
     if (key) {
-        try {
-            const { data } = await axios.get(
-                'https://maps.googleapis.com/maps/api/place/autocomplete/json',
-                {
-                    params: {
-                        input: addr,
-                        key,
-                        components: 'country:co',
-                        language: 'es',
-                        types: 'geocode',
-                    },
-                    timeout: 15000,
-                }
-            );
-
-            console.log('[maps] autocomplete status:', data?.status);
-            console.log('[maps] autocomplete predictions:', data?.predictions?.length || 0);
-
-            if (data?.status === 'OK' && Array.isArray(data.predictions)) {
-                for (const item of data.predictions) {
-                    pushSuggestion({
-                        description: item?.description || '',
-                        place_id: item?.place_id || '',
-                        structured_formatting: item?.structured_formatting || null,
-                    });
-                }
-            } else {
-                console.warn(
-                    '[maps] Google Place Autocomplete:',
-                    data?.status,
-                    data?.error_message || ''
-                );
-            }
-        } catch (error) {
-            console.error('[maps] autocomplete error:', error.message);
-        }
-
-        try {
-            const { data } = await axios.get(
-                'https://maps.googleapis.com/maps/api/place/textsearch/json',
-                {
-                    params: {
-                        query: addr,
-                        key,
-                        language: 'es',
-                        region: 'co',
-                    },
-                    timeout: 15000,
-                }
-            );
-
-            console.log('[maps] textsearch status:', data?.status);
-            console.log('[maps] textsearch results:', data?.results?.length || 0);
-
-            if (data?.status === 'OK' && Array.isArray(data.results)) {
-                for (const item of data.results.slice(0, 8)) {
-                    pushSuggestion({
-                        description:
-                            item?.formatted_address ||
-                            [item?.name, item?.vicinity].filter(Boolean).join(', ') ||
-                            item?.name ||
-                            '',
-                        place_id: item?.place_id || '',
-                        structured_formatting: item?.name
-                            ? {
-                                  main_text: item.name,
-                                  secondary_text: item.formatted_address || item.vicinity || '',
-                              }
-                            : null,
-                    });
-                }
-            } else if (data?.status && data?.status !== 'ZERO_RESULTS') {
-                console.warn(
-                    '[maps] Google Place Text Search:',
-                    data?.status,
-                    data?.error_message || ''
-                );
-            }
-        } catch (error) {
-            console.error('[maps] textsearch error:', error.message);
-        }
-
-        if (results.length === 0) {
+        for (const variant of variants) {
             try {
-                const geoData = await googleMapsFormPost('geocode/json', {
-                    address: addr,
-                    components: 'country:CO',
-                });
+                const { data } = await axios.get(
+                    'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+                    {
+                        params: {
+                            input: variant,
+                            key,
+                            components: 'country:co',
+                            language: 'es',
+                            types: 'geocode',
+                        },
+                        timeout: 15000,
+                    }
+                );
 
-                console.log('[maps] geocode fallback status:', geoData?.status);
-                console.log('[maps] geocode fallback results:', geoData?.results?.length || 0);
+                console.log('[maps] autocomplete geocode query:', variant);
+                console.log('[maps] autocomplete geocode status:', data?.status);
+                console.log('[maps] autocomplete geocode predictions:', data?.predictions?.length || 0);
 
-                if (geoData?.status === 'OK' && Array.isArray(geoData.results)) {
-                    for (const item of geoData.results.slice(0, 8)) {
+                if (data?.status === 'OK' && Array.isArray(data.predictions)) {
+                    for (const item of data.predictions) {
                         pushSuggestion({
-                            description: item?.formatted_address || '',
+                            description: item?.description || '',
                             place_id: item?.place_id || '',
-                            structured_formatting: null,
+                            structured_formatting: item?.structured_formatting || null,
                         });
                     }
                 }
             } catch (error) {
-                console.error('[maps] geocode fallback suggestions error:', error.message);
+                console.error('[maps] autocomplete geocode error:', variant, error.message);
+            }
+        }
+
+        for (const variant of variants) {
+            try {
+                const { data } = await axios.get(
+                    'https://maps.googleapis.com/maps/api/place/autocomplete/json',
+                    {
+                        params: {
+                            input: variant,
+                            key,
+                            components: 'country:co',
+                            language: 'es',
+                            types: 'establishment',
+                        },
+                        timeout: 15000,
+                    }
+                );
+
+                console.log('[maps] autocomplete business query:', variant);
+                console.log('[maps] autocomplete business status:', data?.status);
+                console.log('[maps] autocomplete business predictions:', data?.predictions?.length || 0);
+
+                if (data?.status === 'OK' && Array.isArray(data.predictions)) {
+                    for (const item of data.predictions) {
+                        pushSuggestion({
+                            description: item?.description || '',
+                            place_id: item?.place_id || '',
+                            structured_formatting: item?.structured_formatting || null,
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('[maps] autocomplete business error:', variant, error.message);
+            }
+        }
+
+        for (const variant of variants) {
+            try {
+                const { data } = await axios.get(
+                    'https://maps.googleapis.com/maps/api/place/textsearch/json',
+                    {
+                        params: {
+                            query: variant,
+                            key,
+                            language: 'es',
+                            region: 'co',
+                        },
+                        timeout: 15000,
+                    }
+                );
+
+                console.log('[maps] textsearch query:', variant);
+                console.log('[maps] textsearch status:', data?.status);
+                console.log('[maps] textsearch results:', data?.results?.length || 0);
+
+                if (data?.status === 'OK' && Array.isArray(data.results)) {
+                    for (const item of data.results.slice(0, 8)) {
+                        pushSuggestion({
+                            description:
+                                item?.formatted_address ||
+                                [item?.name, item?.vicinity].filter(Boolean).join(', ') ||
+                                item?.name ||
+                                '',
+                            place_id: item?.place_id || '',
+                            structured_formatting: item?.name
+                                ? {
+                                      main_text: item.name,
+                                      secondary_text: item.formatted_address || item.vicinity || '',
+                                  }
+                                : null,
+                        });
+                    }
+                }
+            } catch (error) {
+                console.error('[maps] textsearch error:', variant, error.message);
+            }
+        }
+
+        if (results.length === 0) {
+            for (const variant of variants) {
+                try {
+                    const geoData = await googleMapsFormPost('geocode/json', {
+                        address: variant,
+                        components: 'country:CO',
+                    });
+
+                    console.log('[maps] geocode fallback query:', variant);
+                    console.log('[maps] geocode fallback status:', geoData?.status);
+                    console.log('[maps] geocode fallback results:', geoData?.results?.length || 0);
+
+                    if (geoData?.status === 'OK' && Array.isArray(geoData.results)) {
+                        for (const item of geoData.results.slice(0, 8)) {
+                            pushSuggestion({
+                                description: item?.formatted_address || '',
+                                place_id: item?.place_id || '',
+                                structured_formatting: null,
+                            });
+                        }
+                    }
+                } catch (error) {
+                    console.error('[maps] geocode fallback suggestions error:', variant, error.message);
+                }
             }
         }
     } else {
