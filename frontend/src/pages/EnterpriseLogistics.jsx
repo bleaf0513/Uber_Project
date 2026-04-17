@@ -298,6 +298,10 @@ const EnterpriseLogistics = () => {
   const [globalIncomingBanner, setGlobalIncomingBanner] = useState(null);
   const [driverChatAlerts, setDriverChatAlerts] = useState({});
 
+  const [routeSummaryLoading, setRouteSummaryLoading] = useState(false);
+  const [routeSummaryDate, setRouteSummaryDate] = useState(todayDate);
+  const [selectedDriverRouteSummary, setSelectedDriverRouteSummary] = useState(null);
+
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
   const addressBoxRef = useRef(null);
@@ -940,21 +944,21 @@ const EnterpriseLogistics = () => {
     );
   }, [clients, formData.clientId]);
 
- const filteredClientsForSelect = useMemo(() => {
-  const term = String(clientSearch || "").trim().toLowerCase();
+  const filteredClientsForSelect = useMemo(() => {
+    const term = String(clientSearch || "").trim().toLowerCase();
 
-  return clients
-    .filter((client) => Boolean(client?.isActive ?? true))
-    .filter((client) => {
-      if (!term) return true;
-      return String(client?.name || "").toLowerCase().includes(term);
-    })
-    .sort((a, b) => {
-      const aUpdated = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
-      const bUpdated = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
-      return bUpdated - aUpdated;
-    });
-}, [clients, clientSearch]);
+    return clients
+      .filter((client) => Boolean(client?.isActive ?? true))
+      .filter((client) => {
+        if (!term) return true;
+        return String(client?.name || "").toLowerCase().includes(term);
+      })
+      .sort((a, b) => {
+        const aUpdated = a?.updatedAt ? new Date(a.updatedAt).getTime() : 0;
+        const bUpdated = b?.updatedAt ? new Date(b.updatedAt).getTime() : 0;
+        return bUpdated - aUpdated;
+      });
+  }, [clients, clientSearch]);
 
   const handleClientSelect = (clientId) => {
     const client =
@@ -1232,6 +1236,66 @@ const EnterpriseLogistics = () => {
     }
   };
 
+  const fetchSelectedDriverRouteSummary = useCallback(async () => {
+    if (!selectedDriver?._id) {
+      setSelectedDriverRouteSummary(null);
+      return;
+    }
+
+    try {
+      setRouteSummaryLoading(true);
+
+      const response = await fetch(
+        `${API_BASE}/enterprise-drivers/${selectedDriver._id}/route-summary?date=${routeSummaryDate}`,
+        {
+          method: "GET",
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const data = await parseJsonSafe(
+        response,
+        "GET /enterprise-drivers/:id/route-summary"
+      );
+
+      if (!response.ok) {
+        throw new Error(
+          data.message || "No se pudo cargar el resumen de ruta del conductor."
+        );
+      }
+
+      setSelectedDriverRouteSummary(data);
+    } catch (error) {
+      console.error("Error cargando resumen de ruta:", error);
+      setSelectedDriverRouteSummary(null);
+    } finally {
+      setRouteSummaryLoading(false);
+    }
+  }, [selectedDriver?._id, routeSummaryDate]);
+
+  useEffect(() => {
+    fetchSelectedDriverRouteSummary();
+  }, [fetchSelectedDriverRouteSummary]);
+
+  const formatDurationText = (seconds) => {
+    const total = Number(seconds || 0);
+    if (!Number.isFinite(total) || total <= 0) return "0 min";
+
+    const hours = Math.floor(total / 3600);
+    const minutes = Math.round((total % 3600) / 60);
+
+    if (hours <= 0) return `${minutes} min`;
+    return `${hours} h ${minutes} min`;
+  };
+
+  const routeSummary = selectedDriverRouteSummary?.summary || null;
+  const routeShift = routeSummary?.shift || null;
+  const routeDeliveries = routeSummary?.deliveries || null;
+  const routePoints = Array.isArray(routeSummary?.routePoints)
+    ? routeSummary.routePoints
+    : [];
+
   const totalUnreadDrivers = Object.keys(driverChatAlerts).length;
 
   return (
@@ -1329,60 +1393,60 @@ const EnterpriseLogistics = () => {
             />
 
             <div className="relative">
-  <input
-    type="text"
-    placeholder="Seleccionar cliente"
-    value={
-      formData.clientId
-        ? `${formData.clientName || ""}`
-        : clientSearch
-    }
-    onChange={(e) => {
-      setClientSearch(e.target.value);
-      if (formData.clientId) {
-        setFormData((prev) => ({
-          ...prev,
-          clientId: "",
-          clientName: "",
-          address: "",
-          clientPhone: "",
-          neighborhood: "",
-          reference: "",
-          placeId: "",
-        }));
-      }
-    }}
-    className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-    disabled={loadingClients}
-  />
+              <input
+                type="text"
+                placeholder="Seleccionar cliente"
+                value={
+                  formData.clientId
+                    ? `${formData.clientName || ""}`
+                    : clientSearch
+                }
+                onChange={(e) => {
+                  setClientSearch(e.target.value);
+                  if (formData.clientId) {
+                    setFormData((prev) => ({
+                      ...prev,
+                      clientId: "",
+                      clientName: "",
+                      address: "",
+                      clientPhone: "",
+                      neighborhood: "",
+                      reference: "",
+                      placeId: "",
+                    }));
+                  }
+                }}
+                className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                disabled={loadingClients}
+              />
 
-  {!loadingClients && !formData.clientId && clientSearch.trim() !== "" && (
-    <div className="absolute z-20 mt-2 w-full max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
-      {filteredClientsForSelect.length === 0 ? (
-        <div className="px-4 py-3 text-sm text-gray-500">
-          No se encontraron clientes
-        </div>
-      ) : (
-        filteredClientsForSelect.map((client) => (
-          <button
-            key={clientIdValue(client)}
-            type="button"
-            onClick={() => {
-              handleClientSelect(clientIdValue(client));
-              setClientSearch("");
-            }}
-            className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
-          >
-            <div className="font-medium text-gray-900">{client.name}</div>
-            <div className="text-sm text-gray-500">
-              {client.phone} - {client.address}
+              {!loadingClients && !formData.clientId && clientSearch.trim() !== "" && (
+                <div className="absolute z-20 mt-2 w-full max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-lg">
+                  {filteredClientsForSelect.length === 0 ? (
+                    <div className="px-4 py-3 text-sm text-gray-500">
+                      No se encontraron clientes
+                    </div>
+                  ) : (
+                    filteredClientsForSelect.map((client) => (
+                      <button
+                        key={clientIdValue(client)}
+                        type="button"
+                        onClick={() => {
+                          handleClientSelect(clientIdValue(client));
+                          setClientSearch("");
+                        }}
+                        className="w-full text-left px-4 py-3 hover:bg-blue-50 border-b border-gray-100 last:border-b-0"
+                      >
+                        <div className="font-medium text-gray-900">{client.name}</div>
+                        <div className="text-sm text-gray-500">
+                          {client.phone} - {client.address}
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
-          </button>
-        ))
-      )}
-    </div>
-  )}
-</div>
 
             {selectedClient ? (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -1667,6 +1731,134 @@ const EnterpriseLogistics = () => {
                 </p>
               </div>
             </div>
+          </div>
+        ) : null}
+
+        {selectedDriver ? (
+          <div className="bg-white rounded-2xl shadow p-5 mb-5">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
+              <div>
+                <h2 className="text-xl font-bold text-gray-900">
+                  Recorrido total del conductor
+                </h2>
+                <p className="text-sm text-gray-500 mt-1">
+                  Jornada, puntos GPS y tiempos reales acumulados del día.
+                </p>
+              </div>
+
+              <div className="flex gap-3 flex-wrap">
+                <input
+                  type="date"
+                  value={routeSummaryDate}
+                  onChange={(e) => setRouteSummaryDate(e.target.value)}
+                  className="bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                />
+
+                <button
+                  type="button"
+                  onClick={fetchSelectedDriverRouteSummary}
+                  className="bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold"
+                >
+                  Actualizar recorrido
+                </button>
+              </div>
+            </div>
+
+            {routeSummaryLoading ? (
+              <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-8 text-center text-gray-500">
+                Cargando recorrido del conductor...
+              </div>
+            ) : !routeShift ? (
+              <div className="rounded-xl bg-gray-50 border border-gray-200 px-4 py-8 text-center text-gray-500">
+                No hay jornada registrada para esta fecha.
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4 mb-5">
+                  <div className="bg-blue-50 rounded-xl p-4">
+                    <p className="text-sm text-blue-700 font-semibold">Estado jornada</p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">
+                      {routeShift.status || "—"}
+                    </p>
+                  </div>
+
+                  <div className="bg-emerald-50 rounded-xl p-4">
+                    <p className="text-sm text-emerald-700 font-semibold">Kilómetros</p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">
+                      {Number(routeShift.totalDistanceKm || 0).toFixed(2)} km
+                    </p>
+                  </div>
+
+                  <div className="bg-indigo-50 rounded-xl p-4">
+                    <p className="text-sm text-indigo-700 font-semibold">Puntos GPS</p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">
+                      {Number(routeShift.totalPoints || 0)}
+                    </p>
+                  </div>
+
+                  <div className="bg-amber-50 rounded-xl p-4">
+                    <p className="text-sm text-amber-700 font-semibold">Tiempo jornada</p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">
+                      {formatDurationText(routeShift.shiftDurationSeconds)}
+                    </p>
+                  </div>
+
+                  <div className="bg-purple-50 rounded-xl p-4">
+                    <p className="text-sm text-purple-700 font-semibold">
+                      Promedio real por entrega
+                    </p>
+                    <p className="text-lg font-bold text-gray-900 mt-1">
+                      {formatDurationText(routeDeliveries?.avgRealDurationSeconds)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 mb-5">
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <p className="text-sm text-gray-500">Inicio jornada</p>
+                    <p className="text-sm font-bold text-gray-900 mt-1">
+                      {routeShift.startedAt
+                        ? new Date(routeShift.startedAt).toLocaleString()
+                        : "Sin dato"}
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <p className="text-sm text-gray-500">Fin jornada</p>
+                    <p className="text-sm font-bold text-gray-900 mt-1">
+                      {routeShift.endedAt
+                        ? new Date(routeShift.endedAt).toLocaleString()
+                        : "Jornada activa"}
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <p className="text-sm text-gray-500">Entregas del día</p>
+                    <p className="text-sm font-bold text-gray-900 mt-1">
+                      {routeDeliveries?.total || 0}
+                    </p>
+                  </div>
+
+                  <div className="bg-gray-50 rounded-xl p-4">
+                    <p className="text-sm text-gray-500">Entregas finalizadas</p>
+                    <p className="text-sm font-bold text-gray-900 mt-1">
+                      {routeDeliveries?.finished || 0}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
+                  <p className="text-sm font-semibold text-gray-700 mb-2">
+                    Puntos registrados en la ruta
+                  </p>
+                  <p className="text-sm text-gray-600">
+                    {routePoints.length > 0
+                      ? `Se registraron ${routePoints.length} puntos GPS para esta jornada.`
+                      : "Aún no hay puntos GPS guardados para esta jornada."}
+                  </p>
+                </div>
+              </>
+            )}
           </div>
         ) : null}
 
