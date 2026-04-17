@@ -2,6 +2,7 @@ const jwt = require('jsonwebtoken');
 const EnterpriseDriver = require('../models/enterpriseDriver.model');
 const EnterpriseDriverShift = require('../models/enterpriseDriverShift.model');
 const EnterpriseDriverRoutePoint = require('../models/enterpriseDriverRoutePoint.model');
+const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 
 function normalizeCedula(value) {
     return String(value || '')
@@ -39,7 +40,7 @@ function shouldPersistNewPoint(previousPoint, nextPoint) {
     if (!previousPoint) return true;
 
     const distanceKm = haversineDistanceKm(previousPoint, nextPoint);
-    return distanceKm >= 0.03; // 30 metros aprox
+    return distanceKm >= 0.03;
 }
 
 async function getOrCreateActiveShift(driver) {
@@ -462,6 +463,144 @@ module.exports.deleteDriver = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: 'No se pudo eliminar el conductor.',
+        });
+    }
+};
+
+module.exports.getDriverRouteSummary = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const date = String(req.query.date || '').trim();
+
+        if (!req.enterprise?._id) {
+            return res.status(401).json({
+                success: false,
+                message: 'Empresa no autorizada.',
+            });
+        }
+
+        const driver = await EnterpriseDriver.findOne({
+            _id: id,
+            enterprise: req.enterprise._id,
+            active: true,
+        });
+
+        if (!driver) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado para esta empresa.',
+            });
+        }
+
+        let startDate;
+        let endDate;
+
+        if (date) {
+            startDate = new Date(`${date}T00:00:00.000Z`);
+            endDate = new Date(`${date}T23:59:59.999Z`);
+        } else {
+            const now = new Date();
+            const yyyyMmDd = now.toISOString().slice(0, 10);
+            startDate = new Date(`${yyyyMmDd}T00:00:00.000Z`);
+            endDate = new Date(`${yyyyMmDd}T23:59:59.999Z`);
+        }
+
+        const shift =
+            (await EnterpriseDriverShift.findOne({
+                enterprise: req.enterprise._id,
+                driverId: driver._id,
+                startedAt: { $gte: startDate, $lte: endDate },
+            }).sort({ startedAt: -1 })) || null;
+
+        const routePoints = shift
+            ? await EnterpriseDriverRoutePoint.find({
+                  enterprise: req.enterprise._id,
+                  driverId: driver._id,
+                  shiftId: shift._id,
+              }).sort({ recordedAt: 1 })
+            : [];
+
+        const deliveries = await EnterpriseDelivery.find({
+            enterprise: req.enterprise._id,
+            assignedDriverId: driver._id,
+            $or: [
+                { createdAt: { $gte: startDate, $lte: endDate } },
+                { startedAt: { $gte: startDate, $lte: endDate } },
+                { finishedAt: { $gte: startDate, $lte: endDate } },
+            ],
+        }).sort({ createdAt: -1 });
+
+        const finishedDeliveries = deliveries.filter(
+            (d) => d.status === 'Finalizada' && d.startedAt && d.finishedAt
+        );
+
+        const realDurationsSeconds = finishedDeliveries.map((d) => {
+            const started = new Date(d.startedAt).getTime();
+            const finished = new Date(d.finishedAt).getTime();
+            return Math.max(0, Math.round((finished - started) / 1000));
+        });
+
+        const avgRealDurationSeconds =
+            realDurationsSeconds.length > 0
+                ? Math.round(
+                      realDurationsSeconds.reduce((sum, val) => sum + val, 0) /
+                          realDurationsSeconds.length
+                  )
+                : 0;
+
+        const shiftDurationSeconds =
+            shift?.startedAt
+                ? Math.max(
+                      0,
+                      Math.round(
+                          (
+                              (shift.endedAt ? new Date(shift.endedAt) : new Date()).getTime() -
+                              new Date(shift.startedAt).getTime()
+                          ) / 1000
+                      )
+                  )
+                : 0;
+
+        return res.status(200).json({
+            success: true,
+            driver: {
+                _id: driver._id,
+                name: driver.name,
+                cedula: driver.cedula,
+                vehicle: driver.vehicle,
+                plate: driver.plate,
+                status: driver.status,
+                currentLocation: driver.currentLocation || null,
+            },
+            summary: {
+                date: date || startDate.toISOString().slice(0, 10),
+                shift: shift
+                    ? {
+                          _id: shift._id,
+                          status: shift.status,
+                          startedAt: shift.startedAt,
+                          endedAt: shift.endedAt,
+                          startedLocation: shift.startedLocation || null,
+                          endedLocation: shift.endedLocation || null,
+                          totalPoints: Number(shift.totalPoints || 0),
+                          totalDistanceKm: Number(shift.totalDistanceKm || 0),
+                          shiftDurationSeconds,
+                      }
+                    : null,
+                deliveries: {
+                    total: deliveries.length,
+                    finished: finishedDeliveries.length,
+                    avgRealDurationSeconds,
+                },
+                routePoints,
+                deliveryItems: deliveries,
+            },
+        });
+    } catch (error) {
+        console.error('Error en getDriverRouteSummary:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'No se pudo obtener el resumen de ruta del conductor.',
         });
     }
 };

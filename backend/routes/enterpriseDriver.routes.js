@@ -11,6 +11,7 @@ const {
   updateDriverLocation,
   updateDriverStatus,
   deleteDriver,
+  getDriverRouteSummary,
 } = require('../controllers/enterpriseDriver.controller');
 
 router.get('/', authEnterprise, getDrivers);
@@ -25,5 +26,8 @@ router.patch('/:id/location', authEnterpriseDriver, updateDriverLocation);
 
 // actualizar estado del conductor autenticado
 router.patch('/:id/status', authEnterpriseDriver, updateDriverStatus);
+
+// resumen de ruta, jornada y métricas básicas del conductor para logística
+router.get('/:id/route-summary', authEnterprise, getDriverRouteSummary);
 
 module.exports = router;
