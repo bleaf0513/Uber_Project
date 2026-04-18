@@ -15,7 +15,7 @@ const haversineDistanceKm = (a, b) => {
   const dLng = toRad(Number(b.lng) - Number(a.lng));
 
   const lat1 = toRad(Number(a.lat));
-  const lat2 = toRad(Number(b.lat));
+  const lat2 = toRad(Number(a.lat));
 
   const aa =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -48,6 +48,11 @@ const formatCurrencyCOP = (value) => {
   }).format(Number.isFinite(numericValue) ? numericValue : 0);
 };
 
+const buildDayRouteStorageKey = (driverId) => {
+  const date = new Date().toISOString().slice(0, 10);
+  return `enterpriseDriverDayRoute_${driverId}_${date}`;
+};
+
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
@@ -69,14 +74,20 @@ const EnterpriseDriverMap = ({
   const trackingStartedRef = useRef(false);
   const lastSentCoordsRef = useRef(null);
   const sendingLocationRef = useRef(false);
+  const dayPolylineRef = useRef(null);
+  const stopMarkersRef = useRef([]);
 
   const [geoError, setGeoError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
+  const [mapMode, setMapMode] = useState("navigation"); // navigation | dayRoute | currentLocation
+  const [dayRoutePoints, setDayRoutePoints] = useState([]);
+  const [loadingDayRoute, setLoadingDayRoute] = useState(false);
   const [routeInfo, setRouteInfo] = useState({
     orderedStops: [],
     totalStops: 0,
     totalDistanceText: "",
     totalDurationText: "",
+    nextInstruction: "",
   });
 
   useEffect(() => {
@@ -102,11 +113,161 @@ const EnterpriseDriverMap = ({
     return base;
   }, [assignedDeliveries, activeDelivery]);
 
+  const clearStopMarkers = useCallback(() => {
+    stopMarkersRef.current.forEach((marker) => marker.setMap(null));
+    stopMarkersRef.current = [];
+  }, []);
+
+  const drawStopMarkers = useCallback(
+    (stops) => {
+      if (!window.google?.maps || !mapInstanceRef.current) return;
+
+      clearStopMarkers();
+
+      stopMarkersRef.current = stops
+        .filter((stop) => stop?.coords?.lat && stop?.coords?.lng)
+        .map((stop, index) => {
+          return new window.google.maps.Marker({
+            map: mapInstanceRef.current,
+            position: {
+              lat: Number(stop.coords.lat),
+              lng: Number(stop.coords.lng),
+            },
+            title: `${index + 1}. ${stop.clientName || "Parada"}`,
+            label: {
+              text: String(index + 1),
+              color: "#ffffff",
+              fontWeight: "700",
+            },
+          });
+        });
+    },
+    [clearStopMarkers]
+  );
+
+  const clearDayPolyline = useCallback(() => {
+    if (dayPolylineRef.current) {
+      dayPolylineRef.current.setMap(null);
+      dayPolylineRef.current = null;
+    }
+  }, []);
+
+  const drawDayRoute = useCallback(
+    (points) => {
+      if (!window.google?.maps || !mapInstanceRef.current) return;
+
+      clearDayPolyline();
+
+      if (!Array.isArray(points) || !points.length) return;
+
+      const path = points
+        .filter((p) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lng)))
+        .map((p) => ({
+          lat: Number(p.lat),
+          lng: Number(p.lng),
+        }));
+
+      if (!path.length) return;
+
+      dayPolylineRef.current = new window.google.maps.Polyline({
+        path,
+        geodesic: true,
+        strokeColor: "#2563eb",
+        strokeOpacity: 1,
+        strokeWeight: 5,
+      });
+
+      dayPolylineRef.current.setMap(mapInstanceRef.current);
+
+      const bounds = new window.google.maps.LatLngBounds();
+      path.forEach((point) => bounds.extend(point));
+      mapInstanceRef.current.fitBounds(bounds);
+    },
+    [clearDayPolyline]
+  );
+
+  const saveDayRoutePointLocally = useCallback((driverId, coords) => {
+    if (!driverId) return;
+
+    const key = buildDayRouteStorageKey(driverId);
+
+    try {
+      const current = JSON.parse(localStorage.getItem(key) || "[]");
+      const last = current[current.length - 1];
+
+      const rounded = {
+        lat: Number(Number(coords.lat).toFixed(6)),
+        lng: Number(Number(coords.lng).toFixed(6)),
+        timestamp: new Date().toISOString(),
+      };
+
+      if (
+        last &&
+        Number(last.lat).toFixed(6) === Number(rounded.lat).toFixed(6) &&
+        Number(last.lng).toFixed(6) === Number(rounded.lng).toFixed(6)
+      ) {
+        return;
+      }
+
+      const updated = [...current, rounded];
+      localStorage.setItem(key, JSON.stringify(updated));
+      setDayRoutePoints(updated);
+    } catch (error) {
+      console.error("No se pudo guardar localmente la ruta del día:", error);
+    }
+  }, []);
+
+  const loadDayRoute = useCallback(async () => {
+    const driverId = selectedDriverRef.current?._id || selectedDriverRef.current?.id;
+    if (!driverId) return;
+
+    setLoadingDayRoute(true);
+
+    const date = new Date().toISOString().slice(0, 10);
+    const localKey = buildDayRouteStorageKey(driverId);
+
+    try {
+      let remotePoints = [];
+
+      try {
+        const response = await fetch(
+          `${API_BASE}/enterprise-drivers/${driverId}/location-history?date=${date}`,
+          {
+            method: "GET",
+            credentials: "include",
+          }
+        );
+
+        if (response.ok) {
+          const text = await response.text();
+          const data = text ? JSON.parse(text) : {};
+          remotePoints = Array.isArray(data?.points) ? data.points : [];
+        }
+      } catch (remoteError) {
+        console.warn("No se pudo consultar historial remoto, se usará el local:", remoteError);
+      }
+
+      if (remotePoints.length) {
+        setDayRoutePoints(remotePoints);
+        localStorage.setItem(localKey, JSON.stringify(remotePoints));
+      } else {
+        const localPoints = JSON.parse(localStorage.getItem(localKey) || "[]");
+        setDayRoutePoints(Array.isArray(localPoints) ? localPoints : []);
+      }
+    } catch (error) {
+      console.error("Error cargando ruta del día:", error);
+      const localPoints = JSON.parse(localStorage.getItem(localKey) || "[]");
+      setDayRoutePoints(Array.isArray(localPoints) ? localPoints : []);
+    } finally {
+      setLoadingDayRoute(false);
+    }
+  }, []);
+
   const persistDriverLocation = useCallback(
     async (coords) => {
       const currentDriver = selectedDriverRef.current;
 
-      if (!currentDriver?._id) return false;
+      if (!currentDriver?._id && !currentDriver?.id) return false;
       if (sendingLocationRef.current) return false;
 
       const roundedCoords = {
@@ -122,8 +283,10 @@ const EnterpriseDriverMap = ({
       sendingLocationRef.current = true;
 
       try {
+        const driverId = currentDriver._id || currentDriver.id;
+
         const response = await fetch(
-          `${API_BASE}/enterprise-drivers/${currentDriver._id}/location`,
+          `${API_BASE}/enterprise-drivers/${driverId}/location`,
           {
             method: "PATCH",
             headers: {
@@ -144,9 +307,7 @@ const EnterpriseDriverMap = ({
         }
 
         if (!response.ok) {
-          throw new Error(
-            data.message || "No se pudo guardar la ubicación en backend."
-          );
+          throw new Error(data.message || "No se pudo guardar la ubicación en backend.");
         }
 
         const persistedDriver = data.driver || {
@@ -168,6 +329,8 @@ const EnterpriseDriverMap = ({
         lastSentCoordsRef.current = roundedCoords;
         setGeoError("");
 
+        saveDayRoutePointLocally(driverId, roundedCoords);
+
         return true;
       } catch (error) {
         console.error("No se pudo persistir la ubicación en backend:", error);
@@ -179,7 +342,7 @@ const EnterpriseDriverMap = ({
         sendingLocationRef.current = false;
       }
     },
-    [setSelectedDriver]
+    [saveDayRoutePointLocally, setSelectedDriver]
   );
 
   useEffect(() => {
@@ -206,8 +369,13 @@ const EnterpriseDriverMap = ({
       geocoderRef.current = new window.google.maps.Geocoder();
 
       directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-        suppressMarkers: false,
+        suppressMarkers: true,
         preserveViewport: false,
+        polylineOptions: {
+          strokeColor: "#2563eb",
+          strokeOpacity: 0.95,
+          strokeWeight: 6,
+        },
       });
 
       directionsRendererRef.current.setMap(mapInstanceRef.current);
@@ -231,6 +399,10 @@ const EnterpriseDriverMap = ({
       directionsRendererRef.current.setPanel(directionsPanelRef.current);
     }
   }, [mapsApiLoaded, selectedDriver]);
+
+  useEffect(() => {
+    loadDayRoute();
+  }, [loadDayRoute]);
 
   useEffect(() => {
     if (
@@ -278,9 +450,9 @@ const EnterpriseDriverMap = ({
         );
       }
 
-      if (!pendingStops.length) {
+      if (mapMode === "currentLocation" || !pendingStops.length) {
         mapInstanceRef.current.setCenter(coords);
-        mapInstanceRef.current.setZoom(15);
+        mapInstanceRef.current.setZoom(16);
       }
     };
 
@@ -317,7 +489,13 @@ const EnterpriseDriverMap = ({
       }
       trackingStartedRef.current = false;
     };
-  }, [mapsApiLoaded, selectedDriver?._id, persistDriverLocation, pendingStops.length]);
+  }, [
+    mapsApiLoaded,
+    selectedDriver?._id,
+    persistDriverLocation,
+    pendingStops.length,
+    mapMode,
+  ]);
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
@@ -348,6 +526,77 @@ const EnterpriseDriverMap = ({
   }, [mapsApiLoaded, selectedDriver?.currentLocation, selectedDriver?.name]);
 
   useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
+
+    const driverLocation = selectedDriver?.currentLocation;
+
+    if (!driverLocation?.lat || !driverLocation?.lng) return;
+
+    const currentCoords = {
+      lat: Number(driverLocation.lat),
+      lng: Number(driverLocation.lng),
+    };
+
+    if (mapMode === "currentLocation") {
+      clearDayPolyline();
+      clearStopMarkers();
+
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.set("directions", null);
+      }
+
+      if (directionsPanelRef.current) {
+        directionsPanelRef.current.innerHTML = "";
+      }
+
+      mapInstanceRef.current.setCenter(currentCoords);
+      mapInstanceRef.current.setZoom(16);
+
+      setRouteInfo({
+        orderedStops: [],
+        totalStops: 0,
+        totalDistanceText: "",
+        totalDurationText: "",
+        nextInstruction: "",
+      });
+
+      return;
+    }
+
+    if (mapMode === "dayRoute") {
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.set("directions", null);
+      }
+      if (directionsPanelRef.current) {
+        directionsPanelRef.current.innerHTML = "";
+      }
+      clearStopMarkers();
+      drawDayRoute(dayRoutePoints);
+
+      setRouteInfo((prev) => ({
+        ...prev,
+        orderedStops: [],
+        totalStops: dayRoutePoints.length,
+        totalDistanceText: prev.totalDistanceText,
+        totalDurationText: prev.totalDurationText,
+        nextInstruction: dayRoutePoints.length
+          ? "Mostrando recorrido acumulado del día."
+          : "Aún no hay recorrido registrado hoy.",
+      }));
+
+      return;
+    }
+  }, [
+    mapsApiLoaded,
+    selectedDriver?.currentLocation,
+    mapMode,
+    dayRoutePoints,
+    clearDayPolyline,
+    clearStopMarkers,
+    drawDayRoute,
+  ]);
+
+  useEffect(() => {
     if (
       !mapsApiLoaded ||
       !window.google?.maps ||
@@ -358,6 +607,8 @@ const EnterpriseDriverMap = ({
       return;
     }
 
+    if (mapMode !== "navigation") return;
+
     const driverLocation = selectedDriver?.currentLocation;
     if (!driverLocation?.lat || !driverLocation?.lng) {
       return;
@@ -365,6 +616,7 @@ const EnterpriseDriverMap = ({
 
     if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
+      clearStopMarkers();
       if (directionsPanelRef.current) {
         directionsPanelRef.current.innerHTML = "";
       }
@@ -373,11 +625,13 @@ const EnterpriseDriverMap = ({
         totalStops: 0,
         totalDistanceText: "",
         totalDurationText: "",
+        nextInstruction: "",
       });
       return;
     }
 
     const signature = JSON.stringify({
+      mapMode,
       driverLat: Number(driverLocation.lat).toFixed(6),
       driverLng: Number(driverLocation.lng).toFixed(6),
       activeDeliveryId: activeDelivery?._id || activeDelivery?.id || null,
@@ -472,6 +726,10 @@ const EnterpriseDriverMap = ({
               const route = result.routes?.[0];
               const legs = route?.legs || [];
 
+              if (route?.bounds && mapInstanceRef.current) {
+                mapInstanceRef.current.fitBounds(route.bounds);
+              }
+
               const totalDistanceMeters = legs.reduce(
                 (sum, leg) => sum + (leg.distance?.value || 0),
                 0
@@ -499,6 +757,14 @@ const EnterpriseDriverMap = ({
                 orderedStopsFromRoute = [...reorderedIntermediate, finalDestination];
               }
 
+              drawStopMarkers(orderedStopsFromRoute);
+
+              const firstLeg = legs[0];
+              const nextInstruction =
+                firstLeg?.steps?.[0]?.instructions
+                  ?.replace(/<[^>]+>/g, "")
+                  ?.trim() || "";
+
               setRouteInfo({
                 orderedStops: orderedStopsFromRoute,
                 totalStops: orderedStopsFromRoute.length,
@@ -507,31 +773,47 @@ const EnterpriseDriverMap = ({
                   totalMin >= 60
                     ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
                     : `${totalMin} min`,
+                nextInstruction,
               });
             } else {
               console.error("Error trazando la ruta:", status);
+              clearStopMarkers();
+              drawStopMarkers(geocodedStops);
+
               setRouteInfo({
                 orderedStops: geocodedStops,
                 totalStops: geocodedStops.length,
                 totalDistanceText: "",
                 totalDurationText: "",
+                nextInstruction: "",
               });
             }
           }
         );
       } catch (error) {
         console.error("Error construyendo ruta:", error);
+        clearStopMarkers();
+
         setRouteInfo({
           orderedStops: activeDelivery?.address ? [activeDelivery] : [],
           totalStops: activeDelivery?.address ? 1 : 0,
           totalDistanceText: "",
           totalDurationText: "",
+          nextInstruction: "",
         });
       }
     };
 
     buildRoute();
-  }, [mapsApiLoaded, selectedDriver?.currentLocation, pendingStops, activeDelivery]);
+  }, [
+    mapsApiLoaded,
+    selectedDriver?.currentLocation,
+    pendingStops,
+    activeDelivery,
+    mapMode,
+    clearStopMarkers,
+    drawStopMarkers,
+  ]);
 
   const openExternalGoogleMaps = () => {
     const driverLocation = selectedDriver?.currentLocation;
@@ -565,7 +847,7 @@ const EnterpriseDriverMap = ({
       destination
     )}&travelmode=driving${waypoints ? `&waypoints=${waypoints}` : ""}`;
 
-    window.open(url, "_blank");
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const canNavigate =
@@ -589,7 +871,7 @@ const EnterpriseDriverMap = ({
               Mapa y navegación de ruta
             </h3>
             <p className="text-sm text-slate-500">
-              Seguimiento en tiempo real, orden de paradas e indicaciones paso a paso.
+              Seguimiento en tiempo real, ruta profesional e indicaciones dentro de la app.
             </p>
           </div>
 
@@ -602,7 +884,15 @@ const EnterpriseDriverMap = ({
               {isTracking ? "Seguimiento activo" : "Seguimiento inactivo"}
             </span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Paradas: {visibleStops.length}
+              Modo:{" "}
+              {mapMode === "navigation"
+                ? "Navegación"
+                : mapMode === "dayRoute"
+                ? "Ruta del día"
+                : "Solo ubicación"}
+            </span>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
+              Paradas: {mapMode === "dayRoute" ? dayRoutePoints.length : visibleStops.length}
             </span>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
               Distancia: {routeInfo.totalDistanceText || "—"}
@@ -612,10 +902,89 @@ const EnterpriseDriverMap = ({
       </div>
 
       <div className="p-5">
-        <div
-          ref={mapRef}
-          className="w-full h-[420px] rounded-[24px] overflow-hidden border border-slate-200"
-        />
+        <div className="relative">
+          <div
+            ref={mapRef}
+            className="w-full h-[460px] rounded-[24px] overflow-hidden border border-slate-200"
+          />
+
+          <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-3 lg:right-auto lg:max-w-[420px]">
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setMapMode("navigation")}
+                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
+                  mapMode === "navigation"
+                    ? "bg-green-600 text-white"
+                    : "bg-white text-slate-700 border border-slate-200"
+                }`}
+              >
+                Modo navegación
+              </button>
+
+              <button
+                type="button"
+                onClick={async () => {
+                  setMapMode("dayRoute");
+                  await loadDayRoute();
+                }}
+                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
+                  mapMode === "dayRoute"
+                    ? "bg-blue-600 text-white"
+                    : "bg-white text-slate-700 border border-slate-200"
+                }`}
+              >
+                Ver recorrido del día
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setMapMode("currentLocation")}
+                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
+                  mapMode === "currentLocation"
+                    ? "bg-slate-900 text-white"
+                    : "bg-white text-slate-700 border border-slate-200"
+                }`}
+              >
+                Ver ubicación actual
+              </button>
+            </div>
+
+            {mapMode === "navigation" && activeDelivery ? (
+              <div className="rounded-2xl border border-blue-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
+                  Entrega activa
+                </p>
+                <p className="mt-1 text-sm font-bold text-slate-900">
+                  {activeDelivery.clientName || "Cliente"}
+                </p>
+                <p className="mt-1 text-sm text-slate-700">
+                  {activeDelivery.address}
+                </p>
+                {routeInfo.nextInstruction ? (
+                  <div className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">
+                    Siguiente indicación: {routeInfo.nextInstruction}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {mapMode === "dayRoute" ? (
+              <div className="rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                  Recorrido del día
+                </p>
+                <p className="mt-1 text-sm font-bold text-slate-900">
+                  {loadingDayRoute
+                    ? "Cargando recorrido..."
+                    : dayRoutePoints.length
+                    ? `${dayRoutePoints.length} puntos registrados`
+                    : "Aún no hay puntos registrados"}
+                </p>
+              </div>
+            ) : null}
+          </div>
+        </div>
 
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-4">
@@ -635,10 +1004,10 @@ const EnterpriseDriverMap = ({
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Paradas
+                  Paradas / puntos
                 </p>
                 <p className="mt-2 text-sm font-bold text-slate-900">
-                  {visibleStops.length}
+                  {mapMode === "dayRoute" ? dayRoutePoints.length : visibleStops.length}
                 </p>
               </div>
 
@@ -667,17 +1036,6 @@ const EnterpriseDriverMap = ({
               </div>
             ) : null}
 
-            {activeDelivery ? (
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <p className="text-sm font-bold text-blue-900 mb-1">
-                  Entrega en curso
-                </p>
-                <p className="text-sm text-blue-800">
-                  {activeDelivery.clientName} — {activeDelivery.address}
-                </p>
-              </div>
-            ) : null}
-
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
@@ -689,38 +1047,85 @@ const EnterpriseDriverMap = ({
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 }`}
               >
-                Abrir navegación en Google Maps
+                Abrir en Google Maps
+              </button>
+
+              <button
+                type="button"
+                onClick={loadDayRoute}
+                className="px-4 py-2.5 rounded-2xl font-semibold border border-slate-200 bg-white text-slate-700 transition hover:scale-[1.02]"
+              >
+                Actualizar recorrido
               </button>
             </div>
 
-            {visibleStops.length > 0 ? (
+            {mapMode === "navigation" ? (
+              visibleStops.length > 0 ? (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <p className="text-sm font-bold text-slate-900 mb-3">
+                    Orden de la ruta
+                  </p>
+
+                  <div className="space-y-2">
+                    {visibleStops.map((stop, index) => (
+                      <div
+                        key={stop._id || stop.id || index}
+                        className={`rounded-xl border px-3 py-3 text-sm ${
+                          String(activeDelivery?._id || activeDelivery?.id) ===
+                          String(stop._id || stop.id)
+                            ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                            : "border-slate-200 bg-white text-slate-700"
+                        }`}
+                      >
+                        <span className="font-semibold">{index + 1}.</span>{" "}
+                        {stop.clientName} — {stop.address}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                  Aún no hay direcciones pendientes para dibujar la ruta.
+                </div>
+              )
+            ) : null}
+
+            {mapMode === "dayRoute" ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-bold text-slate-900 mb-3">
-                  Orden de la ruta
+                  Recorrido acumulado del día
                 </p>
 
-                <div className="space-y-2">
-                  {visibleStops.map((stop, index) => (
-                    <div
-                      key={stop._id || stop.id || index}
-                      className={`rounded-xl border px-3 py-3 text-sm ${
-                        String(activeDelivery?._id || activeDelivery?.id) ===
-                        String(stop._id || stop.id)
-                          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
-                          : "border-slate-200 bg-white text-slate-700"
-                      }`}
-                    >
-                      <span className="font-semibold">{index + 1}.</span>{" "}
-                      {stop.clientName} — {stop.address}
-                    </div>
-                  ))}
-                </div>
+                {dayRoutePoints.length ? (
+                  <div className="space-y-2 max-h-[260px] overflow-y-auto">
+                    {dayRoutePoints.map((point, index) => (
+                      <div
+                        key={`${point.timestamp || "point"}-${index}`}
+                        className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
+                      >
+                        <span className="font-semibold">{index + 1}.</span>{" "}
+                        {Number(point.lat).toFixed(6)}, {Number(point.lng).toFixed(6)}
+                        <div className="mt-1 text-xs text-slate-500">
+                          {point.timestamp
+                            ? new Date(point.timestamp).toLocaleString()
+                            : "Sin fecha"}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
+                    No hay recorrido registrado hoy.
+                  </div>
+                )}
               </div>
-            ) : (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                Aún no hay direcciones pendientes para dibujar la ruta.
+            ) : null}
+
+            {mapMode === "currentLocation" ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
+                Mostrando únicamente la ubicación actual del conductor.
               </div>
-            )}
+            ) : null}
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -731,10 +1136,18 @@ const EnterpriseDriverMap = ({
               </p>
             </div>
 
-            <div
-              ref={directionsPanelRef}
-              className="p-3 text-sm text-slate-700 max-h-[420px] overflow-y-auto"
-            />
+            {mapMode === "navigation" ? (
+              <div
+                ref={directionsPanelRef}
+                className="p-3 text-sm text-slate-700 max-h-[460px] overflow-y-auto"
+              />
+            ) : (
+              <div className="p-4 text-sm text-slate-500">
+                {mapMode === "dayRoute"
+                  ? "En modo recorrido del día no se muestran indicaciones paso a paso."
+                  : "En modo solo ubicación no hay indicaciones activas."}
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1187,38 +1600,38 @@ const EnterpriseDriverPanel = () => {
   };
 
   const handleScopeChange = (scope) => {
-  setListScopeFilter(scope);
+    setListScopeFilter(scope);
 
-  if (scope === "Pendientes") {
-    setListStatusFilter("Pendiente");
-    setListDateFilter("");
-    return;
-  }
+    if (scope === "Pendientes") {
+      setListStatusFilter("Pendiente");
+      setListDateFilter("");
+      return;
+    }
 
-  if (scope === "En curso") {
-    setListStatusFilter("En curso");
-    setListDateFilter("");
-    return;
-  }
+    if (scope === "En curso") {
+      setListStatusFilter("En curso");
+      setListDateFilter("");
+      return;
+    }
 
-  if (scope === "Finalizados") {
-    setListStatusFilter("Finalizada");
-    setListDateFilter("");
-    return;
-  }
+    if (scope === "Finalizados") {
+      setListStatusFilter("Finalizada");
+      setListDateFilter("");
+      return;
+    }
 
-  if (scope === "Hoy") {
-    setListStatusFilter("Todos");
-    setListDateFilter(new Date().toISOString().slice(0, 10));
-    return;
-  }
+    if (scope === "Hoy") {
+      setListStatusFilter("Todos");
+      setListDateFilter(new Date().toISOString().slice(0, 10));
+      return;
+    }
 
-  if (scope === "Todos") {
-    setListStatusFilter("Todos");
-    setListDateFilter("");
-    return;
-  }
-};
+    if (scope === "Todos") {
+      setListStatusFilter("Todos");
+      setListDateFilter("");
+      return;
+    }
+  };
 
   if (!activeCedula) {
     return (
@@ -1353,7 +1766,9 @@ const EnterpriseDriverPanel = () => {
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Cédula
                       </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900">{selectedDriver.cedula}</p>
+                      <p className="mt-1 text-sm font-bold text-slate-900">
+                        {selectedDriver.cedula}
+                      </p>
                     </div>
 
                     <div className="rounded-2xl bg-white p-4 border border-slate-200">
@@ -1448,42 +1863,42 @@ const EnterpriseDriverPanel = () => {
 
           <div className="p-6">
             <div className="flex flex-wrap gap-2 mb-4">
-  <button
-    type="button"
-    onClick={() => handleScopeChange("Pendientes")}
-    className={`px-4 py-2 rounded-2xl font-semibold transition ${
-      listScopeFilter === "Pendientes"
-        ? "bg-amber-500 text-white shadow-md"
-        : "bg-slate-100 text-slate-700 border border-slate-200"
-    }`}
-  >
-    Pendientes
-  </button>
+              <button
+                type="button"
+                onClick={() => handleScopeChange("Pendientes")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "Pendientes"
+                    ? "bg-amber-500 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Pendientes
+              </button>
 
-  <button
-    type="button"
-    onClick={() => handleScopeChange("En curso")}
-    className={`px-4 py-2 rounded-2xl font-semibold transition ${
-      listScopeFilter === "En curso"
-        ? "bg-blue-600 text-white shadow-md"
-        : "bg-slate-100 text-slate-700 border border-slate-200"
-    }`}
-  >
-    En curso
-  </button>
+              <button
+                type="button"
+                onClick={() => handleScopeChange("En curso")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "En curso"
+                    ? "bg-blue-600 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                En curso
+              </button>
 
-  <button
-    type="button"
-    onClick={() => handleScopeChange("Finalizados")}
-    className={`px-4 py-2 rounded-2xl font-semibold transition ${
-      listScopeFilter === "Finalizados"
-        ? "bg-emerald-600 text-white shadow-md"
-        : "bg-slate-100 text-slate-700 border border-slate-200"
-    }`}
-  >
-    Finalizados
-  </button>
-</div>
+              <button
+                type="button"
+                onClick={() => handleScopeChange("Finalizados")}
+                className={`px-4 py-2 rounded-2xl font-semibold transition ${
+                  listScopeFilter === "Finalizados"
+                    ? "bg-emerald-600 text-white shadow-md"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Finalizados
+              </button>
+            </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
               <input
