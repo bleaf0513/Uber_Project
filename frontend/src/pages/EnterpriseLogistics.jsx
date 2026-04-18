@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
-import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import EnterpriseDeliveryChat from "./EnterpriseDeliveryChat";
@@ -303,9 +302,6 @@ const EnterpriseLogistics = () => {
   const [selectedDriverRouteSummary, setSelectedDriverRouteSummary] = useState(null);
 
   const suggestionTimerRef = useRef(null);
-  const suggestionSeqRef = useRef(0);
-  const addressBoxRef = useRef(null);
-
   const driversRequestSeqRef = useRef(0);
   const deliveriesRequestSeqRef = useRef(0);
   const clientsRequestSeqRef = useRef(0);
@@ -333,7 +329,7 @@ const EnterpriseLogistics = () => {
 
     try {
       return JSON.parse(text);
-    } catch (error) {
+    } catch {
       throw new Error(
         `La API no devolvió JSON. Revisa VITE_BASE_URL o la ruta backend. Respuesta: ${text.slice(
           0,
@@ -448,25 +444,6 @@ const EnterpriseLogistics = () => {
     const date = new Date(raw);
     if (Number.isNaN(date.getTime())) return "";
     return date.toISOString().slice(0, 10);
-  };
-
-  const normalizeAddressQuery = (query) => {
-    const clean = String(query || "").trim();
-    if (!clean) return "";
-
-    const lowered = clean.toLowerCase();
-    if (
-      lowered.includes("colombia") ||
-      lowered.includes("medellín") ||
-      lowered.includes("medellin") ||
-      lowered.includes("itagüí") ||
-      lowered.includes("itagui") ||
-      lowered.includes("antioquia")
-    ) {
-      return clean;
-    }
-
-    return `${clean}, Colombia`;
   };
 
   const normalizeSender = (msg) =>
@@ -1021,11 +998,11 @@ const EnterpriseLogistics = () => {
       return;
     }
 
-    const selectedDriver = drivers.find(
+    const selectedDriverForm = drivers.find(
       (driver) => driverIdValue(driver) === String(assignedDriverId)
     );
 
-    if (!selectedDriver) {
+    if (!selectedDriverForm) {
       alert("Debes seleccionar un conductor válido.");
       return;
     }
@@ -1586,23 +1563,17 @@ const EnterpriseLogistics = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
             <div className="bg-yellow-50 rounded-xl p-4 text-center">
               <p className="text-sm text-gray-500">Pendientes</p>
-              <p className="text-2xl font-bold text-yellow-600">
-                {stats.pending}
-              </p>
+              <p className="text-2xl font-bold text-yellow-600">{stats.pending}</p>
             </div>
 
             <div className="bg-blue-50 rounded-xl p-4 text-center">
               <p className="text-sm text-gray-500">En curso</p>
-              <p className="text-2xl font-bold text-blue-600">
-                {stats.inProgress}
-              </p>
+              <p className="text-2xl font-bold text-blue-600">{stats.inProgress}</p>
             </div>
 
             <div className="bg-green-50 rounded-xl p-4 text-center">
               <p className="text-sm text-gray-500">Finalizadas</p>
-              <p className="text-2xl font-bold text-green-600">
-                {stats.finished}
-              </p>
+              <p className="text-2xl font-bold text-green-600">{stats.finished}</p>
             </div>
           </div>
         </div>
@@ -1612,10 +1583,10 @@ const EnterpriseLogistics = () => {
             <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">
-                  Seguimiento del conductor
+                  Seguimiento en vivo
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Ubicación actual, destino activo y última operación registrada
+                  Ubicación actual del conductor, destino activo y última operación registrada.
                 </p>
               </div>
 
@@ -1739,10 +1710,10 @@ const EnterpriseLogistics = () => {
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
               <div>
                 <h2 className="text-xl font-bold text-gray-900">
-                  Recorrido total del conductor
+                  Recorrido y métricas del día
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Jornada, puntos GPS y tiempos reales acumulados del día.
+                  Jornada, puntos GPS y tiempos reales acumulados del conductor.
                 </p>
               </div>
 
