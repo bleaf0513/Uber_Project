@@ -35,6 +35,8 @@ const EnterpriseLogisticsDriverMap = ({
   selectedDriver,
   activeOrLastDelivery,
   driverPendingDeliveriesCount,
+  routePoints = [],
+  mapViewMode = "current",
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
@@ -46,6 +48,23 @@ const EnterpriseLogisticsDriverMap = ({
   const lastCoordsRef = useRef(null);
   const routeSignatureRef = useRef("");
   const infoWindowSignatureRef = useRef("");
+  const dayPolylineRef = useRef(null);
+  const dayMarkersRef = useRef([]);
+  const dayRouteSignatureRef = useRef("");
+
+  const clearDayRouteArtifacts = useCallback(() => {
+    if (dayPolylineRef.current) {
+      dayPolylineRef.current.setMap(null);
+      dayPolylineRef.current = null;
+    }
+
+    if (dayMarkersRef.current.length > 0) {
+      dayMarkersRef.current.forEach((marker) => marker.setMap(null));
+      dayMarkersRef.current = [];
+    }
+
+    dayRouteSignatureRef.current = "";
+  }, []);
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapRef.current) return;
@@ -92,6 +111,8 @@ const EnterpriseLogisticsDriverMap = ({
         directionsRendererRef.current.set("directions", null);
       }
 
+      clearDayRouteArtifacts();
+
       if (infoWindowRef.current) {
         infoWindowRef.current.close();
       }
@@ -121,15 +142,6 @@ const EnterpriseLogisticsDriverMap = ({
       markerRef.current.setPosition(coords);
       markerRef.current.setTitle(selectedDriver?.name || "Conductor");
       markerRef.current.setMap(mapInstanceRef.current);
-    }
-
-    const last = lastCoordsRef.current;
-    const movedEnough = areCoordsMeaningfullyDifferent(last, coords, 0.0003);
-
-    if (movedEnough) {
-      mapInstanceRef.current.panTo(coords);
-      mapInstanceRef.current.setZoom(15);
-      lastCoordsRef.current = coords;
     }
 
     const updatedAtText = selectedDriver?.currentLocation?.updatedAt
@@ -176,14 +188,34 @@ const EnterpriseLogisticsDriverMap = ({
 
     if (infoWindowRef.current && infoWindowSignatureRef.current !== nextInfoSignature) {
       infoWindowRef.current.setContent(content);
-      infoWindowRef.current.open({
-        anchor: markerRef.current,
-        map: mapInstanceRef.current,
-      });
+
+      if (mapViewMode === "current") {
+        infoWindowRef.current.open({
+          anchor: markerRef.current,
+          map: mapInstanceRef.current,
+        });
+      }
+
       infoWindowSignatureRef.current = nextInfoSignature;
+    }
+
+    if (mapViewMode === "current") {
+      const last = lastCoordsRef.current;
+      const movedEnough = areCoordsMeaningfullyDifferent(last, coords, 0.0003);
+
+      if (movedEnough) {
+        mapInstanceRef.current.panTo(coords);
+        mapInstanceRef.current.setZoom(15);
+        lastCoordsRef.current = coords;
+      }
+
+      if (markerRef.current) {
+        markerRef.current.setMap(mapInstanceRef.current);
+      }
     }
   }, [
     mapsApiLoaded,
+    mapViewMode,
     selectedDriver?._id,
     selectedDriver?.name,
     selectedDriver?.status,
@@ -193,6 +225,7 @@ const EnterpriseLogisticsDriverMap = ({
     selectedDriver?.currentLocation?.lng,
     selectedDriver?.currentLocation?.updatedAt,
     driverPendingDeliveriesCount,
+    clearDayRouteArtifacts,
   ]);
 
   useEffect(() => {
@@ -204,6 +237,14 @@ const EnterpriseLogisticsDriverMap = ({
     ) {
       return;
     }
+
+    if (mapViewMode !== "current") {
+      directionsRendererRef.current.set("directions", null);
+      routeSignatureRef.current = "";
+      return;
+    }
+
+    clearDayRouteArtifacts();
 
     const lat = Number(selectedDriver?.currentLocation?.lat);
     const lng = Number(selectedDriver?.currentLocation?.lng);
@@ -221,6 +262,7 @@ const EnterpriseLogisticsDriverMap = ({
       address: destinationAddress,
       deliveryId: activeOrLastDelivery?._id || activeOrLastDelivery?.id || "",
       status: activeOrLastDelivery?.status || "",
+      mode: mapViewMode,
     });
 
     if (signature === routeSignatureRef.current) return;
@@ -235,6 +277,8 @@ const EnterpriseLogisticsDriverMap = ({
         travelMode: window.google.maps.TravelMode.DRIVING,
       },
       (result, status) => {
+        if (mapViewMode !== "current") return;
+
         if (status === "OK" && result) {
           directionsRendererRef.current.setDirections(result);
         } else {
@@ -245,13 +289,179 @@ const EnterpriseLogisticsDriverMap = ({
     );
   }, [
     mapsApiLoaded,
+    mapViewMode,
     selectedDriver?.currentLocation?.lat,
     selectedDriver?.currentLocation?.lng,
     activeOrLastDelivery?.address,
     activeOrLastDelivery?._id,
     activeOrLastDelivery?.id,
     activeOrLastDelivery?.status,
+    clearDayRouteArtifacts,
   ]);
+
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
+
+    if (mapViewMode !== "day") {
+      clearDayRouteArtifacts();
+      return;
+    }
+
+    if (directionsRendererRef.current) {
+      directionsRendererRef.current.set("directions", null);
+      routeSignatureRef.current = "";
+    }
+
+    if (infoWindowRef.current) {
+      infoWindowRef.current.close();
+    }
+
+    const normalizedPoints = (Array.isArray(routePoints) ? routePoints : [])
+      .map((point) => {
+        const lat = Number(point?.lat ?? point?.latitude);
+        const lng = Number(point?.lng ?? point?.longitude);
+        const createdAt =
+          point?.createdAt ||
+          point?.recordedAt ||
+          point?.timestamp ||
+          point?.updatedAt ||
+          "";
+        return {
+          lat,
+          lng,
+          createdAt,
+        };
+      })
+      .filter((point) => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+      .sort((a, b) => {
+        const aTime = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const bTime = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return aTime - bTime;
+      });
+
+    const signature = JSON.stringify(
+      normalizedPoints.map((p) => ({
+        lat: Number(p.lat).toFixed(6),
+        lng: Number(p.lng).toFixed(6),
+        t: p.createdAt || "",
+      }))
+    );
+
+    if (signature === dayRouteSignatureRef.current) return;
+    dayRouteSignatureRef.current = signature;
+
+    clearDayRouteArtifacts();
+
+    const currentLat = Number(selectedDriver?.currentLocation?.lat);
+    const currentLng = Number(selectedDriver?.currentLocation?.lng);
+    const hasCurrentCoords = Number.isFinite(currentLat) && Number.isFinite(currentLng);
+
+    if (normalizedPoints.length === 0) {
+      if (markerRef.current) {
+        if (hasCurrentCoords) {
+          markerRef.current.setPosition({ lat: currentLat, lng: currentLng });
+          markerRef.current.setMap(mapInstanceRef.current);
+          mapInstanceRef.current.panTo({ lat: currentLat, lng: currentLng });
+          mapInstanceRef.current.setZoom(15);
+        } else {
+          markerRef.current.setMap(null);
+        }
+      }
+      return;
+    }
+
+    const path = normalizedPoints.map((point) => ({ lat: point.lat, lng: point.lng }));
+
+    dayPolylineRef.current = new window.google.maps.Polyline({
+      path,
+      geodesic: true,
+      strokeColor: "#0f766e",
+      strokeOpacity: 0.95,
+      strokeWeight: 5,
+      map: mapInstanceRef.current,
+    });
+
+    const bounds = new window.google.maps.LatLngBounds();
+    path.forEach((point) => bounds.extend(point));
+
+    const startPoint = path[0];
+    const endPoint = path[path.length - 1];
+
+    const startMarker = new window.google.maps.Marker({
+      map: mapInstanceRef.current,
+      position: startPoint,
+      label: {
+        text: "I",
+        color: "#ffffff",
+        fontWeight: "bold",
+      },
+      title: "Inicio del recorrido",
+    });
+
+    const endMarker = new window.google.maps.Marker({
+      map: mapInstanceRef.current,
+      position: endPoint,
+      label: {
+        text: "F",
+        color: "#ffffff",
+        fontWeight: "bold",
+      },
+      title: "Último punto del recorrido",
+    });
+
+    dayMarkersRef.current = [startMarker, endMarker];
+
+    if (markerRef.current && hasCurrentCoords) {
+      markerRef.current.setPosition({ lat: currentLat, lng: currentLng });
+      markerRef.current.setMap(mapInstanceRef.current);
+      bounds.extend({ lat: currentLat, lng: currentLng });
+    } else if (markerRef.current) {
+      markerRef.current.setMap(null);
+    }
+
+    mapInstanceRef.current.fitBounds(bounds);
+
+    const fitListener = window.google.maps.event.addListenerOnce(
+      mapInstanceRef.current,
+      "bounds_changed",
+      () => {
+        if (mapInstanceRef.current.getZoom() > 17) {
+          mapInstanceRef.current.setZoom(17);
+        }
+      }
+    );
+
+    return () => {
+      if (fitListener) {
+        window.google.maps.event.removeListener(fitListener);
+      }
+    };
+  }, [
+    mapsApiLoaded,
+    mapViewMode,
+    routePoints,
+    selectedDriver?.currentLocation?.lat,
+    selectedDriver?.currentLocation?.lng,
+    clearDayRouteArtifacts,
+  ]);
+
+  useEffect(() => {
+    return () => {
+      clearDayRouteArtifacts();
+
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.setMap(null);
+      }
+
+      if (markerRef.current) {
+        markerRef.current.setMap(null);
+      }
+
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+      }
+    };
+  }, [clearDayRouteArtifacts]);
 
   return (
     <div
@@ -301,6 +511,7 @@ const EnterpriseLogistics = () => {
   const [routeSummaryLoading, setRouteSummaryLoading] = useState(false);
   const [routeSummaryDate, setRouteSummaryDate] = useState(todayDate);
   const [selectedDriverRouteSummary, setSelectedDriverRouteSummary] = useState(null);
+  const [mapViewMode, setMapViewMode] = useState("current");
 
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
@@ -1278,6 +1489,10 @@ const EnterpriseLogistics = () => {
     fetchSelectedDriverRouteSummary();
   }, [fetchSelectedDriverRouteSummary]);
 
+  useEffect(() => {
+    setMapViewMode("current");
+  }, [selectedDriverFilter]);
+
   const formatDurationText = (seconds) => {
     const total = Number(seconds || 0);
     if (!Number.isFinite(total) || total <= 0) return "0 min";
@@ -1682,6 +1897,8 @@ const EnterpriseLogistics = () => {
               selectedDriver={selectedDriver}
               activeOrLastDelivery={activeOrLastDelivery}
               driverPendingDeliveriesCount={selectedDriverPendingDeliveries.length}
+              routePoints={routePoints}
+              mapViewMode={mapViewMode}
             />
 
             <div className="mt-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
@@ -1723,7 +1940,9 @@ const EnterpriseLogistics = () => {
                   Referencia mostrada en mapa
                 </p>
                 <p className="text-sm text-gray-800 mt-1">
-                  {selectedDriverActiveDelivery
+                  {mapViewMode === "day"
+                    ? "Recorrido total del día"
+                    : selectedDriverActiveDelivery
                     ? "Destino activo"
                     : selectedDriverLastFinishedDelivery
                     ? "Última ruta conocida"
@@ -1753,6 +1972,30 @@ const EnterpriseLogistics = () => {
                   onChange={(e) => setRouteSummaryDate(e.target.value)}
                   className="bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
                 />
+
+                <button
+                  type="button"
+                  onClick={() => setMapViewMode("day")}
+                  className={`px-4 py-3 rounded-xl font-semibold ${
+                    mapViewMode === "day"
+                      ? "bg-emerald-600 text-white"
+                      : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                  }`}
+                >
+                  Ver recorrido del día
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setMapViewMode("current")}
+                  className={`px-4 py-3 rounded-xl font-semibold ${
+                    mapViewMode === "current"
+                      ? "bg-blue-600 text-white"
+                      : "bg-blue-100 text-blue-700 border border-blue-200"
+                  }`}
+                >
+                  Ver ubicación actual
+                </button>
 
                 <button
                   type="button"
