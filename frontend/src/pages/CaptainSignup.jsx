@@ -1,61 +1,128 @@
 import React, { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import axios from "axios";
 import { toast, ToastContainer } from "react-toastify";
 import { getApiBaseUrl, getApiHintOrigin } from "../apiBase";
+
+const MAX_FILE_MB = 4;
+const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
+
+const fileToBase64 = (file) => {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      resolve(reader.result);
+    };
+
+    reader.onerror = () => {
+      reject(new Error("No se pudo leer el archivo."));
+    };
+
+    reader.readAsDataURL(file);
+  });
+};
+
+const validateImageFile = (file, label) => {
+  if (!file) {
+    throw new Error(`Debes subir la foto de ${label}.`);
+  }
+
+  if (!ALLOWED_TYPES.includes(file.type)) {
+    throw new Error(`${label} debe ser una imagen JPG, PNG o WEBP.`);
+  }
+
+  const sizeMb = file.size / (1024 * 1024);
+
+  if (sizeMb > MAX_FILE_MB) {
+    throw new Error(`${label} no puede pesar más de ${MAX_FILE_MB} MB.`);
+  }
+};
 
 const CaptainSignup = () => {
   const [firstname, setFirstName] = useState("");
   const [lastname, setLastName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+
   const [vehicleColor, setVehicleColor] = useState("");
   const [vehiclePlate, setVehiclePlate] = useState("");
   const [vehicleCapacity, setVehicleCapacity] = useState("");
   const [vehicleType, setVehicleType] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
-  const navigate = useNavigate();
+  const [drivingLicenseFile, setDrivingLicenseFile] = useState(null);
+  const [vehicleRegistrationFile, setVehicleRegistrationFile] = useState(null);
+
+  const [submitting, setSubmitting] = useState(false);
+  const [applicationSent, setApplicationSent] = useState(false);
+
+  const resetForm = () => {
+    setFirstName("");
+    setLastName("");
+    setEmail("");
+    setPassword("");
+    setVehicleColor("");
+    setVehiclePlate("");
+    setVehicleCapacity("");
+    setVehicleType("");
+    setDrivingLicenseFile(null);
+    setVehicleRegistrationFile(null);
+  };
 
   const submitHandler = async (e) => {
     e.preventDefault();
 
-    const captainData = {
-      fullname: {
-        firstname,
-        lastname,
-      },
-      email,
-      password,
-      vehicle: {
-        color: vehicleColor,
-        plate: vehiclePlate,
-        capacity: vehicleCapacity,
-        vehicleType,
-      },
-    };
-
-    setSubmitting(true);
-
     try {
+      validateImageFile(drivingLicenseFile, "la licencia de conducción");
+      validateImageFile(vehicleRegistrationFile, "la matrícula o tarjeta de propiedad");
+
+      setSubmitting(true);
+
+      const drivingLicenseImage = await fileToBase64(drivingLicenseFile);
+      const vehicleRegistrationImage = await fileToBase64(vehicleRegistrationFile);
+
+      const captainData = {
+        fullname: {
+          firstname: firstname.trim(),
+          lastname: lastname.trim(),
+        },
+        email: email.trim().toLowerCase(),
+        password,
+        vehicle: {
+          color: vehicleColor.trim(),
+          plate: vehiclePlate.trim().toUpperCase(),
+          capacity: Number(vehicleCapacity),
+          vehicleType,
+        },
+        documents: {
+          drivingLicenseImage,
+          vehicleRegistrationImage,
+        },
+      };
+
       const response = await axios.post(
         `${getApiBaseUrl()}/captain/register`,
-        captainData
+        captainData,
+        {
+          headers: {
+            "Content-Type": "application/json",
+          },
+        }
       );
 
-      if (response.status === 201 && response.data?.token) {
-        localStorage.setItem("token", response.data.token);
+      if (response.status === 201 && response.data?.success) {
+        resetForm();
+        setApplicationSent(true);
 
-        setFirstName("");
-        setLastName("");
-        setEmail("");
-        setPassword("");
-        setVehicleColor("");
-        setVehiclePlate("");
-        setVehicleCapacity("");
-        setVehicleType("");
-
-        navigate("/captain-home");
+        toast.success(
+          response.data?.message ||
+            "Solicitud enviada correctamente. Un administrador la revisará."
+        );
       }
     } catch (err) {
       const isOffline =
@@ -66,7 +133,7 @@ const CaptainSignup = () => {
 
       if (isOffline) {
         toast.error(
-          `No se puede conectar con la API (${getApiHintOrigin()}). Inicia el backend en otra terminal: cd backend -> npm run dev:memory y luego recarga esta pagina.`
+          `No se puede conectar con la API (${getApiHintOrigin()}). Revisa que el backend esté activo.`
         );
       } else {
         const msg =
@@ -75,9 +142,9 @@ const CaptainSignup = () => {
           (Array.isArray(err.response?.data?.errors) &&
             err.response.data.errors[0]?.msg) ||
           err.message ||
-          "Error al registrarse.";
+          "Error al enviar la solicitud.";
 
-        toast.error(typeof msg === "string" ? msg : "Error al registrarse.");
+        toast.error(typeof msg === "string" ? msg : "Error al enviar la solicitud.");
       }
     } finally {
       setSubmitting(false);
@@ -106,133 +173,233 @@ const CaptainSignup = () => {
                 </div>
 
                 <p className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-4 py-2 text-sm font-semibold">
-                  Registro para transportadores
+                  Solicitud para transportadores
                 </p>
 
                 <h1 className="text-3xl font-bold text-gray-900 mt-4">
-                  Crea tu cuenta
+                  Solicita tu activación
                 </h1>
 
                 <p className="text-gray-600 mt-2 text-sm leading-relaxed">
-                  Regístrate como conductor o transportador para recibir
-                  servicios y operar dentro de Central Go.
+                  Regístrate como conductor o transportador. Tu solicitud será
+                  revisada por el equipo de Central Go antes de activar tu cuenta.
                 </p>
               </div>
 
-              <form onSubmit={submitHandler}>
-                <h3 className="text-base mb-2 font-semibold text-gray-800">
-                  ¿Cómo quieres que te llamemos?
-                </h3>
+              {applicationSent ? (
+                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 p-6 text-center">
+                  <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-emerald-600 text-3xl text-white">
+                    ✓
+                  </div>
 
-                <div className="flex gap-3 mb-5">
-                  <input
-                    value={firstname}
-                    onChange={(e) => setFirstName(e.target.value)}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
-                    type="text"
-                    placeholder="Nombre"
-                  />
-                  <input
-                    value={lastname}
-                    onChange={(e) => setLastName(e.target.value)}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
-                    type="text"
-                    placeholder="Apellido"
-                  />
+                  <h2 className="text-2xl font-bold text-emerald-900">
+                    Solicitud enviada
+                  </h2>
+
+                  <p className="mt-3 text-sm leading-relaxed text-emerald-800">
+                    Tu información quedó pendiente de revisión. Cuando el equipo
+                    de Central Go apruebe tu solicitud, podrás iniciar sesión como
+                    conductor.
+                  </p>
+
+                  <div className="mt-6 flex flex-col gap-3 sm:flex-row">
+                    <Link
+                      to="/captain-login"
+                      className="w-full rounded-2xl bg-emerald-600 px-4 py-3 text-center font-semibold text-white"
+                    >
+                      Ir al login
+                    </Link>
+
+                    <button
+                      type="button"
+                      onClick={() => setApplicationSent(false)}
+                      className="w-full rounded-2xl border border-emerald-200 bg-white px-4 py-3 font-semibold text-emerald-700"
+                    >
+                      Enviar otra solicitud
+                    </button>
+                  </div>
                 </div>
+              ) : (
+                <form onSubmit={submitHandler}>
+                  <h3 className="text-base mb-2 font-semibold text-gray-800">
+                    ¿Cómo quieres que te llamemos?
+                  </h3>
 
-                <h3 className="text-base mb-2 font-semibold text-gray-800">
-                  ¿Cuál es tu correo?
-                </h3>
-                <input
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="bg-[#f3f4f6] mb-5 rounded-2xl px-4 py-3 border border-gray-200 w-full text-base outline-none focus:ring-2 focus:ring-emerald-500"
-                  required
-                  type="email"
-                  placeholder="tu_correo@aqui.com"
-                />
+                  <div className="flex gap-3 mb-5">
+                    <input
+                      value={firstname}
+                      onChange={(e) => setFirstName(e.target.value)}
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      type="text"
+                      placeholder="Nombre"
+                    />
 
-                <h3 className="text-base mb-2 font-semibold text-gray-800">
-                  Crea una contraseña
-                </h3>
-                <input
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="bg-[#f3f4f6] mb-5 rounded-2xl px-4 py-3 border border-gray-200 w-full text-base outline-none focus:ring-2 focus:ring-emerald-500"
-                  type="password"
-                  required
-                  placeholder="Tu contraseña"
-                />
+                    <input
+                      value={lastname}
+                      onChange={(e) => setLastName(e.target.value)}
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      type="text"
+                      placeholder="Apellido"
+                    />
+                  </div>
 
-                <h3 className="text-base mb-2 font-semibold text-gray-800">
-                  Información del vehículo
-                </h3>
+                  <h3 className="text-base mb-2 font-semibold text-gray-800">
+                    ¿Cuál es tu correo?
+                  </h3>
 
-                <div className="flex gap-3 mb-4">
                   <input
-                    value={vehicleColor}
-                    onChange={(e) => setVehicleColor(e.target.value)}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="bg-[#f3f4f6] mb-5 rounded-2xl px-4 py-3 border border-gray-200 w-full text-base outline-none focus:ring-2 focus:ring-emerald-500"
                     required
-                    type="text"
-                    placeholder="Color del vehículo"
-                  />
-                  <input
-                    value={vehiclePlate}
-                    onChange={(e) => setVehiclePlate(e.target.value.toUpperCase())}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
-                    type="text"
-                    placeholder="Placa"
-                  />
-                </div>
-
-                <div className="flex gap-3 mb-6">
-                  <input
-                    value={vehicleCapacity}
-                    onChange={(e) => setVehicleCapacity(e.target.value)}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
-                    required
-                    type="number"
-                    min="1"
-                    placeholder="Capacidad"
+                    type="email"
+                    placeholder="tu_correo@aqui.com"
                   />
 
-                  <select
-                    value={vehicleType}
-                    onChange={(e) => setVehicleType(e.target.value)}
-                    className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                  <h3 className="text-base mb-2 font-semibold text-gray-800">
+                    Crea una contraseña
+                  </h3>
+
+                  <input
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="bg-[#f3f4f6] mb-5 rounded-2xl px-4 py-3 border border-gray-200 w-full text-base outline-none focus:ring-2 focus:ring-emerald-500"
+                    type="password"
                     required
+                    placeholder="Tu contraseña"
+                  />
+
+                  <h3 className="text-base mb-2 font-semibold text-gray-800">
+                    Información del vehículo
+                  </h3>
+
+                  <div className="flex gap-3 mb-4">
+                    <input
+                      value={vehicleColor}
+                      onChange={(e) => setVehicleColor(e.target.value)}
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      type="text"
+                      placeholder="Color del vehículo"
+                    />
+
+                    <input
+                      value={vehiclePlate}
+                      onChange={(e) =>
+                        setVehiclePlate(e.target.value.toUpperCase())
+                      }
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      type="text"
+                      placeholder="Placa"
+                    />
+                  </div>
+
+                  <div className="flex gap-3 mb-6">
+                    <input
+                      value={vehicleCapacity}
+                      onChange={(e) => setVehicleCapacity(e.target.value)}
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                      type="number"
+                      min="1"
+                      placeholder="Capacidad"
+                    />
+
+                    <select
+                      value={vehicleType}
+                      onChange={(e) => setVehicleType(e.target.value)}
+                      className="bg-[#f3f4f6] rounded-2xl px-4 py-3 border border-gray-200 text-base w-1/2 outline-none focus:ring-2 focus:ring-emerald-500"
+                      required
+                    >
+                      <option value="" disabled>
+                        Selecciona el tipo
+                      </option>
+                      <option value="motorcycle">Moto</option>
+                      <option value="car">Carro</option>
+                      <option value="light_cargo">Carga liviana</option>
+                      <option value="van">Furgón / camioneta</option>
+                      <option value="truck">Camión</option>
+                    </select>
+                  </div>
+
+                  <h3 className="text-base mb-2 font-semibold text-gray-800">
+                    Documentos obligatorios
+                  </h3>
+
+                  <div className="mb-4 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Foto de la licencia de conducción
+                    </label>
+
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e) =>
+                        setDrivingLicenseFile(e.target.files?.[0] || null)
+                      }
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm"
+                      required
+                    />
+
+                    {drivingLicenseFile ? (
+                      <p className="mt-2 text-xs font-medium text-emerald-700">
+                        Archivo seleccionado: {drivingLicenseFile.name}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Formatos permitidos: JPG, PNG o WEBP. Máximo {MAX_FILE_MB} MB.
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="mb-6 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                      Foto de la matrícula o tarjeta de propiedad
+                    </label>
+
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/webp"
+                      onChange={(e) =>
+                        setVehicleRegistrationFile(e.target.files?.[0] || null)
+                      }
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 text-sm"
+                      required
+                    />
+
+                    {vehicleRegistrationFile ? (
+                      <p className="mt-2 text-xs font-medium text-emerald-700">
+                        Archivo seleccionado: {vehicleRegistrationFile.name}
+                      </p>
+                    ) : (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Formatos permitidos: JPG, PNG o WEBP. Máximo {MAX_FILE_MB} MB.
+                      </p>
+                    )}
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={submitting}
+                    className="bg-emerald-600 text-white font-semibold rounded-2xl px-4 py-3 w-full text-base transition hover:bg-emerald-700 disabled:opacity-60"
                   >
-                    <option value="" disabled>
-                      Selecciona el tipo
-                    </option>
-                    <option value="motorcycle">Moto</option>
-<option value="car">Carro</option>
-<option value="light_cargo">Carga liviana</option>
-<option value="van">Furgón / camioneta</option>
-<option value="truck">Camión</option>
-                  </select>
-                </div>
+                    {submitting ? "Enviando solicitud..." : "Enviar solicitud"}
+                  </button>
 
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="bg-emerald-600 text-white font-semibold rounded-2xl px-4 py-3 w-full text-base transition hover:bg-emerald-700 disabled:opacity-60"
-                >
-                  {submitting ? "Creando..." : "Crear cuenta"}
-                </button>
-
-                <p className="text-center text-sm text-gray-600 mt-5">
-                  ¿Ya tienes cuenta?{" "}
-                  <Link to="/captain-login" className="text-emerald-600 font-semibold">
-                    Inicia sesión aquí
-                  </Link>
-                </p>
-              </form>
+                  <p className="text-center text-sm text-gray-600 mt-5">
+                    ¿Ya tienes cuenta aprobada?{" "}
+                    <Link
+                      to="/captain-login"
+                      className="text-emerald-600 font-semibold"
+                    >
+                      Inicia sesión aquí
+                    </Link>
+                  </p>
+                </form>
+              )}
             </div>
 
             <div className="mt-5 text-center">
