@@ -8,6 +8,8 @@ const Enterprise = require('../models/enterprise.model');
 const EnterpriseDriver = require('../models/enterpriseDriver.model');
 const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 
+const DriverApplication = require('../models/driverApplication.model');
+
 function getTodayRange() {
     const now = new Date();
 
@@ -35,6 +37,47 @@ function calculateCommission(value) {
     const percent = getCommissionPercent();
 
     return Math.round((numericValue * percent) / 100);
+}
+
+function buildCaptainResponse(captainDoc) {
+    if (!captainDoc) return null;
+
+    const captain = captainDoc.toObject ? captainDoc.toObject() : captainDoc;
+
+    return {
+        _id: captain._id,
+        id: captain._id,
+        fullname: captain.fullname,
+        email: captain.email,
+        status: captain.status,
+        vehicle: captain.vehicle,
+        profileImage: captain.profileImage || '',
+        rating: captain.rating || 5,
+        createdAt: captain.createdAt,
+        updatedAt: captain.updatedAt,
+    };
+}
+
+function buildApplicationResponse(applicationDoc) {
+    if (!applicationDoc) return null;
+
+    const app = applicationDoc.toObject ? applicationDoc.toObject() : applicationDoc;
+
+    return {
+        _id: app._id,
+        id: app._id,
+        fullname: app.fullname,
+        email: app.email,
+        vehicle: app.vehicle,
+        documents: app.documents,
+        status: app.status,
+        rejectionReason: app.rejectionReason || '',
+        reviewedAt: app.reviewedAt || null,
+        reviewedBy: app.reviewedBy || null,
+        approvedCaptainId: app.approvedCaptainId || null,
+        createdAt: app.createdAt,
+        updatedAt: app.updatedAt,
+    };
 }
 
 async function ensureDefaultSuperAdminIfNeeded() {
@@ -223,6 +266,11 @@ module.exports.dashboard = async (req, res) => {
             enterpriseDeliveriesInProgress,
             enterpriseDeliveriesFinished,
             enterpriseDeliveriesFinishedToday,
+
+            totalDriverApplications,
+            pendingDriverApplications,
+            approvedDriverApplications,
+            rejectedDriverApplications,
         ] = await Promise.all([
             User.countDocuments(),
 
@@ -262,6 +310,11 @@ module.exports.dashboard = async (req, res) => {
                 status: 'Finalizada',
                 finishedAt: { $gte: start, $lte: end },
             }),
+
+            DriverApplication.countDocuments(),
+            DriverApplication.countDocuments({ status: 'pending' }),
+            DriverApplication.countDocuments({ status: 'approved' }),
+            DriverApplication.countDocuments({ status: 'rejected' }),
         ]);
 
         const completedRideRevenueAgg = await Ride.aggregate([
@@ -352,6 +405,11 @@ module.exports.dashboard = async (req, res) => {
             .populate('enterprise', 'companyName nit email')
             .lean();
 
+        const latestDriverApplications = await DriverApplication.find()
+            .sort({ createdAt: -1 })
+            .limit(8)
+            .lean();
+
         return res.status(200).json({
             success: true,
             generatedAt: new Date().toISOString(),
@@ -379,6 +437,13 @@ module.exports.dashboard = async (req, res) => {
                     revenueToday: ridesRevenueToday,
                     estimatedCommission: calculateCommission(ridesRevenue),
                     estimatedCommissionToday: calculateCommission(ridesRevenueToday),
+                },
+
+                driverApplications: {
+                    totalDriverApplications,
+                    pendingDriverApplications,
+                    approvedDriverApplications,
+                    rejectedDriverApplications,
                 },
 
                 enterprise: {
@@ -426,6 +491,7 @@ module.exports.dashboard = async (req, res) => {
                 rides: latestRides,
                 enterpriseDeliveries: latestEnterpriseDeliveries,
                 enterpriseDrivers: latestEnterpriseDrivers,
+                driverApplications: latestDriverApplications,
             },
         });
     } catch (error) {
@@ -434,6 +500,184 @@ module.exports.dashboard = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || 'No se pudo cargar el dashboard Super Admin.',
+        });
+    }
+};
+
+module.exports.getDriverApplications = async (req, res) => {
+    try {
+        const status = String(req.query.status || 'pending').trim();
+
+        const allowedStatuses = ['pending', 'approved', 'rejected', 'all'];
+
+        if (!allowedStatuses.includes(status)) {
+            return res.status(400).json({
+                success: false,
+                message: 'Estado de solicitud no válido.',
+            });
+        }
+
+        const filter = status === 'all' ? {} : { status };
+
+        const applications = await DriverApplication.find(filter)
+            .sort({ createdAt: -1 })
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            applications: applications.map(buildApplicationResponse),
+        });
+    } catch (error) {
+        console.error('Error en getDriverApplications:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: 'No se pudieron cargar las solicitudes de conductores.',
+        });
+    }
+};
+
+module.exports.approveDriverApplication = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const application = await DriverApplication.findById(id).select('+password');
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Solicitud no encontrada.',
+            });
+        }
+
+        if (application.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'Esta solicitud ya fue revisada.',
+            });
+        }
+
+        const cleanEmail = String(application.email || '').trim().toLowerCase();
+        const plate = String(application?.vehicle?.plate || '').trim().toUpperCase();
+
+        const existingCaptain = await Captain.findOne({
+            $or: [
+                { email: cleanEmail },
+                { 'vehicle.plate': plate },
+            ],
+        });
+
+        if (existingCaptain) {
+            return res.status(409).json({
+                success: false,
+                message: 'Ya existe un conductor registrado con ese correo o placa.',
+            });
+        }
+
+        const captain = await Captain.create({
+            fullname: {
+                firstname: application.fullname.firstname,
+                lastname: application.fullname.lastname || '',
+            },
+            email: cleanEmail,
+            password: application.password,
+            status: 'active',
+            vehicle: {
+                color: application.vehicle.color,
+                plate,
+                capacity: application.vehicle.capacity,
+                vehicleType: application.vehicle.vehicleType,
+            },
+            profileImage: '',
+            rating: 5,
+            onlineSession: {
+                isOnline: false,
+                sessionStartedAt: null,
+                lastSeenAt: null,
+            },
+            stats: {
+                hoursOnline: 0,
+                totalDistanceKm: 0,
+                totalEarning: 0,
+                cashCollected: 0,
+                transferCollected: 0,
+                totalTrips: 0,
+                pendingToSettle: 0,
+            },
+        });
+
+        application.status = 'approved';
+        application.reviewedAt = new Date();
+        application.reviewedBy = req.superAdmin?._id || null;
+        application.approvedCaptainId = captain._id;
+        application.rejectionReason = '';
+
+        await application.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Solicitud aprobada. El conductor ya puede iniciar sesión.',
+            application: buildApplicationResponse(application),
+            captain: buildCaptainResponse(captain),
+        });
+    } catch (error) {
+        console.error('Error en approveDriverApplication:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudo aprobar la solicitud.',
+        });
+    }
+};
+
+module.exports.rejectDriverApplication = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { reason } = req.body;
+
+        const cleanReason = String(reason || '').trim();
+
+        if (!cleanReason || cleanReason.length < 5) {
+            return res.status(400).json({
+                success: false,
+                message: 'Debes escribir un motivo de rechazo válido.',
+            });
+        }
+
+        const application = await DriverApplication.findById(id);
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: 'Solicitud no encontrada.',
+            });
+        }
+
+        if (application.status !== 'pending') {
+            return res.status(400).json({
+                success: false,
+                message: 'Esta solicitud ya fue revisada.',
+            });
+        }
+
+        application.status = 'rejected';
+        application.rejectionReason = cleanReason;
+        application.reviewedAt = new Date();
+        application.reviewedBy = req.superAdmin?._id || null;
+
+        await application.save();
+
+        return res.status(200).json({
+            success: true,
+            message: 'Solicitud rechazada correctamente.',
+            application: buildApplicationResponse(application),
+        });
+    } catch (error) {
+        console.error('Error en rejectDriverApplication:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudo rechazar la solicitud.',
         });
     }
 };
