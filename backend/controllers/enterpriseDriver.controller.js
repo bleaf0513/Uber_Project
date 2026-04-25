@@ -196,6 +196,15 @@ module.exports.loginDriverByCedula = async (req, res) => {
             });
         }
 
+        if (!process.env.JWT_SECRET) {
+            console.error('Falta JWT_SECRET en variables de entorno del backend.');
+
+            return res.status(500).json({
+                success: false,
+                message: 'Falta configurar JWT_SECRET en el backend.',
+            });
+        }
+
         const driver = await EnterpriseDriver.findOne({
             cedula: normalizedCedula,
             active: true,
@@ -208,29 +217,61 @@ module.exports.loginDriverByCedula = async (req, res) => {
             });
         }
 
+        const driverPayload = {
+            _id: driver._id,
+            id: driver._id,
+            enterprise: driver.enterprise,
+            name: driver.name,
+            cedula: driver.cedula,
+            phone: driver.phone,
+            email: driver.email,
+            vehicle: driver.vehicle,
+            plate: driver.plate,
+            status: driver.status,
+            currentLocation: driver.currentLocation || {
+                lat: null,
+                lng: null,
+                updatedAt: null,
+            },
+            activeShiftId: driver.activeShiftId || null,
+            active: driver.active,
+        };
+
         const token = jwt.sign(
-            { _id: driver._id },
+            {
+                _id: driver._id,
+                id: driver._id,
+                driverId: driver._id,
+                enterprise: driver.enterprise,
+                role: 'enterprise_driver',
+                type: 'enterprise_driver',
+            },
             process.env.JWT_SECRET,
-            { expiresIn: '7d' }
+            {
+                expiresIn: '30d',
+            }
         );
 
         res.cookie('enterpriseDriverToken', token, {
             httpOnly: true,
-            secure: true,
-            sameSite: 'none',
-            maxAge: 7 * 24 * 60 * 60 * 1000,
+            secure: process.env.NODE_ENV === 'production',
+            sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
+            maxAge: 30 * 24 * 60 * 60 * 1000,
         });
 
         return res.status(200).json({
             success: true,
             message: 'Ingreso correcto.',
-            driver,
+            token,
+            enterpriseDriverToken: token,
+            driver: driverPayload,
         });
     } catch (error) {
         console.error('Error en loginDriverByCedula:', error);
+
         return res.status(500).json({
             success: false,
-            message: 'Error interno del servidor.',
+            message: error.message || 'Error interno del servidor.',
         });
     }
 };
@@ -280,6 +321,13 @@ module.exports.updateDriverLocation = async (req, res) => {
         const now = new Date();
 
         const shift = await getOrCreateActiveShift(driver);
+
+        if (!shift) {
+            return res.status(500).json({
+                success: false,
+                message: 'No se pudo crear o encontrar la jornada activa del conductor.',
+            });
+        }
 
         const lastPoint = await EnterpriseDriverRoutePoint.findOne({
             driverId: driver._id,
@@ -380,7 +428,10 @@ module.exports.updateDriverStatus = async (req, res) => {
         }
 
         const updatePayload = { status };
-        const driver = await EnterpriseDriver.findOne({ _id: id, active: true });
+        const driver = await EnterpriseDriver.findOne({
+            _id: id,
+            active: true,
+        });
 
         if (!driver) {
             return res.status(404).json({
@@ -537,6 +588,7 @@ module.exports.getDriverRouteSummary = async (req, res) => {
         const realDurationsSeconds = finishedDeliveries.map((d) => {
             const started = new Date(d.startedAt).getTime();
             const finished = new Date(d.finishedAt).getTime();
+
             return Math.max(0, Math.round((finished - started) / 1000));
         });
 
@@ -554,7 +606,10 @@ module.exports.getDriverRouteSummary = async (req, res) => {
                       0,
                       Math.round(
                           (
-                              (shift.endedAt ? new Date(shift.endedAt) : new Date()).getTime() -
+                              (shift.endedAt
+                                  ? new Date(shift.endedAt)
+                                  : new Date()
+                              ).getTime() -
                               new Date(shift.startedAt).getTime()
                           ) / 1000
                       )
@@ -565,6 +620,7 @@ module.exports.getDriverRouteSummary = async (req, res) => {
             success: true,
             driver: {
                 _id: driver._id,
+                id: driver._id,
                 name: driver.name,
                 cedula: driver.cedula,
                 vehicle: driver.vehicle,
@@ -598,6 +654,7 @@ module.exports.getDriverRouteSummary = async (req, res) => {
         });
     } catch (error) {
         console.error('Error en getDriverRouteSummary:', error);
+
         return res.status(500).json({
             success: false,
             message: 'No se pudo obtener el resumen de ruta del conductor.',
