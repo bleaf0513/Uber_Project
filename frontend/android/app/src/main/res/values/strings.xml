@@ -4,4 +4,16 @@
     <string name="title_activity_main">Central Go</string>
     <string name="package_name">co.com.mercalan.centralgo</string>
     <string name="custom_url_scheme">co.com.mercalan.centralgo</string>
+
+    <string name="capacitor_background_geolocation_notification_channel_name">
+        Seguimiento en ruta
+    </string>
+
+    <string name="capacitor_background_geolocation_notification_icon">
+        @mipmap/ic_launcher
+    </string>
+
+    <string name="capacitor_background_geolocation_notification_color">
+        #16a34a
+    </string>
 </resources>

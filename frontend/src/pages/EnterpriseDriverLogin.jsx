@@ -17,6 +17,89 @@ const EnterpriseDriverLogin = () => {
       .trim();
   };
 
+  const extractToken = (data) => {
+    return (
+      data?.token ||
+      data?.driverToken ||
+      data?.enterpriseDriverToken ||
+      data?.accessToken ||
+      data?.authToken ||
+      ""
+    );
+  };
+
+  const extractDriver = (data) => {
+    return (
+      data?.driver ||
+      data?.enterpriseDriver ||
+      data?.user ||
+      data?.data?.driver ||
+      data?.data?.enterpriseDriver ||
+      data?.data?.user ||
+      null
+    );
+  };
+
+  const clearOldDriverSession = () => {
+    localStorage.removeItem("enterpriseDriverToken");
+    localStorage.removeItem("activeEnterpriseDriverCedula");
+    localStorage.removeItem("activeEnterpriseDriverId");
+    localStorage.removeItem("activeEnterpriseDriverData");
+    localStorage.removeItem("enterpriseDeliveries");
+  };
+
+  const saveDriverSession = ({ token, driver, cleanedCedula }) => {
+    const driverId = driver?._id || driver?.id || driver?.driverId || "";
+
+    if (!token) {
+      console.error("[LOGIN DRIVER] El backend no devolvió token");
+      throw new Error(
+        "El backend no devolvió token. Hay que revisar loginDriverByCedula en el backend."
+      );
+    }
+
+    if (!driver) {
+      console.error("[LOGIN DRIVER] El backend no devolvió driver");
+      throw new Error(
+        "El backend no devolvió los datos del conductor. Hay que revisar loginDriverByCedula."
+      );
+    }
+
+    if (!driverId) {
+      console.error("[LOGIN DRIVER] El conductor no tiene _id ni id:", driver);
+      throw new Error(
+        "El conductor no tiene ID válido. El backend debe devolver driver._id o driver.id."
+      );
+    }
+
+    const normalizedDriver = {
+      ...driver,
+      _id: driverId,
+      id: driverId,
+      cedula: driver?.cedula || cleanedCedula,
+    };
+
+    localStorage.setItem("enterpriseDriverToken", token);
+    localStorage.setItem("activeEnterpriseDriverId", driverId);
+    localStorage.setItem(
+      "activeEnterpriseDriverCedula",
+      normalizedDriver.cedula || cleanedCedula
+    );
+    localStorage.setItem(
+      "activeEnterpriseDriverData",
+      JSON.stringify(normalizedDriver)
+    );
+
+    console.log("[LOGIN DRIVER] Sesión guardada correctamente:", {
+      driverId,
+      cedula: normalizedDriver.cedula,
+      hasToken: !!token,
+      driver: normalizedDriver,
+    });
+
+    return normalizedDriver;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
 
@@ -29,6 +112,12 @@ const EnterpriseDriverLogin = () => {
 
     try {
       setLoading(true);
+      clearOldDriverSession();
+
+      console.log("[LOGIN DRIVER] Intentando login", {
+        apiBase: API_BASE,
+        cedula: cleanedCedula,
+      });
 
       const response = await fetch(`${API_BASE}/enterprise-drivers/login`, {
         method: "POST",
@@ -41,29 +130,40 @@ const EnterpriseDriverLogin = () => {
         }),
       });
 
-      const data = await response.json();
+      const text = await response.text();
+
+      let data = {};
+
+      try {
+        data = text ? JSON.parse(text) : {};
+      } catch (error) {
+        console.error("[LOGIN DRIVER] Respuesta no JSON:", text);
+        throw new Error(`El backend devolvió una respuesta inválida: ${text}`);
+      }
+
+      console.log("[LOGIN DRIVER] Respuesta backend:", data);
 
       if (!response.ok) {
         throw new Error(
-          data.message ||
+          data?.message ||
             "Esa cédula no corresponde a un conductor empresarial registrado."
         );
       }
 
-      localStorage.setItem("activeEnterpriseDriverId", data.driver._id);
-      localStorage.setItem("activeEnterpriseDriverCedula", data.driver.cedula);
-      localStorage.setItem(
-        "activeEnterpriseDriverData",
-        JSON.stringify(data.driver)
-      );
+      const token = extractToken(data);
+      const driver = extractDriver(data);
+
+      saveDriverSession({
+        token,
+        driver,
+        cleanedCedula,
+      });
 
       navigate("/enterprise-driver-panel");
     } catch (error) {
       console.error("Error en login empresarial:", error);
-      alert(
-        error.message ||
-          "No fue posible iniciar sesión con esa cédula."
-      );
+
+      alert(error.message || "No fue posible iniciar sesión con esa cédula.");
     } finally {
       setLoading(false);
     }

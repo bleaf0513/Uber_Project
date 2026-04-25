@@ -1,11 +1,17 @@
 import React, { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Capacitor } from "@capacitor/core";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
 import EnterpriseDriverDeliveryChat from "./EnterpriseDriverDeliveryChat";
+import {
+  startBackgroundTracking,
+  stopBackgroundTracking,
+} from "../backgroundLocation";
 
 const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
+const GPS_MARKER_ICON = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
 
 const haversineDistanceKm = (a, b) => {
   const toRad = (deg) => (deg * Math.PI) / 180;
@@ -15,7 +21,28 @@ const haversineDistanceKm = (a, b) => {
   const dLng = toRad(Number(b.lng) - Number(a.lng));
 
   const lat1 = toRad(Number(a.lat));
-  const lat2 = toRad(Number(a.lat));
+  const lat2 = toRad(Number(b.lat));
+
+  const aa =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.sin(dLng / 2) *
+      Math.sin(dLng / 2) *
+      Math.cos(lat1) *
+      Math.cos(lat2);
+
+  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
+  return R * c;
+};
+
+const haversineDistanceMeters = (a, b) => {
+  const toRad = (deg) => (deg * Math.PI) / 180;
+  const R = 6371000;
+
+  const dLat = toRad(Number(b.lat) - Number(a.lat));
+  const dLng = toRad(Number(b.lng) - Number(a.lng));
+
+  const lat1 = toRad(Number(a.lat));
+  const lat2 = toRad(Number(b.lat));
 
   const aa =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
@@ -32,9 +59,11 @@ const getStatusBadgeClass = (status) => {
   if (status === "Finalizada") {
     return "bg-emerald-100 text-emerald-700 border border-emerald-200";
   }
+
   if (status === "En curso") {
     return "bg-blue-100 text-blue-700 border border-blue-200";
   }
+
   return "bg-amber-100 text-amber-700 border border-amber-200";
 };
 
@@ -48,9 +77,18 @@ const formatCurrencyCOP = (value) => {
   }).format(Number.isFinite(numericValue) ? numericValue : 0);
 };
 
-const buildDayRouteStorageKey = (driverId) => {
-  const date = new Date().toISOString().slice(0, 10);
-  return `enterpriseDriverDayRoute_${driverId}_${date}`;
+const getDriverAuthHeaders = () => {
+  const token = localStorage.getItem("enterpriseDriverToken") || "";
+
+  const headers = {
+    "Content-Type": "application/json",
+  };
+
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  return headers;
 };
 
 const EnterpriseDriverMap = ({
@@ -74,20 +112,15 @@ const EnterpriseDriverMap = ({
   const trackingStartedRef = useRef(false);
   const lastSentCoordsRef = useRef(null);
   const sendingLocationRef = useRef(false);
-  const dayPolylineRef = useRef(null);
-  const stopMarkersRef = useRef([]);
+  const lastPersistedAtRef = useRef(0);
 
   const [geoError, setGeoError] = useState("");
   const [isTracking, setIsTracking] = useState(false);
-  const [mapMode, setMapMode] = useState("navigation"); // navigation | dayRoute | currentLocation
-  const [dayRoutePoints, setDayRoutePoints] = useState([]);
-  const [loadingDayRoute, setLoadingDayRoute] = useState(false);
   const [routeInfo, setRouteInfo] = useState({
     orderedStops: [],
     totalStops: 0,
     totalDistanceText: "",
     totalDurationText: "",
-    nextInstruction: "",
   });
 
   useEffect(() => {
@@ -113,185 +146,68 @@ const EnterpriseDriverMap = ({
     return base;
   }, [assignedDeliveries, activeDelivery]);
 
-  const clearStopMarkers = useCallback(() => {
-    stopMarkersRef.current.forEach((marker) => marker.setMap(null));
-    stopMarkersRef.current = [];
-  }, []);
+  const updateDriverMarker = useCallback((coords) => {
+    if (!mapInstanceRef.current || !window.google?.maps) return;
 
-  const drawStopMarkers = useCallback(
-    (stops) => {
-      if (!window.google?.maps || !mapInstanceRef.current) return;
-
-      clearStopMarkers();
-
-      stopMarkersRef.current = stops
-        .filter((stop) => stop?.coords?.lat && stop?.coords?.lng)
-        .map((stop, index) => {
-          return new window.google.maps.Marker({
-            map: mapInstanceRef.current,
-            position: {
-              lat: Number(stop.coords.lat),
-              lng: Number(stop.coords.lng),
-            },
-            title: `${index + 1}. ${stop.clientName || "Parada"}`,
-            label: {
-              text: String(index + 1),
-              color: "#ffffff",
-              fontWeight: "700",
-            },
-          });
-        });
-    },
-    [clearStopMarkers]
-  );
-
-  const clearDayPolyline = useCallback(() => {
-    if (dayPolylineRef.current) {
-      dayPolylineRef.current.setMap(null);
-      dayPolylineRef.current = null;
-    }
-  }, []);
-
-  const drawDayRoute = useCallback(
-    (points) => {
-      if (!window.google?.maps || !mapInstanceRef.current) return;
-
-      clearDayPolyline();
-
-      if (!Array.isArray(points) || !points.length) return;
-
-      const path = points
-        .filter((p) => Number.isFinite(Number(p?.lat)) && Number.isFinite(Number(p?.lng)))
-        .map((p) => ({
-          lat: Number(p.lat),
-          lng: Number(p.lng),
-        }));
-
-      if (!path.length) return;
-
-      dayPolylineRef.current = new window.google.maps.Polyline({
-        path,
-        geodesic: true,
-        strokeColor: "#2563eb",
-        strokeOpacity: 1,
-        strokeWeight: 5,
+    if (!driverMarkerRef.current) {
+      driverMarkerRef.current = new window.google.maps.Marker({
+        map: mapInstanceRef.current,
+        position: coords,
+        title: `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`,
+        icon: {
+          url: GPS_MARKER_ICON,
+        },
       });
-
-      dayPolylineRef.current.setMap(mapInstanceRef.current);
-
-      const bounds = new window.google.maps.LatLngBounds();
-      path.forEach((point) => bounds.extend(point));
-      mapInstanceRef.current.fitBounds(bounds);
-    },
-    [clearDayPolyline]
-  );
-
-  const saveDayRoutePointLocally = useCallback((driverId, coords) => {
-    if (!driverId) return;
-
-    const key = buildDayRouteStorageKey(driverId);
-
-    try {
-      const current = JSON.parse(localStorage.getItem(key) || "[]");
-      const last = current[current.length - 1];
-
-      const rounded = {
-        lat: Number(Number(coords.lat).toFixed(6)),
-        lng: Number(Number(coords.lng).toFixed(6)),
-        timestamp: new Date().toISOString(),
-      };
-
-      if (
-        last &&
-        Number(last.lat).toFixed(6) === Number(rounded.lat).toFixed(6) &&
-        Number(last.lng).toFixed(6) === Number(rounded.lng).toFixed(6)
-      ) {
-        return;
-      }
-
-      const updated = [...current, rounded];
-      localStorage.setItem(key, JSON.stringify(updated));
-      setDayRoutePoints(updated);
-    } catch (error) {
-      console.error("No se pudo guardar localmente la ruta del día:", error);
-    }
-  }, []);
-
-  const loadDayRoute = useCallback(async () => {
-    const driverId = selectedDriverRef.current?._id || selectedDriverRef.current?.id;
-    if (!driverId) return;
-
-    setLoadingDayRoute(true);
-
-    const date = new Date().toISOString().slice(0, 10);
-    const localKey = buildDayRouteStorageKey(driverId);
-
-    try {
-      let remotePoints = [];
-
-      try {
-        const response = await fetch(
-          `${API_BASE}/enterprise-drivers/${driverId}/location-history?date=${date}`,
-          {
-            method: "GET",
-            credentials: "include",
-          }
-        );
-
-        if (response.ok) {
-          const text = await response.text();
-          const data = text ? JSON.parse(text) : {};
-          remotePoints = Array.isArray(data?.points) ? data.points : [];
-        }
-      } catch (remoteError) {
-        console.warn("No se pudo consultar historial remoto, se usará el local:", remoteError);
-      }
-
-      if (remotePoints.length) {
-        setDayRoutePoints(remotePoints);
-        localStorage.setItem(localKey, JSON.stringify(remotePoints));
-      } else {
-        const localPoints = JSON.parse(localStorage.getItem(localKey) || "[]");
-        setDayRoutePoints(Array.isArray(localPoints) ? localPoints : []);
-      }
-    } catch (error) {
-      console.error("Error cargando ruta del día:", error);
-      const localPoints = JSON.parse(localStorage.getItem(localKey) || "[]");
-      setDayRoutePoints(Array.isArray(localPoints) ? localPoints : []);
-    } finally {
-      setLoadingDayRoute(false);
+    } else {
+      driverMarkerRef.current.setPosition(coords);
+      driverMarkerRef.current.setTitle(
+        `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`
+      );
     }
   }, []);
 
   const persistDriverLocation = useCallback(
-    async (coords) => {
+    async (coords, meta = {}) => {
       const currentDriver = selectedDriverRef.current;
 
       if (!currentDriver?._id && !currentDriver?.id) return false;
       if (sendingLocationRef.current) return false;
+
+      const driverId = currentDriver._id || currentDriver.id;
 
       const roundedCoords = {
         lat: Number(Number(coords.lat).toFixed(6)),
         lng: Number(Number(coords.lng).toFixed(6)),
       };
 
+      const now = Date.now();
       const last = lastSentCoordsRef.current;
-      if (last && last.lat === roundedCoords.lat && last.lng === roundedCoords.lng) {
-        return true;
+      const movedMeters = last
+        ? haversineDistanceMeters(last, roundedCoords)
+        : Number.MAX_SAFE_INTEGER;
+      const elapsedMs = now - lastPersistedAtRef.current;
+
+      if (last) {
+        const exactlySame =
+          last.lat === roundedCoords.lat && last.lng === roundedCoords.lng;
+
+        if (exactlySame && elapsedMs < 25000) {
+          return true;
+        }
+
+        if (!exactlySame && movedMeters < 5 && elapsedMs < 15000) {
+          return true;
+        }
       }
 
       sendingLocationRef.current = true;
 
       try {
-        const driverId = currentDriver._id || currentDriver.id;
-
         const response = await fetch(
           `${API_BASE}/enterprise-drivers/${driverId}/location`,
           {
             method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-            },
+            headers: getDriverAuthHeaders(),
             credentials: "include",
             body: JSON.stringify(roundedCoords),
           }
@@ -307,7 +223,9 @@ const EnterpriseDriverMap = ({
         }
 
         if (!response.ok) {
-          throw new Error(data.message || "No se pudo guardar la ubicación en backend.");
+          throw new Error(
+            data.message || "No se pudo guardar la ubicación en backend."
+          );
         }
 
         const persistedDriver = data.driver || {
@@ -327,9 +245,14 @@ const EnterpriseDriverMap = ({
 
         selectedDriverRef.current = persistedDriver;
         lastSentCoordsRef.current = roundedCoords;
-        setGeoError("");
+        lastPersistedAtRef.current = now;
 
-        saveDayRoutePointLocally(driverId, roundedCoords);
+        setGeoError("");
+        setIsTracking(true);
+
+        if (meta?.source) {
+          console.log("[GPS] Ubicación persistida:", meta.source, roundedCoords);
+        }
 
         return true;
       } catch (error) {
@@ -342,7 +265,39 @@ const EnterpriseDriverMap = ({
         sendingLocationRef.current = false;
       }
     },
-    [saveDayRoutePointLocally, setSelectedDriver]
+    [setSelectedDriver]
+  );
+
+  const handleCoordsUpdate = useCallback(
+    async (coords, options = {}) => {
+      const normalizedCoords = {
+        lat: Number(coords.lat),
+        lng: Number(coords.lng),
+      };
+
+      if (
+        !Number.isFinite(normalizedCoords.lat) ||
+        !Number.isFinite(normalizedCoords.lng)
+      ) {
+        return false;
+      }
+
+      const saved = await persistDriverLocation(normalizedCoords, {
+        source: options.source || "unknown",
+      });
+
+      if (!saved) return false;
+
+      updateDriverMarker(normalizedCoords);
+
+      if (options.shouldCenterMap && mapInstanceRef.current && !pendingStops.length) {
+        mapInstanceRef.current.setCenter(normalizedCoords);
+        mapInstanceRef.current.setZoom(15);
+      }
+
+      return true;
+    },
+    [persistDriverLocation, updateDriverMarker, pendingStops.length]
   );
 
   useEffect(() => {
@@ -369,13 +324,8 @@ const EnterpriseDriverMap = ({
       geocoderRef.current = new window.google.maps.Geocoder();
 
       directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-        suppressMarkers: true,
+        suppressMarkers: false,
         preserveViewport: false,
-        polylineOptions: {
-          strokeColor: "#2563eb",
-          strokeOpacity: 0.95,
-          strokeWeight: 6,
-        },
       });
 
       directionsRendererRef.current.setMap(mapInstanceRef.current);
@@ -389,7 +339,7 @@ const EnterpriseDriverMap = ({
           },
           title: `Conductor: ${selectedDriver?.name || "Conductor"}`,
           icon: {
-            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
+            url: GPS_MARKER_ICON,
           },
         });
       }
@@ -401,15 +351,11 @@ const EnterpriseDriverMap = ({
   }, [mapsApiLoaded, selectedDriver]);
 
   useEffect(() => {
-    loadDayRoute();
-  }, [loadDayRoute]);
-
-  useEffect(() => {
     if (
       !mapsApiLoaded ||
       !window.google?.maps ||
       !mapInstanceRef.current ||
-      !selectedDriver?._id
+      (!selectedDriver?._id && !selectedDriver?.id)
     ) {
       return;
     }
@@ -429,31 +375,10 @@ const EnterpriseDriverMap = ({
         lng: Number(position.coords.longitude),
       };
 
-      setIsTracking(true);
-
-      const saved = await persistDriverLocation(coords);
-      if (!saved) return;
-
-      if (!driverMarkerRef.current) {
-        driverMarkerRef.current = new window.google.maps.Marker({
-          map: mapInstanceRef.current,
-          position: coords,
-          title: `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`,
-          icon: {
-            url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-          },
-        });
-      } else {
-        driverMarkerRef.current.setPosition(coords);
-        driverMarkerRef.current.setTitle(
-          `Conductor: ${selectedDriverRef.current?.name || "Conductor"}`
-        );
-      }
-
-      if (mapMode === "currentLocation" || !pendingStops.length) {
-        mapInstanceRef.current.setCenter(coords);
-        mapInstanceRef.current.setZoom(16);
-      }
+      await handleCoordsUpdate(coords, {
+        shouldCenterMap: true,
+        source: "foreground",
+      });
     };
 
     const onError = (error) => {
@@ -472,14 +397,14 @@ const EnterpriseDriverMap = ({
 
     navigator.geolocation.getCurrentPosition(updatePosition, onError, {
       enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0,
+      timeout: 20000,
+      maximumAge: 5000,
     });
 
     watchIdRef.current = navigator.geolocation.watchPosition(updatePosition, onError, {
       enableHighAccuracy: true,
-      timeout: 20000,
-      maximumAge: 3000,
+      timeout: 30000,
+      maximumAge: 10000,
     });
 
     return () => {
@@ -487,14 +412,14 @@ const EnterpriseDriverMap = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
+
       trackingStartedRef.current = false;
     };
   }, [
     mapsApiLoaded,
     selectedDriver?._id,
-    persistDriverLocation,
-    pendingStops.length,
-    mapMode,
+    selectedDriver?.id,
+    handleCoordsUpdate,
   ]);
 
   useEffect(() => {
@@ -508,92 +433,12 @@ const EnterpriseDriverMap = ({
       lng: Number(driverLocation.lng),
     };
 
-    if (!driverMarkerRef.current) {
-      driverMarkerRef.current = new window.google.maps.Marker({
-        map: mapInstanceRef.current,
-        position: coords,
-        title: `Conductor: ${selectedDriver?.name || "Conductor"}`,
-        icon: {
-          url: "http://maps.google.com/mapfiles/ms/icons/blue-dot.png",
-        },
-      });
-    } else {
-      driverMarkerRef.current.setPosition(coords);
-      driverMarkerRef.current.setTitle(
-        `Conductor: ${selectedDriver?.name || "Conductor"}`
-      );
-    }
-  }, [mapsApiLoaded, selectedDriver?.currentLocation, selectedDriver?.name]);
-
-  useEffect(() => {
-    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
-
-    const driverLocation = selectedDriver?.currentLocation;
-
-    if (!driverLocation?.lat || !driverLocation?.lng) return;
-
-    const currentCoords = {
-      lat: Number(driverLocation.lat),
-      lng: Number(driverLocation.lng),
-    };
-
-    if (mapMode === "currentLocation") {
-      clearDayPolyline();
-      clearStopMarkers();
-
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.set("directions", null);
-      }
-
-      if (directionsPanelRef.current) {
-        directionsPanelRef.current.innerHTML = "";
-      }
-
-      mapInstanceRef.current.setCenter(currentCoords);
-      mapInstanceRef.current.setZoom(16);
-
-      setRouteInfo({
-        orderedStops: [],
-        totalStops: 0,
-        totalDistanceText: "",
-        totalDurationText: "",
-        nextInstruction: "",
-      });
-
-      return;
-    }
-
-    if (mapMode === "dayRoute") {
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.set("directions", null);
-      }
-      if (directionsPanelRef.current) {
-        directionsPanelRef.current.innerHTML = "";
-      }
-      clearStopMarkers();
-      drawDayRoute(dayRoutePoints);
-
-      setRouteInfo((prev) => ({
-        ...prev,
-        orderedStops: [],
-        totalStops: dayRoutePoints.length,
-        totalDistanceText: prev.totalDistanceText,
-        totalDurationText: prev.totalDurationText,
-        nextInstruction: dayRoutePoints.length
-          ? "Mostrando recorrido acumulado del día."
-          : "Aún no hay recorrido registrado hoy.",
-      }));
-
-      return;
-    }
+    updateDriverMarker(coords);
   }, [
     mapsApiLoaded,
     selectedDriver?.currentLocation,
-    mapMode,
-    dayRoutePoints,
-    clearDayPolyline,
-    clearStopMarkers,
-    drawDayRoute,
+    selectedDriver?.name,
+    updateDriverMarker,
   ]);
 
   useEffect(() => {
@@ -607,8 +452,6 @@ const EnterpriseDriverMap = ({
       return;
     }
 
-    if (mapMode !== "navigation") return;
-
     const driverLocation = selectedDriver?.currentLocation;
     if (!driverLocation?.lat || !driverLocation?.lng) {
       return;
@@ -616,22 +459,22 @@ const EnterpriseDriverMap = ({
 
     if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
-      clearStopMarkers();
+
       if (directionsPanelRef.current) {
         directionsPanelRef.current.innerHTML = "";
       }
+
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
         totalDistanceText: "",
         totalDurationText: "",
-        nextInstruction: "",
       });
+
       return;
     }
 
     const signature = JSON.stringify({
-      mapMode,
       driverLat: Number(driverLocation.lat).toFixed(6),
       driverLng: Number(driverLocation.lng).toFixed(6),
       activeDeliveryId: activeDelivery?._id || activeDelivery?.id || null,
@@ -650,6 +493,7 @@ const EnterpriseDriverMap = ({
         geocoderRef.current.geocode({ address }, (results, status) => {
           if (status === "OK" && results?.[0]?.geometry?.location) {
             const location = results[0].geometry.location;
+
             resolve({
               lat: location.lat(),
               lng: location.lng(),
@@ -668,6 +512,7 @@ const EnterpriseDriverMap = ({
         const geocodedStops = await Promise.all(
           pendingStops.map(async (delivery) => {
             const coords = await geocodeAddress(delivery.address);
+
             return {
               ...delivery,
               coords,
@@ -726,14 +571,11 @@ const EnterpriseDriverMap = ({
               const route = result.routes?.[0];
               const legs = route?.legs || [];
 
-              if (route?.bounds && mapInstanceRef.current) {
-                mapInstanceRef.current.fitBounds(route.bounds);
-              }
-
               const totalDistanceMeters = legs.reduce(
                 (sum, leg) => sum + (leg.distance?.value || 0),
                 0
               );
+
               const totalDurationSeconds = legs.reduce(
                 (sum, leg) => sum + (leg.duration?.value || 0),
                 0
@@ -754,16 +596,11 @@ const EnterpriseDriverMap = ({
                   (idx) => orderedStops[idx]
                 );
                 const finalDestination = orderedStops[orderedStops.length - 1];
-                orderedStopsFromRoute = [...reorderedIntermediate, finalDestination];
+                orderedStopsFromRoute = [
+                  ...reorderedIntermediate,
+                  finalDestination,
+                ];
               }
-
-              drawStopMarkers(orderedStopsFromRoute);
-
-              const firstLeg = legs[0];
-              const nextInstruction =
-                firstLeg?.steps?.[0]?.instructions
-                  ?.replace(/<[^>]+>/g, "")
-                  ?.trim() || "";
 
               setRouteInfo({
                 orderedStops: orderedStopsFromRoute,
@@ -773,47 +610,33 @@ const EnterpriseDriverMap = ({
                   totalMin >= 60
                     ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
                     : `${totalMin} min`,
-                nextInstruction,
               });
             } else {
               console.error("Error trazando la ruta:", status);
-              clearStopMarkers();
-              drawStopMarkers(geocodedStops);
 
               setRouteInfo({
                 orderedStops: geocodedStops,
                 totalStops: geocodedStops.length,
                 totalDistanceText: "",
                 totalDurationText: "",
-                nextInstruction: "",
               });
             }
           }
         );
       } catch (error) {
         console.error("Error construyendo ruta:", error);
-        clearStopMarkers();
 
         setRouteInfo({
           orderedStops: activeDelivery?.address ? [activeDelivery] : [],
           totalStops: activeDelivery?.address ? 1 : 0,
           totalDistanceText: "",
           totalDurationText: "",
-          nextInstruction: "",
         });
       }
     };
 
     buildRoute();
-  }, [
-    mapsApiLoaded,
-    selectedDriver?.currentLocation,
-    pendingStops,
-    activeDelivery,
-    mapMode,
-    clearStopMarkers,
-    drawStopMarkers,
-  ]);
+  }, [mapsApiLoaded, selectedDriver?.currentLocation, pendingStops, activeDelivery]);
 
   const openExternalGoogleMaps = () => {
     const driverLocation = selectedDriver?.currentLocation;
@@ -829,6 +652,7 @@ const EnterpriseDriverMap = ({
     if (!stopsForNavigation.length) return;
 
     const origin = `${driverLocation.lat},${driverLocation.lng}`;
+
     const destination =
       stopsForNavigation[stopsForNavigation.length - 1].formattedAddress ||
       stopsForNavigation[stopsForNavigation.length - 1].address;
@@ -847,7 +671,7 @@ const EnterpriseDriverMap = ({
       destination
     )}&travelmode=driving${waypoints ? `&waypoints=${waypoints}` : ""}`;
 
-    window.open(url, "_blank", "noopener,noreferrer");
+    window.open(url, "_blank");
   };
 
   const canNavigate =
@@ -871,7 +695,7 @@ const EnterpriseDriverMap = ({
               Mapa y navegación de ruta
             </h3>
             <p className="text-sm text-slate-500">
-              Seguimiento en tiempo real, ruta profesional e indicaciones dentro de la app.
+              Seguimiento en tiempo real, orden de paradas e indicaciones paso a paso.
             </p>
           </div>
 
@@ -883,17 +707,11 @@ const EnterpriseDriverMap = ({
             >
               {isTracking ? "Seguimiento activo" : "Seguimiento inactivo"}
             </span>
+
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Modo:{" "}
-              {mapMode === "navigation"
-                ? "Navegación"
-                : mapMode === "dayRoute"
-                ? "Ruta del día"
-                : "Solo ubicación"}
+              Paradas: {visibleStops.length}
             </span>
-            <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Paradas: {mapMode === "dayRoute" ? dayRoutePoints.length : visibleStops.length}
-            </span>
+
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
               Distancia: {routeInfo.totalDistanceText || "—"}
             </span>
@@ -902,89 +720,10 @@ const EnterpriseDriverMap = ({
       </div>
 
       <div className="p-5">
-        <div className="relative">
-          <div
-            ref={mapRef}
-            className="w-full h-[460px] rounded-[24px] overflow-hidden border border-slate-200"
-          />
-
-          <div className="absolute top-4 left-4 right-4 z-10 flex flex-col gap-3 lg:right-auto lg:max-w-[420px]">
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={() => setMapMode("navigation")}
-                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
-                  mapMode === "navigation"
-                    ? "bg-green-600 text-white"
-                    : "bg-white text-slate-700 border border-slate-200"
-                }`}
-              >
-                Modo navegación
-              </button>
-
-              <button
-                type="button"
-                onClick={async () => {
-                  setMapMode("dayRoute");
-                  await loadDayRoute();
-                }}
-                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
-                  mapMode === "dayRoute"
-                    ? "bg-blue-600 text-white"
-                    : "bg-white text-slate-700 border border-slate-200"
-                }`}
-              >
-                Ver recorrido del día
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setMapMode("currentLocation")}
-                className={`px-4 py-2.5 rounded-2xl font-semibold shadow ${
-                  mapMode === "currentLocation"
-                    ? "bg-slate-900 text-white"
-                    : "bg-white text-slate-700 border border-slate-200"
-                }`}
-              >
-                Ver ubicación actual
-              </button>
-            </div>
-
-            {mapMode === "navigation" && activeDelivery ? (
-              <div className="rounded-2xl border border-blue-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
-                <p className="text-xs font-semibold uppercase tracking-wide text-blue-600">
-                  Entrega activa
-                </p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
-                  {activeDelivery.clientName || "Cliente"}
-                </p>
-                <p className="mt-1 text-sm text-slate-700">
-                  {activeDelivery.address}
-                </p>
-                {routeInfo.nextInstruction ? (
-                  <div className="mt-3 rounded-xl bg-blue-50 px-3 py-2 text-sm font-medium text-blue-800">
-                    Siguiente indicación: {routeInfo.nextInstruction}
-                  </div>
-                ) : null}
-              </div>
-            ) : null}
-
-            {mapMode === "dayRoute" ? (
-              <div className="rounded-2xl border border-slate-200 bg-white/95 px-4 py-3 shadow-lg backdrop-blur">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Recorrido del día
-                </p>
-                <p className="mt-1 text-sm font-bold text-slate-900">
-                  {loadingDayRoute
-                    ? "Cargando recorrido..."
-                    : dayRoutePoints.length
-                    ? `${dayRoutePoints.length} puntos registrados`
-                    : "Aún no hay puntos registrados"}
-                </p>
-              </div>
-            ) : null}
-          </div>
-        </div>
+        <div
+          ref={mapRef}
+          className="w-full h-[420px] rounded-[24px] overflow-hidden border border-slate-200"
+        />
 
         <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2 space-y-4">
@@ -1004,10 +743,10 @@ const EnterpriseDriverMap = ({
 
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Paradas / puntos
+                  Paradas
                 </p>
                 <p className="mt-2 text-sm font-bold text-slate-900">
-                  {mapMode === "dayRoute" ? dayRoutePoints.length : visibleStops.length}
+                  {visibleStops.length}
                 </p>
               </div>
 
@@ -1036,6 +775,17 @@ const EnterpriseDriverMap = ({
               </div>
             ) : null}
 
+            {activeDelivery ? (
+              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
+                <p className="text-sm font-bold text-blue-900 mb-1">
+                  Entrega en curso
+                </p>
+                <p className="text-sm text-blue-800">
+                  {activeDelivery.clientName} — {activeDelivery.address}
+                </p>
+              </div>
+            ) : null}
+
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
@@ -1047,85 +797,38 @@ const EnterpriseDriverMap = ({
                     : "bg-gray-300 text-gray-500 cursor-not-allowed"
                 }`}
               >
-                Abrir en Google Maps
-              </button>
-
-              <button
-                type="button"
-                onClick={loadDayRoute}
-                className="px-4 py-2.5 rounded-2xl font-semibold border border-slate-200 bg-white text-slate-700 transition hover:scale-[1.02]"
-              >
-                Actualizar recorrido
+                Abrir navegación en Google Maps
               </button>
             </div>
 
-            {mapMode === "navigation" ? (
-              visibleStops.length > 0 ? (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                  <p className="text-sm font-bold text-slate-900 mb-3">
-                    Orden de la ruta
-                  </p>
-
-                  <div className="space-y-2">
-                    {visibleStops.map((stop, index) => (
-                      <div
-                        key={stop._id || stop.id || index}
-                        className={`rounded-xl border px-3 py-3 text-sm ${
-                          String(activeDelivery?._id || activeDelivery?.id) ===
-                          String(stop._id || stop.id)
-                            ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
-                            : "border-slate-200 bg-white text-slate-700"
-                        }`}
-                      >
-                        <span className="font-semibold">{index + 1}.</span>{" "}
-                        {stop.clientName} — {stop.address}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                  Aún no hay direcciones pendientes para dibujar la ruta.
-                </div>
-              )
-            ) : null}
-
-            {mapMode === "dayRoute" ? (
+            {visibleStops.length > 0 ? (
               <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
                 <p className="text-sm font-bold text-slate-900 mb-3">
-                  Recorrido acumulado del día
+                  Orden de la ruta
                 </p>
 
-                {dayRoutePoints.length ? (
-                  <div className="space-y-2 max-h-[260px] overflow-y-auto">
-                    {dayRoutePoints.map((point, index) => (
-                      <div
-                        key={`${point.timestamp || "point"}-${index}`}
-                        className="rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-700"
-                      >
-                        <span className="font-semibold">{index + 1}.</span>{" "}
-                        {Number(point.lat).toFixed(6)}, {Number(point.lng).toFixed(6)}
-                        <div className="mt-1 text-xs text-slate-500">
-                          {point.timestamp
-                            ? new Date(point.timestamp).toLocaleString()
-                            : "Sin fecha"}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <div className="rounded-xl border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">
-                    No hay recorrido registrado hoy.
-                  </div>
-                )}
+                <div className="space-y-2">
+                  {visibleStops.map((stop, index) => (
+                    <div
+                      key={stop._id || stop.id || index}
+                      className={`rounded-xl border px-3 py-3 text-sm ${
+                        String(activeDelivery?._id || activeDelivery?.id) ===
+                        String(stop._id || stop.id)
+                          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
+                          : "border-slate-200 bg-white text-slate-700"
+                      }`}
+                    >
+                      <span className="font-semibold">{index + 1}.</span>{" "}
+                      {stop.clientName} — {stop.address}
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : null}
-
-            {mapMode === "currentLocation" ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-600">
-                Mostrando únicamente la ubicación actual del conductor.
+            ) : (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
+                Aún no hay direcciones pendientes para dibujar la ruta.
               </div>
-            ) : null}
+            )}
           </div>
 
           <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
@@ -1136,18 +839,10 @@ const EnterpriseDriverMap = ({
               </p>
             </div>
 
-            {mapMode === "navigation" ? (
-              <div
-                ref={directionsPanelRef}
-                className="p-3 text-sm text-slate-700 max-h-[460px] overflow-y-auto"
-              />
-            ) : (
-              <div className="p-4 text-sm text-slate-500">
-                {mapMode === "dayRoute"
-                  ? "En modo recorrido del día no se muestran indicaciones paso a paso."
-                  : "En modo solo ubicación no hay indicaciones activas."}
-              </div>
-            )}
+            <div
+              ref={directionsPanelRef}
+              className="p-3 text-sm text-slate-700 max-h-[420px] overflow-y-auto"
+            />
           </div>
         </div>
       </div>
@@ -1167,6 +862,90 @@ const EnterpriseDriverPanel = () => {
   const [listDateFilter, setListDateFilter] = useState("");
   const [listScopeFilter, setListScopeFilter] = useState("Pendientes");
   const navigate = useNavigate();
+
+  const nativeTrackingStartedRef = useRef(false);
+
+  const startNativeTrackingNow = useCallback(
+    async ({ silent = false } = {}) => {
+      const driverId =
+        selectedDriver?._id ||
+        selectedDriver?.id ||
+        localStorage.getItem("activeEnterpriseDriverId") ||
+        "";
+
+      const token = localStorage.getItem("enterpriseDriverToken") || "";
+
+      console.log("[BG-NATIVE] Intentando iniciar GPS nativo", {
+        driverId,
+        hasToken: !!token,
+        apiBaseUrl: API_BASE,
+        isNative: Capacitor.isNativePlatform(),
+        platform: Capacitor.getPlatform(),
+      });
+
+      if (!driverId || !token) {
+        nativeTrackingStartedRef.current = false;
+
+        if (!silent) {
+          alert(
+            "Falta driverId o token. Cierra sesión e ingresa nuevamente como conductor."
+          );
+        }
+
+        return false;
+      }
+
+      if (!Capacitor.isNativePlatform()) {
+        nativeTrackingStartedRef.current = false;
+
+        if (!silent) {
+          alert(
+            "El GPS en segundo plano solo funciona en la app instalada en Android, no en navegador."
+          );
+        }
+
+        return false;
+      }
+
+      try {
+        const result = await startBackgroundTracking({
+          driverId,
+          token,
+          apiBaseUrl: API_BASE,
+        });
+
+        nativeTrackingStartedRef.current = true;
+
+        console.log("[BG-NATIVE] GPS nativo iniciado correctamente:", result);
+
+        if (!silent) {
+          alert(
+            "GPS en segundo plano iniciado correctamente. Verifica que quede la notificación fija de Central Go."
+          );
+        }
+
+        return true;
+      } catch (error) {
+        nativeTrackingStartedRef.current = false;
+
+        console.error("[BG-NATIVE] Error iniciando GPS nativo:", error);
+
+        if (!silent) {
+          alert(error?.message || "No se pudo iniciar el GPS en segundo plano.");
+        }
+
+        return false;
+      }
+    },
+    [selectedDriver]
+  );
+
+  useEffect(() => {
+    if (!selectedDriver?._id && !selectedDriver?.id) return;
+    if (nativeTrackingStartedRef.current) return;
+
+    startNativeTrackingNow({ silent: true });
+  }, [selectedDriver?._id, selectedDriver?.id, startNativeTrackingNow]);
 
   useEffect(() => {
     const savedCedula =
@@ -1194,27 +973,33 @@ const EnterpriseDriverPanel = () => {
         }
 
         if (savedDriverId) {
-          const response = await fetch(`${API_BASE}/enterprise-drivers`, {
-            method: "GET",
-            credentials: "include",
-          });
+          try {
+            const response = await fetch(`${API_BASE}/enterprise-drivers`, {
+              method: "GET",
+              headers: getDriverAuthHeaders(),
+              credentials: "include",
+            });
 
-          const text = await response.text();
-          const data = text ? JSON.parse(text) : {};
+            const text = await response.text();
+            const data = text ? JSON.parse(text) : {};
 
-          if (response.ok && data?.drivers?.length) {
-            const matched = data.drivers.find(
-              (driver) => String(driver._id) === String(savedDriverId)
-            );
-
-            if (matched) {
-              setSelectedDriver(matched);
-              currentDriver = matched;
-              localStorage.setItem(
-                "activeEnterpriseDriverData",
-                JSON.stringify(matched)
+            if (response.ok && data?.drivers?.length) {
+              const matched = data.drivers.find(
+                (driver) => String(driver._id || driver.id) === String(savedDriverId)
               );
+
+              if (matched) {
+                setSelectedDriver(matched);
+                currentDriver = matched;
+
+                localStorage.setItem(
+                  "activeEnterpriseDriverData",
+                  JSON.stringify(matched)
+                );
+              }
             }
+          } catch (error) {
+            console.error("No se pudo refrescar datos del conductor:", error);
           }
         }
 
@@ -1222,6 +1007,7 @@ const EnterpriseDriverPanel = () => {
           `${API_BASE}/enterprise-deliveries/me`,
           {
             method: "GET",
+            headers: getDriverAuthHeaders(),
             credentials: "include",
           }
         );
@@ -1332,6 +1118,7 @@ const EnterpriseDriverPanel = () => {
         const aTime = new Date(
           a?.createdAt || a?.updatedAt || a?.startedAt || a?.finishedAt || 0
         ).getTime();
+
         const bTime = new Date(
           b?.createdAt || b?.updatedAt || b?.startedAt || b?.finishedAt || 0
         ).getTime();
@@ -1361,6 +1148,7 @@ const EnterpriseDriverPanel = () => {
 
   const updateDeliveriesStorage = (updatedDeliveries) => {
     setDeliveries(updatedDeliveries);
+
     localStorage.setItem(
       "enterpriseDeliveries",
       JSON.stringify(updatedDeliveries)
@@ -1373,9 +1161,7 @@ const EnterpriseDriverPanel = () => {
         `${API_BASE}/enterprise-drivers/${driverId}/status`,
         {
           method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
+          headers: getDriverAuthHeaders(),
           credentials: "include",
           body: JSON.stringify({ status }),
         }
@@ -1411,9 +1197,7 @@ const EnterpriseDriverPanel = () => {
       `${API_BASE}/enterprise-deliveries/${deliveryId}/status`,
       {
         method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-        },
+        headers: getDriverAuthHeaders(),
         credentials: "include",
         body: JSON.stringify({ status }),
       }
@@ -1448,6 +1232,8 @@ const EnterpriseDriverPanel = () => {
     try {
       const driverId = selectedDriver._id || selectedDriver.id;
 
+      await startNativeTrackingNow({ silent: true });
+
       const optimisticDeliveries = deliveries.map((delivery) => {
         const currentId = delivery._id || delivery.id;
 
@@ -1469,6 +1255,7 @@ const EnterpriseDriverPanel = () => {
       };
 
       setSelectedDriver(optimisticDriver);
+
       localStorage.setItem(
         "activeEnterpriseDriverData",
         JSON.stringify(optimisticDriver)
@@ -1497,8 +1284,10 @@ const EnterpriseDriverPanel = () => {
 
       try {
         const persistedDriver = await persistDriverStatus(driverId, "En ruta");
+
         if (persistedDriver) {
           setSelectedDriver(persistedDriver);
+
           localStorage.setItem(
             "activeEnterpriseDriverData",
             JSON.stringify(persistedDriver)
@@ -1566,6 +1355,7 @@ const EnterpriseDriverPanel = () => {
       };
 
       setSelectedDriver(updatedDriver);
+
       localStorage.setItem(
         "activeEnterpriseDriverData",
         JSON.stringify(updatedDriver)
@@ -1573,8 +1363,10 @@ const EnterpriseDriverPanel = () => {
 
       try {
         const persistedDriver = await persistDriverStatus(driverId, nextDriverStatus);
+
         if (persistedDriver) {
           setSelectedDriver(persistedDriver);
+
           localStorage.setItem(
             "activeEnterpriseDriverData",
             JSON.stringify(persistedDriver)
@@ -1591,11 +1383,21 @@ const EnterpriseDriverPanel = () => {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    try {
+      await stopBackgroundTracking();
+    } catch (error) {
+      console.error("[BG-NATIVE] Error deteniendo tracking al cerrar sesión:", error);
+    }
+
+    localStorage.removeItem("enterpriseDriverToken");
     localStorage.removeItem("activeEnterpriseDriverCedula");
     localStorage.removeItem("activeEnterpriseDriverId");
     localStorage.removeItem("activeEnterpriseDriverData");
     localStorage.removeItem("enterpriseDeliveries");
+
+    nativeTrackingStartedRef.current = false;
+
     navigate("/enterprise-driver-login");
   };
 
@@ -1629,7 +1431,6 @@ const EnterpriseDriverPanel = () => {
     if (scope === "Todos") {
       setListStatusFilter("Todos");
       setListDateFilter("");
-      return;
     }
   };
 
@@ -1710,13 +1511,23 @@ const EnterpriseDriverPanel = () => {
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={handleLogout}
-              className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-green-800 shadow-lg transition hover:scale-[1.02]"
-            >
-              Cerrar sesión
-            </button>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={() => startNativeTrackingNow({ silent: false })}
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-emerald-400 px-5 py-3 font-semibold text-slate-950 shadow-lg transition hover:scale-[1.02]"
+              >
+                Reactivar GPS segundo plano
+              </button>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-green-800 shadow-lg transition hover:scale-[1.02]"
+              >
+                Cerrar sesión
+              </button>
+            </div>
           </div>
 
           <div className="mt-7 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -1760,7 +1571,10 @@ const EnterpriseDriverPanel = () => {
 
               <div className="p-6">
                 <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
-                  <p className="text-lg font-extrabold text-slate-900">{selectedDriver.name}</p>
+                  <p className="text-lg font-extrabold text-slate-900">
+                    {selectedDriver.name}
+                  </p>
+
                   <div className="mt-4 grid grid-cols-1 gap-3">
                     <div className="rounded-2xl bg-white p-4 border border-slate-200">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1965,6 +1779,7 @@ const EnterpriseDriverPanel = () => {
                             <p className="text-lg font-extrabold text-slate-900">
                               Factura #{delivery.invoiceNumber}
                             </p>
+
                             <span
                               className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusBadgeClass(
                                 delivery.status
@@ -1973,6 +1788,7 @@ const EnterpriseDriverPanel = () => {
                               {delivery.status}
                             </span>
                           </div>
+
                           <p className="mt-1 text-xs text-slate-500">
                             Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
                           </p>
@@ -2066,7 +1882,7 @@ const EnterpriseDriverPanel = () => {
                         </div>
                       ) : null}
 
-                      {(delivery.startedAt || delivery.finishedAt) ? (
+                      {delivery.startedAt || delivery.finishedAt ? (
                         <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
                           {delivery.startedAt ? (
                             <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">

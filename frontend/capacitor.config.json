@@ -1,5 +1,8 @@
 {
   "appId": "co.com.mercalan.centralgo",
   "appName": "Central Go",
-  "webDir": "dist"
+  "webDir": "dist",
+  "android": {
+    "useLegacyBridge": true
+  }
 }

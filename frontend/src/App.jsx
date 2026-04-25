@@ -26,6 +26,9 @@ import EnterpriseDeliveryHistory from "./pages/EnterpriseDeliveryHistory";
 import EnterpriseAccess from "./pages/EnterpriseAccess";
 import EnterpriseClients from "./pages/EnterpriseClients";
 
+import SuperAdminLogin from "./pages/SuperAdminLogin";
+import SuperAdminDashboard from "./pages/SuperAdminDashboard";
+
 // Nuevas páginas del conductor
 import CaptainGoodsOffers from "./pages/CaptainGoodsOffers";
 import CaptainSpaceOffers from "./pages/CaptainSpaceOffers";
@@ -46,6 +49,12 @@ const App = () => {
         <Route path="/captain-login" element={<CaptainLogin />} />
         <Route path="/captain-signup" element={<CaptainSignup />} />
         <Route path="/riding" element={<RideStarted />} />
+
+        <Route path="/centralgo-admin-root" element={<SuperAdminLogin />} />
+        <Route
+          path="/centralgo-admin-root/dashboard"
+          element={<SuperAdminDashboard />}
+        />
 
         <Route path="/enterprise-access" element={<EnterpriseAccess />} />
         <Route path="/enterprise-login" element={<EnterpriseLogin />} />

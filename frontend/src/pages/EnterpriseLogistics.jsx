@@ -51,6 +51,7 @@ const EnterpriseLogisticsDriverMap = ({
   const dayPolylineRef = useRef(null);
   const dayMarkersRef = useRef([]);
   const dayRouteSignatureRef = useRef("");
+  const lastDriverIdRef = useRef("");
 
   const clearDayRouteArtifacts = useCallback(() => {
     if (dayPolylineRef.current) {
@@ -94,6 +95,28 @@ const EnterpriseLogisticsDriverMap = ({
       directionsRendererRef.current.setMap(mapInstanceRef.current);
     }
   }, [mapsApiLoaded]);
+
+  useEffect(() => {
+    const currentDriverId = String(selectedDriver?._id || selectedDriver?.id || "");
+
+    if (lastDriverIdRef.current !== currentDriverId) {
+      lastDriverIdRef.current = currentDriverId;
+      lastCoordsRef.current = null;
+      routeSignatureRef.current = "";
+      infoWindowSignatureRef.current = "";
+      dayRouteSignatureRef.current = "";
+
+      if (directionsRendererRef.current) {
+        directionsRendererRef.current.set("directions", null);
+      }
+
+      if (infoWindowRef.current) {
+        infoWindowRef.current.close();
+      }
+
+      clearDayRouteArtifacts();
+    }
+  }, [selectedDriver?._id, selectedDriver?.id, clearDayRouteArtifacts]);
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
@@ -1094,7 +1117,7 @@ const EnterpriseLogistics = () => {
       fetchDrivers(true);
       fetchDeliveries(true);
       fetchClients(true);
-    }, 8000);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [fetchDrivers, fetchDeliveries, fetchClients]);
@@ -1447,51 +1470,105 @@ const EnterpriseLogistics = () => {
     }
   };
 
-  const fetchSelectedDriverRouteSummary = useCallback(async () => {
-    if (!selectedDriver?._id) {
-      setSelectedDriverRouteSummary(null);
+  const fetchSelectedDriverRouteSummary = useCallback(
+    async ({ silent = false } = {}) => {
+      const currentDriverId =
+        selectedDriver?._id || selectedDriver?.id || selectedDriverFilter || "";
+
+      if (!currentDriverId) {
+        setSelectedDriverRouteSummary(null);
+        return null;
+      }
+
+      try {
+        if (!silent) {
+          setRouteSummaryLoading(true);
+        }
+
+        const response = await fetch(
+          `${API_BASE}/enterprise-drivers/${currentDriverId}/route-summary?date=${routeSummaryDate}`,
+          {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
+
+        const data = await parseJsonSafe(
+          response,
+          "GET /enterprise-drivers/:id/route-summary"
+        );
+
+        if (!response.ok) {
+          throw new Error(
+            data.message || "No se pudo cargar el resumen de ruta del conductor."
+          );
+        }
+
+        setSelectedDriverRouteSummary(data);
+        return data;
+      } catch (error) {
+        console.error("Error cargando resumen de ruta:", error);
+        setSelectedDriverRouteSummary(null);
+        return null;
+      } finally {
+        if (!silent) {
+          setRouteSummaryLoading(false);
+        }
+      }
+    },
+    [selectedDriver?._id, selectedDriver?.id, selectedDriverFilter, routeSummaryDate]
+  );
+
+  const handleShowDayRoute = useCallback(async () => {
+    if (!selectedDriver?._id && !selectedDriver?.id) {
+      alert("Primero selecciona un conductor.");
       return;
     }
 
-    try {
-      setRouteSummaryLoading(true);
+    setMapViewMode("day");
+    await fetchDrivers(true);
+    await fetchDeliveries(true);
+    await fetchSelectedDriverRouteSummary({ silent: false });
+  }, [
+    selectedDriver?._id,
+    selectedDriver?.id,
+    fetchDrivers,
+    fetchDeliveries,
+    fetchSelectedDriverRouteSummary,
+  ]);
 
-      const response = await fetch(
-        `${API_BASE}/enterprise-drivers/${selectedDriver._id}/route-summary?date=${routeSummaryDate}`,
-        {
-          method: "GET",
-          credentials: "include",
-          cache: "no-store",
-        }
-      );
+  const handleShowCurrentLocation = useCallback(async () => {
+    setMapViewMode("current");
+    setSelectedDriverRouteSummary(null);
 
-      const data = await parseJsonSafe(
-        response,
-        "GET /enterprise-drivers/:id/route-summary"
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          data.message || "No se pudo cargar el resumen de ruta del conductor."
-        );
-      }
-
-      setSelectedDriverRouteSummary(data);
-    } catch (error) {
-      console.error("Error cargando resumen de ruta:", error);
-      setSelectedDriverRouteSummary(null);
-    } finally {
-      setRouteSummaryLoading(false);
-    }
-  }, [selectedDriver?._id, routeSummaryDate]);
+    await fetchDrivers(true);
+    await fetchDeliveries(true);
+  }, [fetchDrivers, fetchDeliveries]);
 
   useEffect(() => {
-    fetchSelectedDriverRouteSummary();
+    fetchSelectedDriverRouteSummary({ silent: false });
   }, [fetchSelectedDriverRouteSummary]);
 
   useEffect(() => {
+    if (!selectedDriverFilter || mapViewMode !== "day") return;
+
+    const interval = setInterval(() => {
+      fetchSelectedDriverRouteSummary({ silent: true });
+    }, 8000);
+
+    return () => clearInterval(interval);
+  }, [selectedDriverFilter, mapViewMode, fetchSelectedDriverRouteSummary]);
+
+  useEffect(() => {
     setMapViewMode("current");
-  }, [selectedDriverFilter]);
+    setSelectedDriverRouteSummary(null);
+
+    if (selectedDriverFilter) {
+      fetchDrivers(true);
+      fetchDeliveries(true);
+    }
+  }, [selectedDriverFilter, fetchDrivers, fetchDeliveries]);
 
   const formatDurationText = (seconds) => {
     const total = Number(seconds || 0);
@@ -1975,19 +2052,20 @@ const EnterpriseLogistics = () => {
 
                 <button
                   type="button"
-                  onClick={() => setMapViewMode("day")}
+                  onClick={handleShowDayRoute}
+                  disabled={routeSummaryLoading}
                   className={`px-4 py-3 rounded-xl font-semibold ${
                     mapViewMode === "day"
                       ? "bg-emerald-600 text-white"
                       : "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                  }`}
+                  } ${routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""}`}
                 >
-                  Ver recorrido del día
+                  {routeSummaryLoading ? "Cargando recorrido..." : "Ver recorrido del día"}
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setMapViewMode("current")}
+                  onClick={handleShowCurrentLocation}
                   className={`px-4 py-3 rounded-xl font-semibold ${
                     mapViewMode === "current"
                       ? "bg-blue-600 text-white"
@@ -1999,10 +2077,13 @@ const EnterpriseLogistics = () => {
 
                 <button
                   type="button"
-                  onClick={fetchSelectedDriverRouteSummary}
-                  className="bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold"
+                  onClick={() => fetchSelectedDriverRouteSummary({ silent: false })}
+                  disabled={routeSummaryLoading}
+                  className={`bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold ${
+                    routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""
+                  }`}
                 >
-                  Actualizar recorrido
+                  {routeSummaryLoading ? "Actualizando..." : "Actualizar recorrido"}
                 </button>
               </div>
             </div>
