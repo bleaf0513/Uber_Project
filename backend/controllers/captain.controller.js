@@ -1,5 +1,6 @@
 const captainModel = require('../models/captain.model');
 const captainSerivce = require('../services/captain.service');
+const DriverApplication = require('../models/driverApplication.model');
 const { validationResult } = require('express-validator');
 const blacklistTokenModel = require('../models/blacklistToken.model');
 
@@ -135,6 +136,11 @@ function buildCaptainResponse(captainDoc) {
     };
 }
 
+/**
+ * NUEVO FLUJO:
+ * El registro del conductor ya NO crea un captain activo.
+ * Ahora crea una solicitud pendiente para revisión del Super Admin.
+ */
 module.exports.registerCaptain = async (req, res, next) => {
     const errors = validationResult(req);
 
@@ -143,35 +149,146 @@ module.exports.registerCaptain = async (req, res, next) => {
     }
 
     try {
-        const { fullname, email, password, vehicle } = req.body;
+        const {
+            fullname,
+            email,
+            password,
+            vehicle,
+            documents,
+        } = req.body;
 
-        const isCaptainAlreadyExist = await captainModel.findOne({ email });
+        const cleanEmail = String(email || '').trim().toLowerCase();
+        const plate = String(vehicle?.plate || '').trim().toUpperCase();
 
-        if (isCaptainAlreadyExist) {
-            return res.status(400).json({ message: 'Captain already exist' });
+        if (!fullname?.firstname || String(fullname.firstname).trim().length < 3) {
+            return res.status(400).json({
+                message: 'El nombre debe tener mínimo 3 caracteres.',
+            });
+        }
+
+        if (!cleanEmail) {
+            return res.status(400).json({
+                message: 'El correo es obligatorio.',
+            });
+        }
+
+        if (!password || String(password).length < 6) {
+            return res.status(400).json({
+                message: 'La contraseña debe tener mínimo 6 caracteres.',
+            });
+        }
+
+        if (!vehicle?.color || String(vehicle.color).trim().length < 3) {
+            return res.status(400).json({
+                message: 'El color del vehículo es obligatorio.',
+            });
+        }
+
+        if (!plate || plate.length < 3) {
+            return res.status(400).json({
+                message: 'La placa del vehículo es obligatoria.',
+            });
+        }
+
+        if (!vehicle?.capacity || Number(vehicle.capacity) < 1) {
+            return res.status(400).json({
+                message: 'La capacidad del vehículo debe ser válida.',
+            });
+        }
+
+        if (!['motorcycle', 'car', 'light_cargo', 'van', 'truck'].includes(vehicle?.vehicleType)) {
+            return res.status(400).json({
+                message: 'El tipo de vehículo no es válido.',
+            });
+        }
+
+        if (!documents?.drivingLicenseImage) {
+            return res.status(400).json({
+                message: 'Debes subir la foto de la licencia de conducción.',
+            });
+        }
+
+        if (!documents?.vehicleRegistrationImage) {
+            return res.status(400).json({
+                message: 'Debes subir la foto de la matrícula o tarjeta de propiedad del vehículo.',
+            });
+        }
+
+        const existingCaptain = await captainModel.findOne({
+            email: cleanEmail,
+        });
+
+        if (existingCaptain) {
+            return res.status(400).json({
+                message: 'Ya existe un conductor registrado con ese correo.',
+            });
+        }
+
+        const existingPlateCaptain = await captainModel.findOne({
+            'vehicle.plate': plate,
+        });
+
+        if (existingPlateCaptain) {
+            return res.status(400).json({
+                message: 'Ya existe un conductor registrado con esa placa.',
+            });
+        }
+
+        const existingPendingApplication = await DriverApplication.findOne({
+            $or: [
+                { email: cleanEmail },
+                { 'vehicle.plate': plate },
+            ],
+            status: 'pending',
+        });
+
+        if (existingPendingApplication) {
+            return res.status(409).json({
+                message: 'Ya existe una solicitud pendiente con ese correo o esa placa.',
+            });
         }
 
         const hashedPassword = await captainModel.hashPassword(password);
 
-        const captain = await captainSerivce.createCaptain({
-            firstname: fullname.firstname,
-            lastname: fullname.lastname,
-            email,
+        const application = await DriverApplication.create({
+            fullname: {
+                firstname: String(fullname.firstname || '').trim(),
+                lastname: String(fullname.lastname || '').trim(),
+            },
+            email: cleanEmail,
             password: hashedPassword,
-            color: vehicle.color,
-            plate: vehicle.plate,
-            capacity: vehicle.capacity,
-            vehicleType: vehicle.vehicleType,
+            vehicle: {
+                color: String(vehicle.color || '').trim(),
+                plate,
+                capacity: Number(vehicle.capacity || 1),
+                vehicleType: vehicle.vehicleType,
+            },
+            documents: {
+                drivingLicenseImage: documents.drivingLicenseImage,
+                vehicleRegistrationImage: documents.vehicleRegistrationImage,
+            },
+            status: 'pending',
         });
-
-        const token = captain.generateAuthToken();
 
         return res.status(201).json({
-            token,
-            captain: buildCaptainResponse(captain),
+            success: true,
+            message: 'Solicitud enviada correctamente. Un administrador revisará tus documentos.',
+            application: {
+                _id: application._id,
+                id: application._id,
+                status: application.status,
+                email: application.email,
+                vehicle: application.vehicle,
+                createdAt: application.createdAt,
+            },
         });
     } catch (error) {
-        return res.status(500).json({ error: error.message });
+        console.error('registerCaptain application error:', error);
+
+        return res.status(500).json({
+            message: 'No se pudo enviar la solicitud del conductor.',
+            error: error.message,
+        });
     }
 };
 
@@ -184,9 +301,37 @@ module.exports.loginCaptain = async (req, res, next) => {
     }
 
     try {
-        const captain = await captainModel.findOne({ email }).select('+password');
+        const cleanEmail = String(email || '').trim().toLowerCase();
+
+        const captain = await captainModel.findOne({ email: cleanEmail }).select('+password');
 
         if (!captain) {
+            const pendingApplication = await DriverApplication.findOne({
+                email: cleanEmail,
+                status: 'pending',
+            });
+
+            const rejectedApplication = await DriverApplication.findOne({
+                email: cleanEmail,
+                status: 'rejected',
+            }).sort({ updatedAt: -1 });
+
+            if (pendingApplication) {
+                return res.status(403).json({
+                    message: 'Tu solicitud como conductor aún está pendiente de revisión.',
+                    status: 'pending_application',
+                });
+            }
+
+            if (rejectedApplication) {
+                return res.status(403).json({
+                    message: rejectedApplication.rejectionReason
+                        ? `Tu solicitud fue rechazada. Motivo: ${rejectedApplication.rejectionReason}`
+                        : 'Tu solicitud como conductor fue rechazada.',
+                    status: 'rejected_application',
+                });
+            }
+
             return res.status(404).json({ message: 'Captain not found' });
         }
 
@@ -194,6 +339,12 @@ module.exports.loginCaptain = async (req, res, next) => {
 
         if (!isMatch) {
             return res.status(400).json({ message: 'Invalid password' });
+        }
+
+        if (captain.status !== 'active') {
+            return res.status(403).json({
+                message: 'Tu cuenta de conductor no está activa.',
+            });
         }
 
         const now = new Date();
@@ -212,7 +363,7 @@ module.exports.loginCaptain = async (req, res, next) => {
         res.cookie('token', token, {
             httpOnly: true,
             sameSite: 'lax',
-            secure: false,
+            secure: process.env.NODE_ENV === 'production',
         });
 
         return res.status(200).json({
