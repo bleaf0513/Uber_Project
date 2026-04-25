@@ -23,6 +23,40 @@ const formatDate = (value) => {
   return date.toLocaleString();
 };
 
+const getVehicleTypeLabel = (value) => {
+  const labels = {
+    motorcycle: "Moto",
+    car: "Carro",
+    light_cargo: "Carga liviana",
+    van: "Furgón / camioneta",
+    truck: "Camión",
+  };
+
+  return labels[value] || value || "Sin tipo";
+};
+
+const getApplicationStatusLabel = (status) => {
+  const labels = {
+    pending: "Pendiente",
+    approved: "Aprobada",
+    rejected: "Rechazada",
+  };
+
+  return labels[status] || status || "Sin estado";
+};
+
+const getApplicationStatusClass = (status) => {
+  if (status === "approved") {
+    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  }
+
+  if (status === "rejected") {
+    return "bg-red-100 text-red-700 border border-red-200";
+  }
+
+  return "bg-amber-100 text-amber-700 border border-amber-200";
+};
+
 const StatCard = ({ title, value, subtitle }) => {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -51,9 +85,13 @@ const SuperAdminDashboard = () => {
 
   const [admin, setAdmin] = useState(null);
   const [dashboard, setDashboard] = useState(null);
+  const [driverApplications, setDriverApplications] = useState([]);
+  const [applicationFilter, setApplicationFilter] = useState("pending");
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [applicationsLoading, setApplicationsLoading] = useState(false);
+  const [actionLoadingId, setActionLoadingId] = useState("");
 
   const token = useMemo(() => {
     return localStorage.getItem("superAdminToken") || "";
@@ -83,6 +121,12 @@ const SuperAdminDashboard = () => {
     }
   };
 
+  const handleUnauthorized = () => {
+    localStorage.removeItem("superAdminToken");
+    localStorage.removeItem("superAdminData");
+    navigate("/centralgo-admin-root");
+  };
+
   const loadDashboard = async ({ silent = false } = {}) => {
     try {
       if (silent) {
@@ -108,10 +152,15 @@ const SuperAdminDashboard = () => {
     } catch (error) {
       console.error("Error cargando dashboard Super Admin:", error);
 
-      if (String(error.message || "").toLowerCase().includes("token")) {
-        localStorage.removeItem("superAdminToken");
-        localStorage.removeItem("superAdminData");
-        navigate("/centralgo-admin-root");
+      const message = String(error.message || "").toLowerCase();
+
+      if (
+        message.includes("token") ||
+        message.includes("sesión") ||
+        message.includes("no autorizado") ||
+        message.includes("inválida")
+      ) {
+        handleUnauthorized();
         return;
       }
 
@@ -119,6 +168,55 @@ const SuperAdminDashboard = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const loadDriverApplications = async ({
+    status = applicationFilter,
+    silent = false,
+  } = {}) => {
+    try {
+      if (!silent) {
+        setApplicationsLoading(true);
+      }
+
+      const response = await fetch(
+        `${API_BASE}/super-admin/driver-applications?status=${encodeURIComponent(
+          status
+        )}`,
+        {
+          method: "GET",
+          headers: getHeaders(),
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const data = await parseJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudieron cargar las solicitudes.");
+      }
+
+      setDriverApplications(Array.isArray(data.applications) ? data.applications : []);
+    } catch (error) {
+      console.error("Error cargando solicitudes de conductores:", error);
+
+      const message = String(error.message || "").toLowerCase();
+
+      if (
+        message.includes("token") ||
+        message.includes("sesión") ||
+        message.includes("no autorizado") ||
+        message.includes("inválida")
+      ) {
+        handleUnauthorized();
+        return;
+      }
+
+      alert(error.message || "No se pudieron cargar las solicitudes.");
+    } finally {
+      setApplicationsLoading(false);
     }
   };
 
@@ -141,9 +239,7 @@ const SuperAdminDashboard = () => {
       localStorage.setItem("superAdminData", JSON.stringify(data.admin || {}));
     } catch (error) {
       console.error("Error validando Super Admin:", error);
-      localStorage.removeItem("superAdminToken");
-      localStorage.removeItem("superAdminData");
-      navigate("/centralgo-admin-root");
+      handleUnauthorized();
     }
   };
 
@@ -164,6 +260,175 @@ const SuperAdminDashboard = () => {
     navigate("/centralgo-admin-root");
   };
 
+  const handleChangeApplicationFilter = async (status) => {
+    setApplicationFilter(status);
+    await loadDriverApplications({ status, silent: false });
+  };
+
+  const openDocument = (imageData) => {
+    if (!imageData) {
+      alert("No hay documento disponible.");
+      return;
+    }
+
+    const win = window.open("", "_blank");
+
+    if (!win) {
+      alert("El navegador bloqueó la ventana emergente. Permite popups para ver el documento.");
+      return;
+    }
+
+    win.document.write(`
+      <html>
+        <head>
+          <title>Documento conductor - Central Go</title>
+          <style>
+            body {
+              margin: 0;
+              background: #0f172a;
+              color: white;
+              font-family: Arial, sans-serif;
+              display: flex;
+              min-height: 100vh;
+              align-items: center;
+              justify-content: center;
+              padding: 24px;
+              box-sizing: border-box;
+            }
+            .wrap {
+              width: 100%;
+              max-width: 1100px;
+              text-align: center;
+            }
+            img {
+              max-width: 100%;
+              max-height: 88vh;
+              border-radius: 18px;
+              box-shadow: 0 20px 60px rgba(0,0,0,.45);
+              background: white;
+            }
+            p {
+              color: #cbd5e1;
+              margin-bottom: 18px;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="wrap">
+            <p>Documento cargado por el conductor</p>
+            <img src="${imageData}" alt="Documento conductor" />
+          </div>
+        </body>
+      </html>
+    `);
+
+    win.document.close();
+  };
+
+  const approveApplication = async (application) => {
+    const applicationId = application?._id || application?.id;
+
+    if (!applicationId) {
+      alert("Solicitud inválida.");
+      return;
+    }
+
+    const confirmApprove = window.confirm(
+      `¿Aprobar la solicitud de ${application?.fullname?.firstname || ""} ${
+        application?.fullname?.lastname || ""
+      }?\n\nAl aprobarla, se creará el conductor activo y podrá iniciar sesión.`
+    );
+
+    if (!confirmApprove) return;
+
+    try {
+      setActionLoadingId(applicationId);
+
+      const response = await fetch(
+        `${API_BASE}/super-admin/driver-applications/${applicationId}/approve`,
+        {
+          method: "PATCH",
+          headers: getHeaders(),
+          credentials: "include",
+        }
+      );
+
+      const data = await parseJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo aprobar la solicitud.");
+      }
+
+      alert(data.message || "Solicitud aprobada correctamente.");
+
+      await Promise.all([
+        loadDashboard({ silent: true }),
+        loadDriverApplications({ status: applicationFilter, silent: true }),
+      ]);
+    } catch (error) {
+      console.error("Error aprobando solicitud:", error);
+      alert(error.message || "No se pudo aprobar la solicitud.");
+    } finally {
+      setActionLoadingId("");
+    }
+  };
+
+  const rejectApplication = async (application) => {
+    const applicationId = application?._id || application?.id;
+
+    if (!applicationId) {
+      alert("Solicitud inválida.");
+      return;
+    }
+
+    const reason = window.prompt(
+      "Escribe el motivo del rechazo. Este motivo quedará guardado para auditoría:"
+    );
+
+    if (reason === null) return;
+
+    const cleanReason = String(reason || "").trim();
+
+    if (cleanReason.length < 5) {
+      alert("El motivo debe tener mínimo 5 caracteres.");
+      return;
+    }
+
+    try {
+      setActionLoadingId(applicationId);
+
+      const response = await fetch(
+        `${API_BASE}/super-admin/driver-applications/${applicationId}/reject`,
+        {
+          method: "PATCH",
+          headers: getHeaders(),
+          credentials: "include",
+          body: JSON.stringify({
+            reason: cleanReason,
+          }),
+        }
+      );
+
+      const data = await parseJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo rechazar la solicitud.");
+      }
+
+      alert(data.message || "Solicitud rechazada correctamente.");
+
+      await Promise.all([
+        loadDashboard({ silent: true }),
+        loadDriverApplications({ status: applicationFilter, silent: true }),
+      ]);
+    } catch (error) {
+      console.error("Error rechazando solicitud:", error);
+      alert(error.message || "No se pudo rechazar la solicitud.");
+    } finally {
+      setActionLoadingId("");
+    }
+  };
+
   useEffect(() => {
     if (!token) {
       navigate("/centralgo-admin-root");
@@ -172,9 +437,11 @@ const SuperAdminDashboard = () => {
 
     loadMe();
     loadDashboard({ silent: false });
+    loadDriverApplications({ status: "pending", silent: false });
 
     const interval = setInterval(() => {
       loadDashboard({ silent: true });
+      loadDriverApplications({ status: applicationFilter, silent: true });
     }, 15000);
 
     return () => clearInterval(interval);
@@ -185,6 +452,7 @@ const SuperAdminDashboard = () => {
   const rides = modules?.rides || {};
   const enterprise = modules?.enterprise || {};
   const marketplace = modules?.marketplace || {};
+  const driverApplicationsStats = modules?.driverApplications || {};
   const totals = modules?.totals || {};
   const latest = dashboard?.latest || {};
 
@@ -223,7 +491,10 @@ const SuperAdminDashboard = () => {
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => loadDashboard({ silent: true })}
+                onClick={() => {
+                  loadDashboard({ silent: true });
+                  loadDriverApplications({ status: applicationFilter, silent: true });
+                }}
                 disabled={refreshing}
                 className="rounded-2xl bg-emerald-500 px-5 py-3 font-bold text-slate-950 disabled:opacity-60"
               >
@@ -268,9 +539,9 @@ const SuperAdminDashboard = () => {
           />
 
           <StatCard
-            title="Comisión estimada hoy"
-            value={formatCOP(totals.estimatedCommissionToday)}
-            subtitle="Estimación del día"
+            title="Solicitudes pendientes"
+            value={driverApplicationsStats.pendingDriverApplications || 0}
+            subtitle="Conductores esperando aprobación"
           />
         </div>
 
@@ -353,6 +624,210 @@ const SuperAdminDashboard = () => {
               </p>
             </div>
           </ModuleCard>
+        </div>
+
+        <div className="mt-6 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                Solicitudes de conductores
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Revisa documentos, aprueba conductores o rechaza solicitudes con motivo.
+              </p>
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => handleChangeApplicationFilter("pending")}
+                className={`rounded-2xl px-4 py-2 text-sm font-bold ${
+                  applicationFilter === "pending"
+                    ? "bg-amber-500 text-white"
+                    : "bg-amber-50 text-amber-700 border border-amber-200"
+                }`}
+              >
+                Pendientes ({driverApplicationsStats.pendingDriverApplications || 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeApplicationFilter("approved")}
+                className={`rounded-2xl px-4 py-2 text-sm font-bold ${
+                  applicationFilter === "approved"
+                    ? "bg-emerald-600 text-white"
+                    : "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                }`}
+              >
+                Aprobadas ({driverApplicationsStats.approvedDriverApplications || 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeApplicationFilter("rejected")}
+                className={`rounded-2xl px-4 py-2 text-sm font-bold ${
+                  applicationFilter === "rejected"
+                    ? "bg-red-600 text-white"
+                    : "bg-red-50 text-red-700 border border-red-200"
+                }`}
+              >
+                Rechazadas ({driverApplicationsStats.rejectedDriverApplications || 0})
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleChangeApplicationFilter("all")}
+                className={`rounded-2xl px-4 py-2 text-sm font-bold ${
+                  applicationFilter === "all"
+                    ? "bg-slate-900 text-white"
+                    : "bg-slate-100 text-slate-700 border border-slate-200"
+                }`}
+              >
+                Todas
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-5">
+            {applicationsLoading ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-600">
+                Cargando solicitudes...
+              </div>
+            ) : driverApplications.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                No hay solicitudes para este filtro.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {driverApplications.map((application) => {
+                  const applicationId = application._id || application.id;
+                  const isActionLoading = actionLoadingId === applicationId;
+
+                  return (
+                    <div
+                      key={applicationId}
+                      className="rounded-[24px] border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-lg font-extrabold text-slate-900">
+                              {application?.fullname?.firstname || "Sin nombre"}{" "}
+                              {application?.fullname?.lastname || ""}
+                            </h3>
+
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${getApplicationStatusClass(
+                                application.status
+                              )}`}
+                            >
+                              {getApplicationStatusLabel(application.status)}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-sm text-slate-600">
+                            {application.email}
+                          </p>
+
+                          <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                              <p className="text-xs font-semibold uppercase text-slate-500">
+                                Vehículo
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-slate-900">
+                                {getVehicleTypeLabel(application?.vehicle?.vehicleType)}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                              <p className="text-xs font-semibold uppercase text-slate-500">
+                                Placa
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-slate-900">
+                                {application?.vehicle?.plate || "Sin placa"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                              <p className="text-xs font-semibold uppercase text-slate-500">
+                                Color
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-slate-900">
+                                {application?.vehicle?.color || "Sin color"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                              <p className="text-xs font-semibold uppercase text-slate-500">
+                                Fecha solicitud
+                              </p>
+                              <p className="mt-1 text-sm font-bold text-slate-900">
+                                {formatDate(application.createdAt)}
+                              </p>
+                            </div>
+                          </div>
+
+                          {application.status === "rejected" && application.rejectionReason ? (
+                            <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+                              <b>Motivo rechazo:</b> {application.rejectionReason}
+                            </div>
+                          ) : null}
+                        </div>
+
+                        <div className="flex flex-col gap-2 xl:min-w-[260px]">
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocument(application?.documents?.drivingLicenseImage)
+                            }
+                            className="rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white"
+                          >
+                            Ver licencia
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openDocument(application?.documents?.vehicleRegistrationImage)
+                            }
+                            className="rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white"
+                          >
+                            Ver matrícula
+                          </button>
+
+                          {application.status === "pending" ? (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => approveApplication(application)}
+                                disabled={isActionLoading}
+                                className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                              >
+                                {isActionLoading ? "Procesando..." : "Aprobar"}
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => rejectApplication(application)}
+                                disabled={isActionLoading}
+                                className="rounded-2xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+                              >
+                                {isActionLoading ? "Procesando..." : "Rechazar"}
+                              </button>
+                            </>
+                          ) : (
+                            <div className="rounded-2xl bg-white px-4 py-3 text-center text-xs font-semibold text-slate-500 border border-slate-200">
+                              Solicitud ya revisada
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
