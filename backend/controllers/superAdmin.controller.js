@@ -44,6 +44,35 @@ function calculateCommission(value) {
     return Math.round((numericValue * percent) / 100);
 }
 
+function addOneMonth(dateValue) {
+    const date = new Date(dateValue);
+
+    if (Number.isNaN(date.getTime())) {
+        return null;
+    }
+
+    const nextDate = new Date(date);
+    nextDate.setMonth(nextDate.getMonth() + 1);
+
+    return nextDate;
+}
+
+function getDaysBetween(startDate, endDate = new Date()) {
+    const start = new Date(startDate);
+    const end = new Date(endDate);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) {
+        return 0;
+    }
+
+    const diffMs = end.getTime() - start.getTime();
+    return Math.max(0, Math.floor(diffMs / (1000 * 60 * 60 * 24)));
+}
+
+function getApplicationFullName(application) {
+    return `${application?.fullname?.firstname || ''} ${application?.fullname?.lastname || ''}`.trim();
+}
+
 function buildCaptainResponse(captainDoc) {
     if (!captainDoc) return null;
 
@@ -83,10 +112,6 @@ function buildApplicationResponse(applicationDoc) {
         createdAt: app.createdAt,
         updatedAt: app.updatedAt,
     };
-}
-
-function getApplicationFullName(application) {
-    return `${application?.fullname?.firstname || ''} ${application?.fullname?.lastname || ''}`.trim();
 }
 
 async function ensureDefaultSuperAdminIfNeeded() {
@@ -509,6 +534,180 @@ module.exports.dashboard = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || 'No se pudo cargar el dashboard Super Admin.',
+        });
+    }
+};
+
+module.exports.getEnterprisesOverview = async (req, res) => {
+    try {
+        const enterprises = await Enterprise.find()
+            .sort({ createdAt: -1 })
+            .lean();
+
+        const enterpriseIds = enterprises.map((enterprise) => enterprise._id);
+
+        const [driversGrouped, deliveriesGrouped] = await Promise.all([
+            EnterpriseDriver.aggregate([
+                {
+                    $match: {
+                        enterprise: { $in: enterpriseIds },
+                    },
+                },
+                {
+                    $group: {
+                        _id: '$enterprise',
+                        totalDrivers: { $sum: 1 },
+                        activeDrivers: {
+                            $sum: {
+                                $cond: [{ $eq: ['$active', true] }, 1, 0],
+                            },
+                        },
+                        driversInRoute: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $and: [
+                                            { $eq: ['$active', true] },
+                                            { $eq: ['$status', 'En ruta'] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
+                        driversAvailable: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $and: [
+                                            { $eq: ['$active', true] },
+                                            { $eq: ['$status', 'Disponible'] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
+                        driversInactive: {
+                            $sum: {
+                                $cond: [
+                                    {
+                                        $or: [
+                                            { $eq: ['$active', false] },
+                                            { $eq: ['$status', 'Inactivo'] },
+                                        ],
+                                    },
+                                    1,
+                                    0,
+                                ],
+                            },
+                        },
+                        lastDriverActivityAt: {
+                            $max: '$currentLocation.updatedAt',
+                        },
+                    },
+                },
+            ]),
+
+            EnterpriseDelivery.aggregate([
+                {
+                    $match: {
+                        enterprise: { $in: enterpriseIds },
+                    },
+                },
+                {
+                    $group: {
+                        _id: '$enterprise',
+                        totalDeliveries: { $sum: 1 },
+                        pendingDeliveries: {
+                            $sum: {
+                                $cond: [{ $eq: ['$status', 'Pendiente'] }, 1, 0],
+                            },
+                        },
+                        inProgressDeliveries: {
+                            $sum: {
+                                $cond: [{ $eq: ['$status', 'En curso'] }, 1, 0],
+                            },
+                        },
+                        finishedDeliveries: {
+                            $sum: {
+                                $cond: [{ $eq: ['$status', 'Finalizada'] }, 1, 0],
+                            },
+                        },
+                        lastDeliveryAt: {
+                            $max: '$createdAt',
+                        },
+                    },
+                },
+            ]),
+        ]);
+
+        const driversMap = new Map(
+            driversGrouped.map((item) => [String(item._id), item])
+        );
+
+        const deliveriesMap = new Map(
+            deliveriesGrouped.map((item) => [String(item._id), item])
+        );
+
+        const response = enterprises.map((enterprise) => {
+            const key = String(enterprise._id);
+
+            const driverStats = driversMap.get(key) || {};
+            const deliveryStats = deliveriesMap.get(key) || {};
+
+            const registeredAt = enterprise.createdAt || null;
+            const nextBillingDate = registeredAt ? addOneMonth(registeredAt) : null;
+
+            return {
+                _id: enterprise._id,
+                id: enterprise._id,
+                companyName: enterprise.companyName || '',
+                nit: enterprise.nit || '',
+                email: enterprise.email || '',
+                phone: enterprise.phone || '',
+                active: enterprise.active,
+                createdAt: enterprise.createdAt || null,
+                updatedAt: enterprise.updatedAt || null,
+
+                billingPeriod: {
+                    registeredAt,
+                    nextBillingDate,
+                    daysSinceRegistration: registeredAt
+                        ? getDaysBetween(registeredAt)
+                        : 0,
+                },
+
+                stats: {
+                    totalDrivers: Number(driverStats.totalDrivers || 0),
+                    activeDrivers: Number(driverStats.activeDrivers || 0),
+                    driversInRoute: Number(driverStats.driversInRoute || 0),
+                    driversAvailable: Number(driverStats.driversAvailable || 0),
+                    driversInactive: Number(driverStats.driversInactive || 0),
+
+                    totalDeliveries: Number(deliveryStats.totalDeliveries || 0),
+                    pendingDeliveries: Number(deliveryStats.pendingDeliveries || 0),
+                    inProgressDeliveries: Number(deliveryStats.inProgressDeliveries || 0),
+                    finishedDeliveries: Number(deliveryStats.finishedDeliveries || 0),
+
+                    lastDriverActivityAt: driverStats.lastDriverActivityAt || null,
+                    lastDeliveryAt: deliveryStats.lastDeliveryAt || null,
+                },
+            };
+        });
+
+        return res.status(200).json({
+            success: true,
+            enterprises: response,
+        });
+    } catch (error) {
+        console.error('Error en getEnterprisesOverview:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudo cargar el resumen de empresas.',
         });
     }
 };

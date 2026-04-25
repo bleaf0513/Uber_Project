@@ -8,6 +8,7 @@ const {
     logout,
     me,
     dashboard,
+    getEnterprisesOverview,
     getDriverApplications,
     approveDriverApplication,
     rejectDriverApplication,
@@ -18,6 +19,10 @@ router.post('/logout', authSuperAdmin, logout);
 router.get('/me', authSuperAdmin, me);
 router.get('/dashboard', authSuperAdmin, dashboard);
 
+// Empresas registradas y resumen administrativo por empresa
+router.get('/enterprises-overview', authSuperAdmin, getEnterprisesOverview);
+
+// Solicitudes de conductores tipo Uber/InDriver
 router.get('/driver-applications', authSuperAdmin, getDriverApplications);
 router.patch('/driver-applications/:id/approve', authSuperAdmin, approveDriverApplication);
 router.patch('/driver-applications/:id/reject', authSuperAdmin, rejectDriverApplication);
