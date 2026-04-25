@@ -17,11 +17,14 @@ const captainRoutes = require('./routes/captain.routes');
 const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 const offerRoutes = require('./routes/offer.routes');
+
 const enterpriseRoutes = require('./routes/enterprise.routes');
 const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
 const enterpriseDeliveryRoutes = require('./routes/enterpriseDelivery.routes');
 const enterpriseChatRoutes = require('./routes/enterpriseChat.routes');
 const enterpriseClientRoutes = require('./routes/enterpriseClient.routes');
+
+const superAdminRoutes = require('./routes/superAdmin.routes');
 
 app.use(
     cors({
@@ -47,10 +50,14 @@ app.use('/captains', captainRoutes);
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
 app.use('/offers', offerRoutes);
+
 app.use('/enterprise', enterpriseRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);
 app.use('/enterprise-deliveries', enterpriseDeliveryRoutes);
 app.use('/enterprise-clients', enterpriseClientRoutes);
 app.use('/', enterpriseChatRoutes);
+
+// Super Admin maestro de Central Go
+app.use('/super-admin', superAdminRoutes);
 
 module.exports = app;
