@@ -10,6 +10,11 @@ const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 
 const DriverApplication = require('../models/driverApplication.model');
 
+const {
+    sendDriverApplicationApprovedEmail,
+    sendDriverApplicationRejectedEmail,
+} = require('../services/email.service');
+
 function getTodayRange() {
     const now = new Date();
 
@@ -78,6 +83,10 @@ function buildApplicationResponse(applicationDoc) {
         createdAt: app.createdAt,
         updatedAt: app.updatedAt,
     };
+}
+
+function getApplicationFullName(application) {
+    return `${application?.fullname?.firstname || ''} ${application?.fullname?.lastname || ''}`.trim();
 }
 
 async function ensureDefaultSuperAdminIfNeeded() {
@@ -614,9 +623,17 @@ module.exports.approveDriverApplication = async (req, res) => {
 
         await application.save();
 
+        const emailResult = await sendDriverApplicationApprovedEmail({
+            to: application.email,
+            name: getApplicationFullName(application),
+        });
+
         return res.status(200).json({
             success: true,
-            message: 'Solicitud aprobada. El conductor ya puede iniciar sesión.',
+            message: emailResult.sent
+                ? 'Solicitud aprobada. El conductor ya puede iniciar sesión y fue notificado por correo.'
+                : 'Solicitud aprobada. El conductor ya puede iniciar sesión, pero no se pudo enviar el correo.',
+            email: emailResult,
             application: buildApplicationResponse(application),
             captain: buildCaptainResponse(captain),
         });
@@ -667,9 +684,18 @@ module.exports.rejectDriverApplication = async (req, res) => {
 
         await application.save();
 
+        const emailResult = await sendDriverApplicationRejectedEmail({
+            to: application.email,
+            name: getApplicationFullName(application),
+            reason: cleanReason,
+        });
+
         return res.status(200).json({
             success: true,
-            message: 'Solicitud rechazada correctamente.',
+            message: emailResult.sent
+                ? 'Solicitud rechazada correctamente. El conductor fue notificado por correo.'
+                : 'Solicitud rechazada correctamente, pero no se pudo enviar el correo.',
+            email: emailResult,
             application: buildApplicationResponse(application),
         });
     } catch (error) {
