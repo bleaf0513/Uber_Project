@@ -23,6 +23,19 @@ const formatDate = (value) => {
   return date.toLocaleString();
 };
 
+const formatDateOnly = (value) => {
+  if (!value) return "Sin fecha";
+
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Sin fecha";
+
+  return date.toLocaleDateString("es-CO", {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+};
+
 const getVehicleTypeLabel = (value) => {
   const labels = {
     motorcycle: "Moto",
@@ -57,12 +70,52 @@ const getApplicationStatusClass = (status) => {
   return "bg-amber-100 text-amber-700 border border-amber-200";
 };
 
+const getEnterpriseStatusClass = (active) => {
+  if (active) {
+    return "bg-emerald-100 text-emerald-700 border border-emerald-200";
+  }
+
+  return "bg-red-100 text-red-700 border border-red-200";
+};
+
+const getBillingAlertClass = (daysSinceRegistration) => {
+  const days = Number(daysSinceRegistration || 0);
+
+  if (days >= 30) {
+    return "bg-red-50 text-red-700 border border-red-200";
+  }
+
+  if (days >= 25) {
+    return "bg-amber-50 text-amber-700 border border-amber-200";
+  }
+
+  return "bg-emerald-50 text-emerald-700 border border-emerald-200";
+};
+
+const getBillingAlertText = (daysSinceRegistration) => {
+  const days = Number(daysSinceRegistration || 0);
+
+  if (days >= 30) return "Periodo cumplido / revisar cobro";
+  if (days >= 25) return "Próximo a corte mensual";
+  return "Periodo en curso";
+};
+
 const StatCard = ({ title, value, subtitle }) => {
   return (
     <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
       <p className="text-sm font-semibold text-slate-500">{title}</p>
       <p className="mt-3 text-3xl font-extrabold text-slate-900">{value}</p>
       {subtitle ? <p className="mt-1 text-xs text-slate-500">{subtitle}</p> : null}
+    </div>
+  );
+};
+
+const MiniStat = ({ title, value, subtitle }) => {
+  return (
+    <div className="rounded-2xl border border-slate-200 bg-white p-3">
+      <p className="text-xs font-semibold uppercase text-slate-500">{title}</p>
+      <p className="mt-1 text-lg font-extrabold text-slate-900">{value}</p>
+      {subtitle ? <p className="mt-1 text-[11px] text-slate-500">{subtitle}</p> : null}
     </div>
   );
 };
@@ -87,6 +140,9 @@ const SuperAdminDashboard = () => {
   const [dashboard, setDashboard] = useState(null);
   const [driverApplications, setDriverApplications] = useState([]);
   const [applicationFilter, setApplicationFilter] = useState("pending");
+
+  const [enterprisesOverview, setEnterprisesOverview] = useState([]);
+  const [enterprisesLoading, setEnterprisesLoading] = useState(false);
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -127,6 +183,17 @@ const SuperAdminDashboard = () => {
     navigate("/centralgo-admin-root");
   };
 
+  const isUnauthorizedMessage = (messageValue) => {
+    const message = String(messageValue || "").toLowerCase();
+
+    return (
+      message.includes("token") ||
+      message.includes("sesión") ||
+      message.includes("no autorizado") ||
+      message.includes("inválida")
+    );
+  };
+
   const loadDashboard = async ({ silent = false } = {}) => {
     try {
       if (silent) {
@@ -152,14 +219,7 @@ const SuperAdminDashboard = () => {
     } catch (error) {
       console.error("Error cargando dashboard Super Admin:", error);
 
-      const message = String(error.message || "").toLowerCase();
-
-      if (
-        message.includes("token") ||
-        message.includes("sesión") ||
-        message.includes("no autorizado") ||
-        message.includes("inválida")
-      ) {
+      if (isUnauthorizedMessage(error.message)) {
         handleUnauthorized();
         return;
       }
@@ -168,6 +228,40 @@ const SuperAdminDashboard = () => {
     } finally {
       setLoading(false);
       setRefreshing(false);
+    }
+  };
+
+  const loadEnterprisesOverview = async ({ silent = false } = {}) => {
+    try {
+      if (!silent) {
+        setEnterprisesLoading(true);
+      }
+
+      const response = await fetch(`${API_BASE}/super-admin/enterprises-overview`, {
+        method: "GET",
+        headers: getHeaders(),
+        credentials: "include",
+        cache: "no-store",
+      });
+
+      const data = await parseJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo cargar el resumen de empresas.");
+      }
+
+      setEnterprisesOverview(Array.isArray(data.enterprises) ? data.enterprises : []);
+    } catch (error) {
+      console.error("Error cargando empresas registradas:", error);
+
+      if (isUnauthorizedMessage(error.message)) {
+        handleUnauthorized();
+        return;
+      }
+
+      alert(error.message || "No se pudo cargar el resumen de empresas.");
+    } finally {
+      setEnterprisesLoading(false);
     }
   };
 
@@ -202,14 +296,7 @@ const SuperAdminDashboard = () => {
     } catch (error) {
       console.error("Error cargando solicitudes de conductores:", error);
 
-      const message = String(error.message || "").toLowerCase();
-
-      if (
-        message.includes("token") ||
-        message.includes("sesión") ||
-        message.includes("no autorizado") ||
-        message.includes("inválida")
-      ) {
+      if (isUnauthorizedMessage(error.message)) {
         handleUnauthorized();
         return;
       }
@@ -241,6 +328,14 @@ const SuperAdminDashboard = () => {
       console.error("Error validando Super Admin:", error);
       handleUnauthorized();
     }
+  };
+
+  const refreshAll = async ({ silent = true } = {}) => {
+    await Promise.all([
+      loadDashboard({ silent }),
+      loadDriverApplications({ status: applicationFilter, silent }),
+      loadEnterprisesOverview({ silent }),
+    ]);
   };
 
   const handleLogout = async () => {
@@ -438,10 +533,12 @@ const SuperAdminDashboard = () => {
     loadMe();
     loadDashboard({ silent: false });
     loadDriverApplications({ status: "pending", silent: false });
+    loadEnterprisesOverview({ silent: false });
 
     const interval = setInterval(() => {
       loadDashboard({ silent: true });
-      loadDriverApplications({ status: applicationFilter, silent: true });
+      loadDriverApplications({ status: "pending", silent: true });
+      loadEnterprisesOverview({ silent: true });
     }, 15000);
 
     return () => clearInterval(interval);
@@ -455,6 +552,35 @@ const SuperAdminDashboard = () => {
   const driverApplicationsStats = modules?.driverApplications || {};
   const totals = modules?.totals || {};
   const latest = dashboard?.latest || {};
+
+  const enterpriseOverviewTotals = useMemo(() => {
+    return enterprisesOverview.reduce(
+      (acc, item) => {
+        acc.total += 1;
+
+        if (item.active) acc.active += 1;
+        else acc.inactive += 1;
+
+        acc.totalDrivers += Number(item?.stats?.totalDrivers || 0);
+        acc.activeDrivers += Number(item?.stats?.activeDrivers || 0);
+        acc.driversInRoute += Number(item?.stats?.driversInRoute || 0);
+        acc.driversAvailable += Number(item?.stats?.driversAvailable || 0);
+        acc.driversInactive += Number(item?.stats?.driversInactive || 0);
+
+        return acc;
+      },
+      {
+        total: 0,
+        active: 0,
+        inactive: 0,
+        totalDrivers: 0,
+        activeDrivers: 0,
+        driversInRoute: 0,
+        driversAvailable: 0,
+        driversInactive: 0,
+      }
+    );
+  }, [enterprisesOverview]);
 
   if (loading) {
     return (
@@ -491,14 +617,13 @@ const SuperAdminDashboard = () => {
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
-                onClick={() => {
-                  loadDashboard({ silent: true });
-                  loadDriverApplications({ status: applicationFilter, silent: true });
-                }}
-                disabled={refreshing}
+                onClick={() => refreshAll({ silent: true })}
+                disabled={refreshing || applicationsLoading || enterprisesLoading}
                 className="rounded-2xl bg-emerald-500 px-5 py-3 font-bold text-slate-950 disabled:opacity-60"
               >
-                {refreshing ? "Actualizando..." : "Actualizar"}
+                {refreshing || applicationsLoading || enterprisesLoading
+                  ? "Actualizando..."
+                  : "Actualizar"}
               </button>
 
               <button
@@ -527,15 +652,15 @@ const SuperAdminDashboard = () => {
           />
 
           <StatCard
-            title="Ingresos hoy"
-            value={formatCOP(totals.grossRevenueToday)}
-            subtitle="Movimiento finalizado del día"
+            title="Empresas activas"
+            value={enterpriseOverviewTotals.active || enterprise.activeEnterprises || 0}
+            subtitle={`${enterpriseOverviewTotals.total || enterprise.totalEnterprises || 0} empresas registradas`}
           />
 
           <StatCard
-            title="Comisión estimada"
-            value={formatCOP(totals.estimatedCommission)}
-            subtitle={`Comisión ${dashboard?.commissionPercent || 0}%`}
+            title="Conductores empresariales activos"
+            value={enterpriseOverviewTotals.activeDrivers || enterprise.activeEnterpriseDrivers || 0}
+            subtitle={`${enterpriseOverviewTotals.driversInRoute || enterprise.enterpriseDriversInRoute || 0} en ruta`}
           />
 
           <StatCard
@@ -586,15 +711,15 @@ const SuperAdminDashboard = () => {
             description="Empresas, conductores empresariales y entregas."
           >
             <div className="grid grid-cols-2 gap-3">
-              <StatCard title="Empresas" value={enterprise.totalEnterprises || 0} />
-              <StatCard title="Activas" value={enterprise.activeEnterprises || 0} />
+              <StatCard title="Empresas" value={enterpriseOverviewTotals.total || enterprise.totalEnterprises || 0} />
+              <StatCard title="Activas" value={enterpriseOverviewTotals.active || enterprise.activeEnterprises || 0} />
               <StatCard
                 title="Conductores"
-                value={enterprise.totalEnterpriseDrivers || 0}
+                value={enterpriseOverviewTotals.totalDrivers || enterprise.totalEnterpriseDrivers || 0}
               />
               <StatCard
                 title="En ruta"
-                value={enterprise.enterpriseDriversInRoute || 0}
+                value={enterpriseOverviewTotals.driversInRoute || enterprise.enterpriseDriversInRoute || 0}
               />
               <StatCard
                 title="Entregas"
@@ -615,15 +740,165 @@ const SuperAdminDashboard = () => {
             </div>
 
             <div className="mt-4 rounded-2xl bg-slate-50 p-4">
-              <p className="text-sm font-bold text-slate-700">Dinero empresarial</p>
+              <p className="text-sm font-bold text-slate-700">Modelo comercial</p>
               <p className="mt-2 text-lg font-extrabold text-slate-900">
-                {formatCOP(enterprise.revenue)}
+                Mensualidad por empresa
               </p>
               <p className="text-xs text-slate-500">
-                Comisión estimada: {formatCOP(enterprise.estimatedCommission)}
+                No se calcula por porcentaje de factura. El periodo se controla desde la fecha de registro.
               </p>
             </div>
           </ModuleCard>
+        </div>
+
+        <div className="mt-6 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">
+                Empresas registradas
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Control administrativo por empresa: fecha de registro, periodo mensual y conductores activos.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => loadEnterprisesOverview({ silent: false })}
+              disabled={enterprisesLoading}
+              className="rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60"
+            >
+              {enterprisesLoading ? "Cargando empresas..." : "Actualizar empresas"}
+            </button>
+          </div>
+
+          <div className="mt-5 grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-5">
+            <MiniStat title="Empresas" value={enterpriseOverviewTotals.total} />
+            <MiniStat title="Activas" value={enterpriseOverviewTotals.active} />
+            <MiniStat title="Inactivas" value={enterpriseOverviewTotals.inactive} />
+            <MiniStat title="Conductores activos" value={enterpriseOverviewTotals.activeDrivers} />
+            <MiniStat title="Conductores en ruta" value={enterpriseOverviewTotals.driversInRoute} />
+          </div>
+
+          <div className="mt-5">
+            {enterprisesLoading ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-600">
+                Cargando empresas registradas...
+              </div>
+            ) : enterprisesOverview.length === 0 ? (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                No hay empresas registradas todavía.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-4">
+                {enterprisesOverview.map((company) => {
+                  const days = Number(company?.billingPeriod?.daysSinceRegistration || 0);
+                  const stats = company?.stats || {};
+
+                  return (
+                    <div
+                      key={company._id || company.id}
+                      className="rounded-[26px] border border-slate-200 bg-slate-50 p-4"
+                    >
+                      <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <h3 className="text-xl font-extrabold text-slate-900">
+                              {company.companyName || "Empresa sin nombre"}
+                            </h3>
+
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${getEnterpriseStatusClass(
+                                company.active
+                              )}`}
+                            >
+                              {company.active ? "Activa" : "Inactiva"}
+                            </span>
+
+                            <span
+                              className={`rounded-full px-3 py-1 text-xs font-bold ${getBillingAlertClass(
+                                days
+                              )}`}
+                            >
+                              {getBillingAlertText(days)}
+                            </span>
+                          </div>
+
+                          <p className="mt-1 text-sm text-slate-600">
+                            NIT: <b>{company.nit || "Sin NIT"}</b> · {company.email || "Sin correo"}
+                          </p>
+
+                          <p className="mt-1 text-sm text-slate-600">
+                            Teléfono: {company.phone || "Sin teléfono"}
+                          </p>
+
+                          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+                            <MiniStat
+                              title="Fecha registro"
+                              value={formatDateOnly(company.createdAt)}
+                              subtitle="Inicio del periodo"
+                            />
+
+                            <MiniStat
+                              title="Próximo corte"
+                              value={formatDateOnly(company?.billingPeriod?.nextBillingDate)}
+                              subtitle={`${days} días desde registro`}
+                            />
+
+                            <MiniStat
+                              title="Última actividad GPS"
+                              value={formatDate(company?.stats?.lastDriverActivityAt)}
+                              subtitle="Conductores empresa"
+                            />
+
+                            <MiniStat
+                              title="Última entrega"
+                              value={formatDate(company?.stats?.lastDeliveryAt)}
+                              subtitle="Actividad operativa"
+                            />
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+                            <MiniStat title="Conductores" value={stats.totalDrivers || 0} />
+                            <MiniStat title="Activos" value={stats.activeDrivers || 0} />
+                            <MiniStat title="Disponibles" value={stats.driversAvailable || 0} />
+                            <MiniStat title="En ruta" value={stats.driversInRoute || 0} />
+                            <MiniStat title="Inactivos" value={stats.driversInactive || 0} />
+                            <MiniStat title="Entregas" value={stats.totalDeliveries || 0} />
+                            <MiniStat title="Pendientes" value={stats.pendingDeliveries || 0} />
+                            <MiniStat title="Finalizadas" value={stats.finishedDeliveries || 0} />
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-white p-4 xl:min-w-[250px]">
+                          <p className="text-xs font-semibold uppercase text-slate-500">
+                            Control mensual
+                          </p>
+
+                          <p className="mt-2 text-sm text-slate-700">
+                            Esta empresa se controla por <b>mensualidad</b>, no por porcentaje.
+                          </p>
+
+                          <div className="mt-3 rounded-2xl bg-slate-50 p-3 text-sm text-slate-700">
+                            <p>
+                              <b>Registrada:</b> {formatDateOnly(company.createdAt)}
+                            </p>
+                            <p className="mt-1">
+                              <b>Días activos:</b> {days}
+                            </p>
+                            <p className="mt-1">
+                              <b>Corte sugerido:</b>{" "}
+                              {formatDateOnly(company?.billingPeriod?.nextBillingDate)}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 rounded-[28px] border border-slate-200 bg-white p-5 shadow-sm">
