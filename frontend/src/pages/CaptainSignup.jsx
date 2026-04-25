@@ -4,7 +4,7 @@ import axios from "axios";
 import { toast, ToastContainer } from "react-toastify";
 import { getApiBaseUrl, getApiHintOrigin } from "../apiBase";
 
-const MAX_FILE_MB = 4;
+const MAX_FILE_MB = 8;
 const ALLOWED_TYPES = ["image/jpeg", "image/png", "image/webp"];
 
 const fileToBase64 = (file) => {
@@ -17,7 +17,50 @@ const fileToBase64 = (file) => {
     const reader = new FileReader();
 
     reader.onload = () => {
-      resolve(reader.result);
+      const img = new Image();
+
+      img.onload = () => {
+        const maxWidth = 1200;
+        const maxHeight = 1200;
+
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width = Math.round((width * maxHeight) / height);
+            height = maxHeight;
+          }
+        }
+
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          reject(new Error("No se pudo procesar la imagen."));
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL("image/jpeg", 0.72);
+
+        resolve(compressedBase64);
+      };
+
+      img.onerror = () => {
+        reject(new Error("No se pudo cargar la imagen."));
+      };
+
+      img.src = reader.result;
     };
 
     reader.onerror = () => {
