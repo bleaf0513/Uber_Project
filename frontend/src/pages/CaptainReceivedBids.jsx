@@ -1,7 +1,16 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, {
+  useCallback,
+  useContext,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
+import { io } from "socket.io-client";
 import { getApiBaseUrl } from "../apiBase";
+import { CaptainDataContext } from "../context/CaptainContext";
 
 const formatCOP = (value) => {
   const number = Number(value) || 0;
@@ -33,6 +42,82 @@ const humanizeUnit = (unit) => {
   };
 
   return map[unit] || unit || "";
+};
+
+const getStoredCaptainId = () => {
+  try {
+    const rawCaptain =
+      localStorage.getItem("captain") ||
+      localStorage.getItem("captainData") ||
+      localStorage.getItem("captainInfo");
+
+    if (!rawCaptain) return "";
+
+    const parsed = JSON.parse(rawCaptain);
+    return parsed?._id || parsed?.id || "";
+  } catch {
+    return "";
+  }
+};
+
+const playOfferSound = () => {
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContext) return;
+
+    const ctx = new AudioContext();
+    const now = ctx.currentTime;
+
+    const tones = [
+      { freq: 950, start: 0 },
+      { freq: 1250, start: 0.18 },
+      { freq: 1450, start: 0.36 },
+    ];
+
+    tones.forEach((tone) => {
+      const oscillator = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      oscillator.type = "sine";
+      oscillator.frequency.setValueAtTime(tone.freq, now + tone.start);
+
+      gain.gain.setValueAtTime(0.0001, now + tone.start);
+      gain.gain.exponentialRampToValueAtTime(0.22, now + tone.start + 0.03);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.14);
+
+      oscillator.connect(gain);
+      gain.connect(ctx.destination);
+
+      oscillator.start(now + tone.start);
+      oscillator.stop(now + tone.start + 0.16);
+    });
+
+    setTimeout(() => {
+      try {
+        ctx.close();
+      } catch {
+        // ignore
+      }
+    }, 900);
+  } catch (error) {
+    console.warn("No se pudo reproducir sonido:", error);
+  }
+};
+
+const showBrowserNotification = (title, body) => {
+  try {
+    if (!("Notification" in window)) return;
+
+    if (Notification.permission === "granted") {
+      new Notification(title, {
+        body,
+        icon: "/favicon.ico",
+        tag: "central-go-offer-bid",
+      });
+    }
+  } catch (error) {
+    console.warn("No se pudo mostrar notificación:", error);
+  }
 };
 
 const getListingSource = (bid) => {
@@ -74,7 +159,12 @@ const getListingTypeLabel = (listingType) => {
 
 const getAvailableInfo = (bid) => {
   if (bid?.listingType === "goods" && bid?.goodsOffer) {
-    const quantity = Number(bid.goodsOffer.quantityAvailable) || 0;
+    const quantity = Number(
+      bid.goodsOffer.availableReal ??
+        bid.goodsOffer.realAvailable ??
+        bid.goodsOffer.quantityAvailable ??
+        0
+    );
     const unit = bid.goodsOffer.quantityUnit || "";
 
     return {
@@ -86,7 +176,12 @@ const getAvailableInfo = (bid) => {
   }
 
   if (bid?.listingType === "space" && bid?.spaceOffer) {
-    const quantity = Number(bid.spaceOffer.capacityAvailable) || 0;
+    const quantity = Number(
+      bid.spaceOffer.availableReal ??
+        bid.spaceOffer.realAvailable ??
+        bid.spaceOffer.capacityAvailable ??
+        0
+    );
     const unit = bid.spaceOffer.capacityUnit || "";
 
     return {
@@ -98,7 +193,12 @@ const getAvailableInfo = (bid) => {
   }
 
   if (bid?.listingType === "seat" && bid?.seatOffer) {
-    const quantity = Number(bid.seatOffer.seatsAvailable) || 0;
+    const quantity = Number(
+      bid.seatOffer.availableReal ??
+        bid.seatOffer.realAvailable ??
+        bid.seatOffer.seatsAvailable ??
+        0
+    );
     const unit = bid.seatOffer.seatUnit || "";
 
     return {
@@ -195,13 +295,23 @@ const getTheme = (listingType) => {
 };
 
 const CaptainReceivedBids = () => {
+  const { captain } = useContext(CaptainDataContext);
+
   const [loading, setLoading] = useState(false);
   const [bids, setBids] = useState([]);
   const [actingId, setActingId] = useState("");
   const [counterInputs, setCounterInputs] = useState({});
   const [message, setMessage] = useState("");
+  const [socketStatus, setSocketStatus] = useState("Desconectado");
+  const [soundEnabled, setSoundEnabled] = useState(false);
+  const [notificationBanner, setNotificationBanner] = useState(null);
 
+  const socketRef = useRef(null);
   const token = localStorage.getItem("token");
+
+  const captainId = useMemo(() => {
+    return captain?._id || captain?.id || getStoredCaptainId();
+  }, [captain?._id, captain?.id]);
 
   const stats = useMemo(() => {
     return {
@@ -212,36 +322,124 @@ const CaptainReceivedBids = () => {
     };
   }, [bids]);
 
-  const fetchReceivedBids = async () => {
-    try {
-      setLoading(true);
-      setMessage("");
+  const fetchReceivedBids = useCallback(
+    async (showLoader = true) => {
+      try {
+        if (showLoader) setLoading(true);
+        setMessage("");
 
-      const response = await axios.get(
-        `${getApiBaseUrl()}/offers/bid/my-received`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-          },
-        }
-      );
+        const response = await axios.get(
+          `${getApiBaseUrl()}/offers/bid/my-received`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
 
-      setBids(Array.isArray(response?.data?.bids) ? response.data.bids : []);
-    } catch (error) {
-      console.error("Error cargando ofertas recibidas:", error);
-      setMessage(
-        error?.response?.data?.message ||
-          "No se pudieron cargar las ofertas recibidas."
-      );
-    } finally {
-      setLoading(false);
-    }
-  };
+        setBids(Array.isArray(response?.data?.bids) ? response.data.bids : []);
+      } catch (error) {
+        console.error("Error cargando ofertas recibidas:", error);
+        setMessage(
+          error?.response?.data?.message ||
+            "No se pudieron cargar las ofertas recibidas."
+        );
+      } finally {
+        if (showLoader) setLoading(false);
+      }
+    },
+    [token]
+  );
 
   useEffect(() => {
     if (!token) return;
     fetchReceivedBids();
-  }, [token]);
+  }, [token, fetchReceivedBids]);
+
+  useEffect(() => {
+    if (!captainId) return;
+
+    const socket = io(getApiBaseUrl(), {
+      transports: ["websocket", "polling"],
+      withCredentials: true,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+    });
+
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      setSocketStatus("Conectado");
+      socket.emit("join", {
+        userId: captainId,
+        userType: "captain",
+      });
+    });
+
+    socket.on("disconnect", () => {
+      setSocketStatus("Desconectado");
+    });
+
+    socket.on("connect_error", (error) => {
+      console.error("Socket error conductor:", error);
+      setSocketStatus("Error de conexión");
+    });
+
+    socket.on("socket-joined", (data) => {
+      if (data?.ok) {
+        setSocketStatus("Notificaciones activas");
+      }
+    });
+
+    socket.on("new-offer-bid", async (data = {}) => {
+      const title = data.notificationTitle || "Nueva oferta recibida";
+      const body =
+        data.notificationBody ||
+        `${data.customerName || "Un cliente"} envió una nueva oferta.`;
+
+      setNotificationBanner({
+        type: "new",
+        title,
+        body,
+        createdAt: new Date().toISOString(),
+      });
+
+      playOfferSound();
+      showBrowserNotification(title, body);
+      await fetchReceivedBids(false);
+
+      setTimeout(() => {
+        setNotificationBanner(null);
+      }, 9000);
+    });
+
+    return () => {
+      socket.off("connect");
+      socket.off("disconnect");
+      socket.off("connect_error");
+      socket.off("socket-joined");
+      socket.off("new-offer-bid");
+      socket.disconnect();
+    };
+  }, [captainId, fetchReceivedBids]);
+
+  const enableSoundAndNotifications = async () => {
+    try {
+      playOfferSound();
+      setSoundEnabled(true);
+
+      if ("Notification" in window && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+
+      setMessage("Notificaciones y sonido activados para ofertas.");
+    } catch (error) {
+      console.warn("No se pudieron activar notificaciones:", error);
+      setMessage("No se pudieron activar las notificaciones del navegador.");
+    }
+  };
 
   const updateCounterInput = (bidId, field, value) => {
     setCounterInputs((prev) => ({
@@ -288,7 +486,7 @@ const CaptainReceivedBids = () => {
       );
 
       setMessage(response?.data?.message || "Respuesta enviada correctamente.");
-      await fetchReceivedBids();
+      await fetchReceivedBids(false);
     } catch (error) {
       console.error("Error respondiendo oferta:", error);
       setMessage(
@@ -326,7 +524,9 @@ const CaptainReceivedBids = () => {
               </div>
 
               <div>
-                <p className={`text-xs font-black uppercase tracking-wide ${theme.text}`}>
+                <p
+                  className={`text-xs font-black uppercase tracking-wide ${theme.text}`}
+                >
                   {getListingTypeLabel(bid.listingType)}
                 </p>
 
@@ -531,10 +731,29 @@ const CaptainReceivedBids = () => {
 
           <button
             type="button"
-            onClick={fetchReceivedBids}
+            onClick={() => fetchReceivedBids()}
             className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center border border-gray-200"
           >
             <i className="ri-refresh-line text-lg" />
+          </button>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <div className="text-[11px] text-gray-600">
+            Estado socket:{" "}
+            <span className="font-black text-gray-900">{socketStatus}</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={enableSoundAndNotifications}
+            className={`px-3 py-2 rounded-2xl text-xs font-black border ${
+              soundEnabled
+                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                : "bg-orange-50 text-orange-700 border-orange-200"
+            }`}
+          >
+            {soundEnabled ? "Sonido activo" : "Activar sonido"}
           </button>
         </div>
 
@@ -562,6 +781,33 @@ const CaptainReceivedBids = () => {
       </div>
 
       <div className="p-4">
+        {notificationBanner ? (
+          <div className="mb-4 rounded-[24px] bg-slate-950 text-white border border-slate-800 p-4 shadow-xl">
+            <div className="flex items-start gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-orange-500 flex items-center justify-center">
+                <i className="ri-notification-3-line text-xl" />
+              </div>
+
+              <div className="flex-1">
+                <p className="text-sm font-black">
+                  {notificationBanner.title}
+                </p>
+                <p className="text-sm text-white/80 mt-1">
+                  {notificationBanner.body}
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setNotificationBanner(null)}
+                className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center"
+              >
+                <i className="ri-close-line text-lg" />
+              </button>
+            </div>
+          </div>
+        ) : null}
+
         {message ? (
           <div
             className={`mb-4 rounded-2xl px-4 py-3 text-sm font-bold border ${
