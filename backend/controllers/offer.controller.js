@@ -45,7 +45,9 @@ const attachGoodsComputedFields = (offer) => {
     return {
         ...obj,
         priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-        availableLabel: `${obj.quantityAvailable || 0} ${obj.quantityUnit || ""} disponibles`,
+        availableLabel: `${normalizeNumber(obj.quantityAvailable)} ${
+            obj.quantityUnit || ""
+        } disponibles`,
     };
 };
 
@@ -55,7 +57,9 @@ const attachSpaceComputedFields = (offer) => {
     return {
         ...obj,
         priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-        availableLabel: `${obj.capacityAvailable || 0} ${obj.capacityUnit || ""} disponibles`,
+        availableLabel: `${normalizeNumber(obj.capacityAvailable)} ${
+            obj.capacityUnit || ""
+        } disponibles`,
     };
 };
 
@@ -64,8 +68,12 @@ const attachSeatComputedFields = (offer) => {
 
     return {
         ...obj,
-        priceLabel: `${formatCOP(obj.suggestedPrice)} por ${obj.seatUnit || "cupo"}`,
-        availableLabel: `${obj.seatsAvailable || 0} ${obj.seatUnit || "cupos"} disponibles`,
+        priceLabel: `${formatCOP(obj.suggestedPrice)} por ${
+            obj.seatUnit || "cupo"
+        }`,
+        availableLabel: `${normalizeNumber(obj.seatsAvailable)} ${
+            obj.seatUnit || "cupos"
+        } disponibles`,
     };
 };
 
@@ -77,6 +85,7 @@ const getListingConfigFromBid = (bid) => {
             quantityField: "quantityAvailable",
             unitField: "quantityUnit",
             emptyStatus: "sold_out",
+            listingName: "mercancía",
         };
     }
 
@@ -87,6 +96,7 @@ const getListingConfigFromBid = (bid) => {
             quantityField: "capacityAvailable",
             unitField: "capacityUnit",
             emptyStatus: "reserved",
+            listingName: "espacio",
         };
     }
 
@@ -97,16 +107,33 @@ const getListingConfigFromBid = (bid) => {
             quantityField: "seatsAvailable",
             unitField: "seatUnit",
             emptyStatus: "full",
+            listingName: "cupos",
         };
     }
 
     return null;
 };
 
+const getListingIdFromBid = (bid, config) => {
+    if (!config || !config.listingId) return null;
+
+    if (typeof config.listingId === "object" && config.listingId._id) {
+        return config.listingId._id;
+    }
+
+    return config.listingId;
+};
+
 const discountAvailabilityForBid = async (bid) => {
     const config = getListingConfigFromBid(bid);
 
-    if (!config || !config.listingId) {
+    if (!config) {
+        throw new Error("Tipo de publicación inválido.");
+    }
+
+    const listingId = getListingIdFromBid(bid, config);
+
+    if (!listingId) {
         throw new Error("No se pudo identificar la publicación de esta oferta.");
     }
 
@@ -116,18 +143,23 @@ const discountAvailabilityForBid = async (bid) => {
         throw new Error("La cantidad solicitada debe ser mayor que cero.");
     }
 
-    const listing = await config.Model.findById(config.listingId);
+    const requestedUnit = String(bid.requestedUnit || "").trim();
 
-    if (!listing) {
+    if (!requestedUnit) {
+        throw new Error("La unidad solicitada no es válida.");
+    }
+
+    const listingBefore = await config.Model.findById(listingId);
+
+    if (!listingBefore) {
         throw new Error("La publicación ya no existe.");
     }
 
-    if (listing.status !== "active") {
+    if (listingBefore.status !== "active") {
         throw new Error("La publicación ya no está activa.");
     }
 
-    const listingUnit = String(listing[config.unitField] || "");
-    const requestedUnit = String(bid.requestedUnit || "");
+    const listingUnit = String(listingBefore[config.unitField] || "").trim();
 
     if (listingUnit !== requestedUnit) {
         throw new Error(
@@ -135,17 +167,17 @@ const discountAvailabilityForBid = async (bid) => {
         );
     }
 
-    const availableNow = normalizeNumber(listing[config.quantityField]);
+    const availableBefore = normalizeNumber(listingBefore[config.quantityField]);
 
-    if (availableNow < requestedQuantity) {
+    if (availableBefore < requestedQuantity) {
         throw new Error(
-            `No hay disponibilidad suficiente. Disponible actual: ${availableNow} ${listingUnit}. Solicitado: ${requestedQuantity} ${requestedUnit}.`
+            `No hay disponibilidad suficiente. Disponible actual: ${availableBefore} ${listingUnit}. Solicitado: ${requestedQuantity} ${requestedUnit}.`
         );
     }
 
     const updatedListing = await config.Model.findOneAndUpdate(
         {
-            _id: config.listingId,
+            _id: listingId,
             status: "active",
             [config.unitField]: requestedUnit,
             [config.quantityField]: { $gte: requestedQuantity },
@@ -157,6 +189,7 @@ const discountAvailabilityForBid = async (bid) => {
         },
         {
             new: true,
+            runValidators: true,
         }
     );
 
@@ -166,13 +199,50 @@ const discountAvailabilityForBid = async (bid) => {
         );
     }
 
-    if (normalizeNumber(updatedListing[config.quantityField]) <= 0) {
+    const remaining = normalizeNumber(updatedListing[config.quantityField]);
+
+    if (remaining <= 0) {
         updatedListing[config.quantityField] = 0;
         updatedListing.status = config.emptyStatus;
         await updatedListing.save();
     }
 
     return updatedListing;
+};
+
+const rejectOtherPendingBidsIfSoldOut = async (acceptedBid, updatedListing) => {
+    const config = getListingConfigFromBid(acceptedBid);
+
+    if (!config || !updatedListing) return;
+
+    const remaining = normalizeNumber(updatedListing[config.quantityField]);
+
+    if (remaining > 0) return;
+
+    const filter = {
+        _id: { $ne: acceptedBid._id },
+        listingType: acceptedBid.listingType,
+        status: { $in: ["pending", "countered"] },
+    };
+
+    if (acceptedBid.listingType === "goods") {
+        filter.goodsOffer = acceptedBid.goodsOffer;
+    }
+
+    if (acceptedBid.listingType === "space") {
+        filter.spaceOffer = acceptedBid.spaceOffer;
+    }
+
+    if (acceptedBid.listingType === "seat") {
+        filter.seatOffer = acceptedBid.seatOffer;
+    }
+
+    await OfferBid.updateMany(filter, {
+        $set: {
+            status: "rejected",
+            counterMessage: "La publicación ya no tiene disponibilidad.",
+        },
+    });
 };
 
 module.exports.createGoodsOffer = async (req, res) => {
@@ -399,10 +469,23 @@ module.exports.createBid = async (req, res) => {
         } = req.body;
 
         const requestedQty = normalizeNumber(requestedQuantity);
+        const offered = normalizeNumber(offeredPrice);
+
+        if (!["goods", "space", "seat"].includes(listingType)) {
+            return res.status(400).json({
+                message: "Tipo de publicación inválido.",
+            });
+        }
 
         if (requestedQty <= 0) {
             return res.status(400).json({
                 message: "La cantidad solicitada debe ser mayor que cero.",
+            });
+        }
+
+        if (offered <= 0) {
+            return res.status(400).json({
+                message: "El valor ofrecido debe ser mayor que cero.",
             });
         }
 
@@ -413,7 +496,7 @@ module.exports.createBid = async (req, res) => {
             customer: req.user._id,
             requestedQuantity: requestedQty,
             requestedUnit,
-            offeredPrice: Number(offeredPrice),
+            offeredPrice: offered,
             message: message || "",
         };
 
@@ -559,6 +642,7 @@ module.exports.respondToBid = async (req, res) => {
 
         if (action === "accepted") {
             updatedListing = await discountAvailabilityForBid(bid);
+            await rejectOtherPendingBidsIfSoldOut(bid, updatedListing);
             bid.status = "accepted";
         } else if (action === "rejected") {
             bid.status = "rejected";
@@ -642,6 +726,7 @@ module.exports.customerRespondToBid = async (req, res) => {
 
         if (action === "accepted") {
             updatedListing = await discountAvailabilityForBid(bid);
+            await rejectOtherPendingBidsIfSoldOut(bid, updatedListing);
             bid.status = "accepted";
         } else if (action === "rejected") {
             bid.status = "rejected";
