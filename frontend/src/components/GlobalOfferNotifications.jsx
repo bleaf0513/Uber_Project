@@ -1,69 +1,92 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import { io } from "socket.io-client";
 import { getApiBaseUrl } from "../apiBase";
 
-const NOTIFICATION_SOUND_KEY = "centralgo_offer_sound_enabled";
+const SOUND_KEY = "centralgo_offer_sound_enabled";
 
 const safeParse = (value) => {
   try {
-    if (!value) return null;
-    return JSON.parse(value);
+    return value ? JSON.parse(value) : null;
   } catch {
     return null;
   }
 };
 
-const getStoredUserId = () => {
-  const possibleKeys = [
+const findIdDeep = (obj) => {
+  if (!obj || typeof obj !== "object") return "";
+
+  if (obj._id) return String(obj._id);
+  if (obj.id) return String(obj.id);
+
+  const commonKeys = [
+    "user",
+    "captain",
+    "data",
+    "profile",
+    "driver",
+    "currentUser",
+    "currentCaptain",
+  ];
+
+  for (const key of commonKeys) {
+    if (obj[key] && typeof obj[key] === "object") {
+      const found = findIdDeep(obj[key]);
+      if (found) return found;
+    }
+  }
+
+  return "";
+};
+
+const getLocalStorageValue = (keys) => {
+  for (const key of keys) {
+    const value = localStorage.getItem(key);
+    if (!value) continue;
+
+    if (key.toLowerCase().includes("id")) {
+      return value;
+    }
+
+    const parsed = safeParse(value);
+    const found = findIdDeep(parsed);
+
+    if (found) return found;
+  }
+
+  return "";
+};
+
+const getSessionInfo = () => {
+  const token =
+    localStorage.getItem("token") ||
+    localStorage.getItem("userToken") ||
+    localStorage.getItem("captainToken") ||
+    "";
+
+  const userId = getLocalStorageValue([
+    "userId",
     "user",
     "userData",
     "userInfo",
-    "userId",
-  ];
+    "currentUser",
+  ]);
 
-  for (const key of possibleKeys) {
-    const value = localStorage.getItem(key);
-
-    if (!value) continue;
-
-    if (key === "userId") return value;
-
-    const parsed = safeParse(value);
-
-    if (parsed?._id || parsed?.id) {
-      return parsed._id || parsed.id;
-    }
-  }
-
-  return "";
-};
-
-const getStoredCaptainId = () => {
-  const possibleKeys = [
+  const captainId = getLocalStorageValue([
+    "captainId",
     "captain",
     "captainData",
     "captainInfo",
-    "captainId",
-  ];
+    "currentCaptain",
+  ]);
 
-  for (const key of possibleKeys) {
-    const value = localStorage.getItem(key);
-
-    if (!value) continue;
-
-    if (key === "captainId") return value;
-
-    const parsed = safeParse(value);
-
-    if (parsed?._id || parsed?.id) {
-      return parsed._id || parsed.id;
-    }
-  }
-
-  return "";
+  return {
+    token,
+    userId,
+    captainId,
+  };
 };
 
-const playLoudOfferSound = () => {
+const playLoudSound = () => {
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (!AudioContext) return;
@@ -71,30 +94,35 @@ const playLoudOfferSound = () => {
     const ctx = new AudioContext();
     const now = ctx.currentTime;
 
+    const masterGain = ctx.createGain();
+    masterGain.gain.setValueAtTime(0.95, now);
+    masterGain.connect(ctx.destination);
+
     const tones = [
-      { freq: 950, start: 0 },
-      { freq: 1300, start: 0.16 },
-      { freq: 1650, start: 0.32 },
-      { freq: 1300, start: 0.52 },
-      { freq: 950, start: 0.68 },
+      { freq: 880, start: 0 },
+      { freq: 1250, start: 0.14 },
+      { freq: 1650, start: 0.28 },
+      { freq: 1250, start: 0.48 },
+      { freq: 880, start: 0.62 },
+      { freq: 1650, start: 0.82 },
     ];
 
     tones.forEach((tone) => {
-      const oscillator = ctx.createOscillator();
+      const osc = ctx.createOscillator();
       const gain = ctx.createGain();
 
-      oscillator.type = "square";
-      oscillator.frequency.setValueAtTime(tone.freq, now + tone.start);
+      osc.type = "square";
+      osc.frequency.setValueAtTime(tone.freq, now + tone.start);
 
       gain.gain.setValueAtTime(0.0001, now + tone.start);
-      gain.gain.exponentialRampToValueAtTime(0.65, now + tone.start + 0.035);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.14);
+      gain.gain.exponentialRampToValueAtTime(0.9, now + tone.start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.13);
 
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
+      osc.connect(gain);
+      gain.connect(masterGain);
 
-      oscillator.start(now + tone.start);
-      oscillator.stop(now + tone.start + 0.16);
+      osc.start(now + tone.start);
+      osc.stop(now + tone.start + 0.15);
     });
 
     setTimeout(() => {
@@ -103,9 +131,9 @@ const playLoudOfferSound = () => {
       } catch {
         // ignore
       }
-    }, 1300);
+    }, 1500);
   } catch (error) {
-    console.warn("No se pudo reproducir sonido global:", error);
+    console.warn("[GLOBAL NOTIFICATIONS] No se pudo reproducir sonido:", error);
   }
 };
 
@@ -121,60 +149,87 @@ const showBrowserNotification = (title, body) => {
       });
     }
   } catch (error) {
-    console.warn("No se pudo mostrar notificación global:", error);
+    console.warn("[GLOBAL NOTIFICATIONS] No se pudo mostrar notificación:", error);
   }
 };
 
 const GlobalOfferNotifications = () => {
+  const [session, setSession] = useState(getSessionInfo);
   const [banner, setBanner] = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(
-    localStorage.getItem(NOTIFICATION_SOUND_KEY) === "true"
+    localStorage.getItem(SOUND_KEY) === "true"
   );
+  const [debugStatus, setDebugStatus] = useState("");
 
   const userSocketRef = useRef(null);
   const captainSocketRef = useRef(null);
   const bannerTimerRef = useRef(null);
-
-  const token = localStorage.getItem("token");
-
-  const userId = useMemo(() => getStoredUserId(), []);
-  const captainId = useMemo(() => getStoredCaptainId(), []);
-
-  const showGlobalAlert = useCallback(
-    ({ title, body, type = "offer" }) => {
-      if (bannerTimerRef.current) {
-        clearTimeout(bannerTimerRef.current);
-      }
-
-      setBanner({
-        title,
-        body,
-        type,
-        createdAt: new Date().toISOString(),
-      });
-
-      if (localStorage.getItem(NOTIFICATION_SOUND_KEY) === "true") {
-        playLoudOfferSound();
-      }
-
-      showBrowserNotification(title, body);
-
-      bannerTimerRef.current = setTimeout(() => {
-        setBanner(null);
-      }, 10000);
-    },
-    []
-  );
+  const sessionRef = useRef(session);
 
   useEffect(() => {
-    if (!token) return;
+    sessionRef.current = session;
+  }, [session]);
 
-    if (!userId && !captainId) return;
+  useEffect(() => {
+    const refreshSession = () => {
+      const next = getSessionInfo();
 
-    const apiBase = getApiBaseUrl();
+      setSession((prev) => {
+        if (
+          prev.token === next.token &&
+          prev.userId === next.userId &&
+          prev.captainId === next.captainId
+        ) {
+          return prev;
+        }
 
-    if (captainId && !captainSocketRef.current) {
-      const captainSocket = io(apiBase, {
+        console.log("[GLOBAL NOTIFICATIONS] Sesión detectada:", next);
+        return next;
+      });
+    };
+
+    refreshSession();
+
+    const interval = setInterval(refreshSession, 1000);
+
+    window.addEventListener("storage", refreshSession);
+    window.addEventListener("focus", refreshSession);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("storage", refreshSession);
+      window.removeEventListener("focus", refreshSession);
+    };
+  }, []);
+
+  const showAlert = useCallback((title, body, type = "offer") => {
+    if (bannerTimerRef.current) {
+      clearTimeout(bannerTimerRef.current);
+    }
+
+    setBanner({
+      title,
+      body,
+      type,
+      createdAt: new Date().toISOString(),
+    });
+
+    if (localStorage.getItem(SOUND_KEY) === "true") {
+      playLoudSound();
+    }
+
+    showBrowserNotification(title, body);
+
+    bannerTimerRef.current = setTimeout(() => {
+      setBanner(null);
+    }, 10000);
+  }, []);
+
+  const connectCaptainSocket = useCallback(
+    (captainId) => {
+      if (!captainId || captainSocketRef.current) return;
+
+      const socket = io(getApiBaseUrl(), {
         transports: ["websocket", "polling"],
         withCredentials: true,
         reconnection: true,
@@ -183,26 +238,39 @@ const GlobalOfferNotifications = () => {
         reconnectionDelayMax: 5000,
       });
 
-      captainSocketRef.current = captainSocket;
+      captainSocketRef.current = socket;
 
-      captainSocket.on("connect", () => {
-        captainSocket.emit("join", {
+      socket.on("connect", () => {
+        console.log("[GLOBAL SOCKET] Captain conectado:", {
+          socketId: socket.id,
+          captainId,
+        });
+
+        setDebugStatus("Conductor conectado a notificaciones");
+
+        socket.emit("join", {
           userId: captainId,
           userType: "captain",
         });
       });
 
-      captainSocket.on("new-offer-bid", (data = {}) => {
+      socket.on("socket-joined", (data) => {
+        console.log("[GLOBAL SOCKET] Captain socket-joined:", data);
+
+        if (!data?.ok) {
+          setDebugStatus(`Error join conductor: ${data?.message || "sin detalle"}`);
+        }
+      });
+
+      socket.on("new-offer-bid", (data = {}) => {
+        console.log("[GLOBAL SOCKET] new-offer-bid recibido:", data);
+
         const title = data.notificationTitle || "Nueva oferta recibida";
         const body =
           data.notificationBody ||
           `${data.customerName || "Un cliente"} envió una nueva oferta.`;
 
-        showGlobalAlert({
-          title,
-          body,
-          type: "new-offer-bid",
-        });
+        showAlert(title, body, "new-offer-bid");
 
         window.dispatchEvent(
           new CustomEvent("centralgo:new-offer-bid", {
@@ -211,17 +279,15 @@ const GlobalOfferNotifications = () => {
         );
       });
 
-      captainSocket.on("offer-counter-response", (data = {}) => {
+      socket.on("offer-counter-response", (data = {}) => {
+        console.log("[GLOBAL SOCKET] offer-counter-response recibido:", data);
+
         const title = data.notificationTitle || "Respuesta a tu contraoferta";
         const body =
           data.notificationBody ||
           `${data.customerName || "Un cliente"} respondió tu contraoferta.`;
 
-        showGlobalAlert({
-          title,
-          body,
-          type: "offer-counter-response",
-        });
+        showAlert(title, body, "offer-counter-response");
 
         window.dispatchEvent(
           new CustomEvent("centralgo:offer-counter-response", {
@@ -229,10 +295,25 @@ const GlobalOfferNotifications = () => {
           })
         );
       });
-    }
 
-    if (userId && !userSocketRef.current) {
-      const userSocket = io(apiBase, {
+      socket.on("disconnect", (reason) => {
+        console.log("[GLOBAL SOCKET] Captain desconectado:", reason);
+        setDebugStatus("Conductor desconectado de notificaciones");
+      });
+
+      socket.on("connect_error", (error) => {
+        console.error("[GLOBAL SOCKET] Captain error:", error);
+        setDebugStatus("Error conectando notificaciones conductor");
+      });
+    },
+    [showAlert]
+  );
+
+  const connectUserSocket = useCallback(
+    (userId) => {
+      if (!userId || userSocketRef.current) return;
+
+      const socket = io(getApiBaseUrl(), {
         transports: ["websocket", "polling"],
         withCredentials: true,
         reconnection: true,
@@ -241,16 +322,33 @@ const GlobalOfferNotifications = () => {
         reconnectionDelayMax: 5000,
       });
 
-      userSocketRef.current = userSocket;
+      userSocketRef.current = socket;
 
-      userSocket.on("connect", () => {
-        userSocket.emit("join", {
+      socket.on("connect", () => {
+        console.log("[GLOBAL SOCKET] User conectado:", {
+          socketId: socket.id,
+          userId,
+        });
+
+        setDebugStatus("Usuario conectado a notificaciones");
+
+        socket.emit("join", {
           userId,
           userType: "user",
         });
       });
 
-      userSocket.on("offer-bid-updated", (data = {}) => {
+      socket.on("socket-joined", (data) => {
+        console.log("[GLOBAL SOCKET] User socket-joined:", data);
+
+        if (!data?.ok) {
+          setDebugStatus(`Error join usuario: ${data?.message || "sin detalle"}`);
+        }
+      });
+
+      socket.on("offer-bid-updated", (data = {}) => {
+        console.log("[GLOBAL SOCKET] offer-bid-updated recibido:", data);
+
         const title = data.notificationTitle || "Respuesta a tu oferta";
         const body =
           data.notificationBody ||
@@ -258,11 +356,7 @@ const GlobalOfferNotifications = () => {
             data.title || "una publicación"
           }.`;
 
-        showGlobalAlert({
-          title,
-          body,
-          type: "offer-bid-updated",
-        });
+        showAlert(title, body, "offer-bid-updated");
 
         window.dispatchEvent(
           new CustomEvent("centralgo:offer-bid-updated", {
@@ -270,20 +364,42 @@ const GlobalOfferNotifications = () => {
           })
         );
       });
+
+      socket.on("disconnect", (reason) => {
+        console.log("[GLOBAL SOCKET] User desconectado:", reason);
+        setDebugStatus("Usuario desconectado de notificaciones");
+      });
+
+      socket.on("connect_error", (error) => {
+        console.error("[GLOBAL SOCKET] User error:", error);
+        setDebugStatus("Error conectando notificaciones usuario");
+      });
+    },
+    [showAlert]
+  );
+
+  useEffect(() => {
+    const { token, userId, captainId } = session;
+
+    if (!token) return;
+
+    if (captainId) {
+      connectCaptainSocket(captainId);
     }
 
+    if (userId) {
+      connectUserSocket(userId);
+    }
+  }, [session, connectCaptainSocket, connectUserSocket]);
+
+  useEffect(() => {
     return () => {
       if (captainSocketRef.current) {
-        captainSocketRef.current.off("connect");
-        captainSocketRef.current.off("new-offer-bid");
-        captainSocketRef.current.off("offer-counter-response");
         captainSocketRef.current.disconnect();
         captainSocketRef.current = null;
       }
 
       if (userSocketRef.current) {
-        userSocketRef.current.off("connect");
-        userSocketRef.current.off("offer-bid-updated");
         userSocketRef.current.disconnect();
         userSocketRef.current = null;
       }
@@ -292,35 +408,41 @@ const GlobalOfferNotifications = () => {
         clearTimeout(bannerTimerRef.current);
       }
     };
-  }, [token, userId, captainId, showGlobalAlert]);
+  }, []);
 
   const enableSound = async () => {
     try {
-      localStorage.setItem(NOTIFICATION_SOUND_KEY, "true");
+      localStorage.setItem(SOUND_KEY, "true");
       setSoundEnabled(true);
 
-      playLoudOfferSound();
+      playLoudSound();
 
       if ("Notification" in window && Notification.permission === "default") {
         await Notification.requestPermission();
       }
     } catch (error) {
-      console.warn("No se pudieron activar notificaciones globales:", error);
+      console.warn("[GLOBAL NOTIFICATIONS] No se pudieron activar:", error);
     }
   };
 
   const disableSound = () => {
-    localStorage.setItem(NOTIFICATION_SOUND_KEY, "false");
+    localStorage.setItem(SOUND_KEY, "false");
     setSoundEnabled(false);
   };
 
-  if (!token || (!userId && !captainId)) {
+  if (!session.token || (!session.userId && !session.captainId)) {
     return null;
   }
 
   return (
     <>
-      <div className="fixed bottom-4 right-4 z-[9999]">
+      <div className="fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2">
+        {debugStatus ? (
+          <div className="max-w-[260px] rounded-2xl bg-black/80 text-white px-3 py-2 text-[10px] font-bold shadow-xl">
+            {debugStatus}
+          </div>
+        ) : null}
+
         <button
           type="button"
           onClick={soundEnabled ? disableSound : enableSound}
