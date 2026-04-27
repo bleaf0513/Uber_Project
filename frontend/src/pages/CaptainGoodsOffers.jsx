@@ -103,6 +103,11 @@ const getStatusText = (status) => {
   return "Activa";
 };
 
+const getNumber = (value) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : 0;
+};
+
 const CaptainGoodsOffers = () => {
   const { captain } = useContext(CaptainDataContext);
 
@@ -340,8 +345,8 @@ const CaptainGoodsOffers = () => {
 
   const renderSalesBlock = (offer) => {
     const sales = Array.isArray(offer.sales) ? offer.sales : [];
-    const soldQuantity = Number(offer.soldQuantity) || 0;
-    const soldMoney = Number(offer.soldMoney) || 0;
+    const soldQuantity = getNumber(offer.soldQuantity);
+    const soldMoney = getNumber(offer.soldMoney);
     const unit = offer.quantityUnit || "";
 
     if (sales.length === 0) {
@@ -391,14 +396,12 @@ const CaptainGoodsOffers = () => {
                     Compró
                   </p>
                   <p className="text-sm font-black text-gray-950">
-                    {Number(sale.quantity) || 0} {sale.unit || unit}
+                    {getNumber(sale.quantity)} {sale.unit || unit}
                   </p>
                 </div>
 
                 <div className="rounded-xl bg-white px-3 py-2 border border-emerald-100">
-                  <p className="text-[11px] text-gray-500 font-bold">
-                    Valor
-                  </p>
+                  <p className="text-[11px] text-gray-500 font-bold">Valor</p>
                   <p className="text-sm font-black text-emerald-800">
                     {formatCOP(sale.price)}
                   </p>
@@ -418,18 +421,29 @@ const CaptainGoodsOffers = () => {
   };
 
   const renderOfferCard = (offer) => {
-    const availableLabel =
-      offer.availableLabel ||
-      `${offer.quantityAvailable} ${offer.quantityUnit} disponibles`;
+    const unit = offer.quantityUnit || "";
 
-    const publishedLabel =
-      offer.publishedLabel ||
-      `${offer.quantityAvailable} ${offer.quantityUnit} publicados`;
+    const availableReal = getNumber(
+      offer.availableReal ?? offer.realAvailable ?? offer.quantityAvailable
+    );
 
-    const soldLabel =
-      offer.soldLabel || `${Number(offer.soldQuantity) || 0} ${offer.quantityUnit} vendidos`;
+    const soldQuantity = getNumber(offer.soldQuantity);
 
-    const soldMoney = Number(offer.soldMoney) || 0;
+    const publishedQuantityFromBackend = getNumber(offer.publishedQuantity);
+    const quantityAvailableFromBackend = getNumber(offer.quantityAvailable);
+
+    const publishedQuantity =
+      publishedQuantityFromBackend > 0
+        ? publishedQuantityFromBackend
+        : availableReal + soldQuantity > 0
+        ? availableReal + soldQuantity
+        : quantityAvailableFromBackend;
+
+    const availableLabel = `${availableReal} ${unit} disponibles`;
+    const publishedLabel = `${publishedQuantity} ${unit} publicados`;
+    const soldLabel = `${soldQuantity} ${unit} vendidos`;
+
+    const soldMoney = getNumber(offer.soldMoney);
     const priceLabel = buildPriceLabel(offer);
 
     return (
