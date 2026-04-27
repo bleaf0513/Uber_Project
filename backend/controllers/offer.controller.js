@@ -107,10 +107,14 @@ const notifyCaptainNewBid = async (bidId) => {
 
         if (!bid?.driver) return;
 
-        const captain = await Captain.findById(bid.driver._id || bid.driver).select("socketId");
+        const captainId = bid.driver._id || bid.driver;
+        const captain = await Captain.findById(captainId).select("socketId");
 
         if (!captain?.socketId) {
-            console.log("[offers] captain offline, notification skipped:", String(bid.driver._id || bid.driver));
+            console.log(
+                "[offers] captain offline, notification skipped:",
+                String(captainId)
+            );
             return;
         }
 
@@ -118,7 +122,9 @@ const notifyCaptainNewBid = async (bidId) => {
             event: "new-offer-bid",
             data: buildBidNotificationPayload(bid, {
                 notificationTitle: "Nueva oferta recibida",
-                notificationBody: `${getCustomerNameFromBid(bid)} ofertó ${bid.requestedQuantity} ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`,
+                notificationBody: `${getCustomerNameFromBid(bid)} ofertó ${
+                    bid.requestedQuantity
+                } ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`,
             }),
         });
     } catch (error) {
@@ -137,10 +143,14 @@ const notifyUserBidUpdated = async (bidId, action) => {
 
         if (!bid?.customer) return;
 
-        const user = await User.findById(bid.customer._id || bid.customer).select("socketId");
+        const userId = bid.customer._id || bid.customer;
+        const user = await User.findById(userId).select("socketId");
 
         if (!user?.socketId) {
-            console.log("[offers] user offline, notification skipped:", String(bid.customer._id || bid.customer));
+            console.log(
+                "[offers] user offline, notification skipped:",
+                String(userId)
+            );
             return;
         }
 
@@ -157,7 +167,9 @@ const notifyUserBidUpdated = async (bidId, action) => {
             data: buildBidNotificationPayload(bid, {
                 action,
                 notificationTitle: "Respuesta a tu oferta",
-                notificationBody: `${getCaptainName(bid.driver)} ${actionLabels[action] || "respondió"} tu oferta.`,
+                notificationBody: `${getCaptainName(bid.driver)} ${
+                    actionLabels[action] || "respondió"
+                } tu oferta.`,
             }),
         });
     } catch (error) {
@@ -176,10 +188,14 @@ const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
 
         if (!bid?.driver) return;
 
-        const captain = await Captain.findById(bid.driver._id || bid.driver).select("socketId");
+        const captainId = bid.driver._id || bid.driver;
+        const captain = await Captain.findById(captainId).select("socketId");
 
         if (!captain?.socketId) {
-            console.log("[offers] captain offline, counter response notification skipped:", String(bid.driver._id || bid.driver));
+            console.log(
+                "[offers] captain offline, counter response notification skipped:",
+                String(captainId)
+            );
             return;
         }
 
@@ -196,6 +212,16 @@ const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
     } catch (error) {
         console.error("[offers] notifyCaptainCustomerCounterResponse error:", error);
     }
+};
+
+const notifyAsync = (label, fn) => {
+    setImmediate(() => {
+        Promise.resolve()
+            .then(fn)
+            .catch((error) => {
+                console.error(`[offers] ${label}:`, error);
+            });
+    });
 };
 
 const buildSalesMap = async ({ listingType, fieldName, offerIds }) => {
@@ -880,7 +906,9 @@ module.exports.createBid = async (req, res) => {
 
         const bid = await OfferBid.create(bidPayload);
 
-        await notifyCaptainNewBid(bid._id);
+        notifyAsync("Error enviando notificación al conductor", () =>
+            notifyCaptainNewBid(bid._id)
+        );
 
         return res.status(201).json({
             bid,
@@ -926,7 +954,7 @@ module.exports.respondToBid = async (req, res) => {
         }
 
         let updatedListing = null;
-        let finalAction = action;
+        const finalAction = action;
 
         if (action === "accepted") {
             updatedListing = await discountAvailabilityForBid(bid);
@@ -955,7 +983,9 @@ module.exports.respondToBid = async (req, res) => {
             });
         }
 
-        await notifyUserBidUpdated(bid._id, finalAction);
+        notifyAsync("Error notificando al usuario", () =>
+            notifyUserBidUpdated(bid._id, finalAction)
+        );
 
         const populatedBid = await OfferBid.findById(bid._id)
             .populate("customer", "fullname email")
@@ -1029,7 +1059,9 @@ module.exports.customerRespondToBid = async (req, res) => {
             });
         }
 
-        await notifyCaptainCustomerCounterResponse(bid._id, action);
+        notifyAsync("Error notificando respuesta de contraoferta", () =>
+            notifyCaptainCustomerCounterResponse(bid._id, action)
+        );
 
         const populatedBid = await OfferBid.findById(bid._id)
             .populate("customer", "fullname email")
