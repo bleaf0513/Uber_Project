@@ -53,6 +53,7 @@ const VEHICLE_TYPES = [
 
 const formatCOP = (value) => {
   const number = Number(value) || 0;
+
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -83,9 +84,13 @@ const buildPriceLabel = (offerOrForm) => {
 
 const getStatusStyle = (status) => {
   if (status === "sold_out") return "bg-red-100 text-red-700 border-red-200";
-  if (status === "paused") return "bg-yellow-100 text-yellow-700 border-yellow-200";
-  if (status === "cancelled") return "bg-gray-200 text-gray-700 border-gray-300";
-  if (status === "completed") return "bg-blue-100 text-blue-700 border-blue-200";
+  if (status === "paused")
+    return "bg-yellow-100 text-yellow-700 border-yellow-200";
+  if (status === "cancelled")
+    return "bg-gray-200 text-gray-700 border-gray-300";
+  if (status === "completed")
+    return "bg-blue-100 text-blue-700 border-blue-200";
+
   return "bg-emerald-100 text-emerald-700 border-emerald-200";
 };
 
@@ -94,6 +99,7 @@ const getStatusText = (status) => {
   if (status === "paused") return "Pausada";
   if (status === "cancelled") return "Cancelada";
   if (status === "completed") return "Completada";
+
   return "Activa";
 };
 
@@ -201,6 +207,10 @@ const CaptainGoodsOffers = () => {
       setMyOffers(mine);
     } catch (error) {
       console.error("Error cargando mis ofertas de mercancía:", error);
+      setMessage(
+        error?.response?.data?.message ||
+          "No se pudieron cargar tus publicaciones."
+      );
     } finally {
       setLoadingMine(false);
     }
@@ -406,21 +416,14 @@ const CaptainGoodsOffers = () => {
             ) : null}
           </div>
 
-          <div className="mt-4 grid grid-cols-2 gap-3">
+          <div className="mt-4">
             <button
               type="button"
               onClick={fetchMyGoodsOffers}
-              className="rounded-2xl bg-gray-100 text-gray-800 py-3 font-black border border-gray-200"
+              className="w-full rounded-2xl bg-gray-100 text-gray-800 py-3 font-black border border-gray-200"
             >
-              Actualizar
+              Actualizar disponibilidad
             </button>
-
-            <Link
-              to="/captain-received-bids"
-              className="rounded-2xl bg-orange-600 text-white py-3 font-black text-center shadow-lg shadow-orange-600/20"
-            >
-              Ver solicitudes
-            </Link>
           </div>
         </div>
       </div>
