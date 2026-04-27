@@ -42,18 +42,6 @@ const PRICE_TYPE_LABELS = {
   precio_total: "precio total",
 };
 
-const UNIT_LABELS = {
-  kg: "kg",
-  gramos: "gramos",
-  libras: "libras",
-  bultos: "bultos",
-  pacas: "pacas",
-  cajas: "cajas",
-  canastillas: "canastillas",
-  toneladas: "toneladas",
-  unidades: "unidades",
-};
-
 const VEHICLE_TYPES = [
   { value: "", label: "Selecciona vehículo" },
   { value: "motorcycle", label: "Moto" },
@@ -72,19 +60,8 @@ const formatCOP = (value) => {
   }).format(number);
 };
 
-const humanizeUnit = (unit) => UNIT_LABELS[unit] || unit || "";
-
-const humanizePriceType = (priceType) =>
-  PRICE_TYPE_LABELS[priceType] || "precio";
-
-const getPriceLabel = (offerOrForm) => {
-  if (!offerOrForm) return formatCOP(0);
-
-  if (offerOrForm.priceLabel) return offerOrForm.priceLabel;
-
-  return `${formatCOP(offerOrForm.suggestedPrice)} ${humanizePriceType(
-    offerOrForm.priceType
-  )}`;
+const humanizePriceType = (priceType) => {
+  return PRICE_TYPE_LABELS[priceType] || "precio";
 };
 
 const getPriceTypeConfig = (priceType) => {
@@ -92,6 +69,16 @@ const getPriceTypeConfig = (priceType) => {
     GOODS_PRICE_TYPES.find((item) => item.value === priceType) ||
     GOODS_PRICE_TYPES[0]
   );
+};
+
+const buildPriceLabel = (offerOrForm) => {
+  if (!offerOrForm) return formatCOP(0);
+
+  if (offerOrForm.priceLabel) return offerOrForm.priceLabel;
+
+  return `${formatCOP(offerOrForm.suggestedPrice)} ${humanizePriceType(
+    offerOrForm.priceType
+  )}`;
 };
 
 const CaptainGoodsOffers = () => {
@@ -119,27 +106,22 @@ const CaptainGoodsOffers = () => {
 
   const token = localStorage.getItem("token");
 
-  const priceTypeConfig = useMemo(
-    () => getPriceTypeConfig(form.priceType),
-    [form.priceType]
-  );
+  const priceTypeConfig = useMemo(() => {
+    return getPriceTypeConfig(form.priceType);
+  }, [form.priceType]);
 
   const preview = useMemo(() => {
     const product = form.productName.trim() || "Producto";
     const quantity = Number(form.quantityAvailable) || 0;
-    const unit = humanizeUnit(form.quantityUnit);
-    const price = Number(form.suggestedPrice) || 0;
-    const priceLabel = `${formatCOP(price)} ${humanizePriceType(
-      form.priceType
-    )}`;
+    const unit = form.quantityUnit || "kg";
+    const suggestedPrice = Number(form.suggestedPrice) || 0;
 
     return {
       product,
-      quantity,
-      unit,
-      price,
-      priceLabel,
       availableLabel: `${quantity} ${unit} disponibles`,
+      priceLabel: `${formatCOP(suggestedPrice)} ${humanizePriceType(
+        form.priceType
+      )}`,
     };
   }, [form]);
 
@@ -242,9 +224,7 @@ const CaptainGoodsOffers = () => {
 
     if (form.priceType !== "precio_total" && priceTypeConfig.unit) {
       if (form.quantityUnit !== priceTypeConfig.unit) {
-        return `Para evitar confusiones, si el precio es ${priceTypeConfig.label.toLowerCase()}, la unidad disponible debe ser ${humanizeUnit(
-          priceTypeConfig.unit
-        )}.`;
+        return `Para evitar confusiones, si el precio es ${priceTypeConfig.label.toLowerCase()}, la unidad disponible debe ser ${priceTypeConfig.unit}.`;
       }
     }
 
@@ -320,11 +300,9 @@ const CaptainGoodsOffers = () => {
   const renderOfferCard = (offer) => {
     const availableLabel =
       offer.availableLabel ||
-      `${offer.quantityAvailable} ${humanizeUnit(
-        offer.quantityUnit
-      )} disponibles`;
+      `${offer.quantityAvailable} ${offer.quantityUnit} disponibles`;
 
-    const priceLabel = getPriceLabel(offer);
+    const priceLabel = buildPriceLabel(offer);
 
     return (
       <div
@@ -433,7 +411,7 @@ const CaptainGoodsOffers = () => {
 
             <p className="text-sm text-gray-600 mt-3">
               Llena la cantidad total que tienes disponible y especifica si el
-              precio es por unidad, por kg, por caja o por el total.
+              precio es por kg, por caja, por bulto, por unidad o por el total.
             </p>
           </div>
 
@@ -488,7 +466,7 @@ const CaptainGoodsOffers = () => {
                   >
                     {GOODS_UNITS.map((unit) => (
                       <option key={unit} value={unit}>
-                        {humanizeUnit(unit)}
+                        {unit}
                       </option>
                     ))}
                   </select>
@@ -561,16 +539,14 @@ const CaptainGoodsOffers = () => {
                 </p>
               </div>
 
-              {form.priceType !== "precio_total" && (
+              {form.priceType !== "precio_total" ? (
                 <p className="text-xs text-orange-700 mt-2">
                   Para evitar confusiones, al elegir{" "}
                   <strong>{priceTypeConfig.label.toLowerCase()}</strong>, la
                   unidad disponible debe coincidir con{" "}
-                  <strong>{humanizeUnit(priceTypeConfig.unit)}</strong>.
+                  <strong>{priceTypeConfig.unit}</strong>.
                 </p>
-              )}
-
-              {form.priceType === "precio_total" && (
+              ) : (
                 <p className="text-xs text-orange-700 mt-2">
                   Precio total significa que el valor publicado corresponde a
                   toda la mercancía disponible.
