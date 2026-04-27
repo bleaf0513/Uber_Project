@@ -81,6 +81,22 @@ const buildPriceLabel = (offerOrForm) => {
   )}`;
 };
 
+const getStatusStyle = (status) => {
+  if (status === "sold_out") return "bg-red-100 text-red-700 border-red-200";
+  if (status === "paused") return "bg-yellow-100 text-yellow-700 border-yellow-200";
+  if (status === "cancelled") return "bg-gray-200 text-gray-700 border-gray-300";
+  if (status === "completed") return "bg-blue-100 text-blue-700 border-blue-200";
+  return "bg-emerald-100 text-emerald-700 border-emerald-200";
+};
+
+const getStatusText = (status) => {
+  if (status === "sold_out") return "Agotada";
+  if (status === "paused") return "Pausada";
+  if (status === "cancelled") return "Cancelada";
+  if (status === "completed") return "Completada";
+  return "Activa";
+};
+
 const CaptainGoodsOffers = () => {
   const { captain } = useContext(CaptainDataContext);
 
@@ -307,88 +323,123 @@ const CaptainGoodsOffers = () => {
     return (
       <div
         key={offer._id}
-        className="rounded-2xl border border-gray-200 p-4 bg-gray-50"
+        className="relative overflow-hidden rounded-[30px] border border-orange-100 bg-white shadow-[0_22px_60px_rgba(15,23,42,0.12)]"
       >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">
-              {offer.productName}
-            </h3>
+        <div className="h-2 bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-400" />
 
-            <p className="text-sm text-gray-600 mt-1">
-              {offer.origin} → {offer.destination}
-            </p>
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-orange-50 text-orange-700 border border-orange-200 flex items-center justify-center shadow-sm">
+                <i className="ri-shopping-basket-2-line text-2xl" />
+              </div>
+
+              <div>
+                <p className="text-xs font-black text-orange-700 uppercase tracking-wide">
+                  Mercancía publicada
+                </p>
+
+                <h3 className="text-lg font-black text-gray-950 mt-1 leading-tight">
+                  {offer.productName}
+                </h3>
+
+                <p className="text-sm text-gray-500 mt-1">
+                  {offer.origin} → {offer.destination}
+                </p>
+              </div>
+            </div>
+
+            <span
+              className={`text-xs font-black px-3 py-1 rounded-full border ${getStatusStyle(
+                offer.status
+              )}`}
+            >
+              {getStatusText(offer.status)}
+            </span>
           </div>
 
-          <span
-            className={`text-xs font-semibold px-3 py-1 rounded-full ${
-              offer.status === "sold_out"
-                ? "bg-red-100 text-red-700"
-                : offer.status === "paused"
-                ? "bg-yellow-100 text-yellow-700"
-                : "bg-emerald-100 text-emerald-700"
-            }`}
-          >
-            {offer.status || "active"}
-          </span>
-        </div>
+          <div className="grid grid-cols-2 gap-3 mt-5">
+            <div className="rounded-2xl bg-slate-950 text-white px-4 py-3 shadow-lg">
+              <p className="text-xs text-white/60 font-bold">
+                Disponible real
+              </p>
+              <p className="text-lg font-black mt-1">{availableLabel}</p>
+            </div>
 
-        <div className="grid grid-cols-1 gap-2 mt-3">
-          <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500 font-semibold">
-              Cantidad disponible real
-            </p>
-            <p className="text-base font-bold text-gray-900">
-              {availableLabel}
-            </p>
+            <div className="rounded-2xl bg-orange-50 border border-orange-100 px-4 py-3">
+              <p className="text-xs text-orange-700 font-bold">
+                Precio publicado
+              </p>
+              <p className="text-lg font-black text-orange-800 mt-1">
+                {priceLabel}
+              </p>
+            </div>
           </div>
 
-          <div className="rounded-2xl bg-orange-50 border border-orange-100 px-4 py-3">
-            <p className="text-xs text-orange-700 font-semibold">
-              Precio publicado
+          <div className="mt-3 rounded-2xl bg-gray-50 border border-gray-200 p-4 space-y-2">
+            <p className="text-sm text-gray-700">
+              <span className="font-black">Negociable:</span>{" "}
+              {offer.isNegotiable ? "Sí, recibe ofertas" : "No negociable"}
             </p>
-            <p className="text-base font-bold text-orange-800">
-              {priceLabel}
-            </p>
+
+            {offer.departureTime ? (
+              <p className="text-sm text-gray-700">
+                <span className="font-black">Salida:</span>{" "}
+                {new Date(offer.departureTime).toLocaleString("es-CO")}
+              </p>
+            ) : null}
+
+            {offer.description ? (
+              <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
+                <p className="text-xs font-black text-gray-500 mb-1">
+                  Descripción
+                </p>
+                <p className="text-sm text-gray-700">{offer.description}</p>
+              </div>
+            ) : null}
+
+            {offer.notes ? (
+              <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
+                <p className="text-xs font-black text-gray-500 mb-1">Notas</p>
+                <p className="text-sm text-gray-700">{offer.notes}</p>
+              </div>
+            ) : null}
           </div>
-        </div>
 
-        <div className="mt-3 space-y-1 text-sm text-gray-700">
-          <p>
-            <span className="font-semibold">Negociable:</span>{" "}
-            {offer.isNegotiable ? "Sí" : "No"}
-          </p>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <button
+              type="button"
+              onClick={fetchMyGoodsOffers}
+              className="rounded-2xl bg-gray-100 text-gray-800 py-3 font-black border border-gray-200"
+            >
+              Actualizar
+            </button>
 
-          {offer.description ? (
-            <p>
-              <span className="font-semibold">Descripción:</span>{" "}
-              {offer.description}
-            </p>
-          ) : null}
-
-          {offer.notes ? (
-            <p>
-              <span className="font-semibold">Notas:</span> {offer.notes}
-            </p>
-          ) : null}
+            <Link
+              to="/captain-received-bids"
+              className="rounded-2xl bg-orange-600 text-white py-3 font-black text-center shadow-lg shadow-orange-600/20"
+            >
+              Ver solicitudes
+            </Link>
+          </div>
         </div>
       </div>
     );
   };
 
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="sticky top-0 z-40 bg-white border-b border-gray-200 px-4 py-3 flex items-center justify-between">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-gray-100 to-slate-200">
+      <div className="sticky top-0 z-40 bg-white/90 backdrop-blur-xl border-b border-gray-200 px-4 py-3 flex items-center justify-between">
         <div className="flex items-center gap-3">
           <Link
             to="/captain-home"
-            className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center"
+            className="w-10 h-10 rounded-full bg-black text-white flex items-center justify-center shadow-lg"
           >
             <i className="ri-arrow-left-line text-xl"></i>
           </Link>
 
           <div>
-            <h1 className="text-lg font-bold text-gray-900">
+            <h1 className="text-lg font-black text-gray-950">
               Publicar mercancía
             </h1>
             <p className="text-xs text-gray-600">
@@ -397,15 +448,15 @@ const CaptainGoodsOffers = () => {
           </div>
         </div>
 
-        <div className="w-10 h-10 rounded-2xl bg-orange-100 flex items-center justify-center">
+        <div className="w-10 h-10 rounded-2xl bg-orange-100 border border-orange-200 flex items-center justify-center">
           <i className="ri-shopping-basket-2-line text-xl text-orange-600"></i>
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
-        <div className="bg-white rounded-[24px] shadow-sm border border-gray-200 p-4">
+      <div className="p-4 space-y-5">
+        <div className="bg-white rounded-[24px] shadow-[0_16px_45px_rgba(15,23,42,0.08)] border border-white p-4">
           <div className="mb-4">
-            <p className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-1 text-xs font-semibold">
+            <p className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-1 text-xs font-bold border border-orange-100">
               Nueva publicación
             </p>
 
@@ -521,21 +572,19 @@ const CaptainGoodsOffers = () => {
               </div>
 
               <div className="rounded-2xl bg-white border border-orange-100 px-4 py-3 mt-3">
-                <p className="text-xs text-orange-700 font-semibold">
+                <p className="text-xs text-orange-700 font-bold">
                   Así verá el usuario tu publicación
                 </p>
-                <p className="text-base font-bold text-gray-900 mt-1">
+                <p className="text-base font-black text-gray-900 mt-1">
                   {preview.product}
                 </p>
                 <p className="text-sm text-gray-700 mt-1">
                   Disponible:{" "}
-                  <span className="font-semibold">
-                    {preview.availableLabel}
-                  </span>
+                  <span className="font-bold">{preview.availableLabel}</span>
                 </p>
                 <p className="text-sm text-gray-700 mt-1">
                   Precio publicado:{" "}
-                  <span className="font-semibold">{preview.priceLabel}</span>
+                  <span className="font-bold">{preview.priceLabel}</span>
                 </p>
               </div>
 
@@ -660,7 +709,7 @@ const CaptainGoodsOffers = () => {
 
             {message ? (
               <div
-                className={`rounded-2xl px-4 py-3 text-sm ${
+                className={`rounded-2xl px-4 py-3 text-sm font-semibold ${
                   message.includes("correctamente")
                     ? "bg-emerald-50 text-emerald-700"
                     : "bg-red-50 text-red-700"
@@ -673,28 +722,29 @@ const CaptainGoodsOffers = () => {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-2xl bg-black text-white py-3.5 text-base font-semibold disabled:opacity-60"
+              className="w-full rounded-2xl bg-black text-white py-3.5 text-base font-bold disabled:opacity-60"
             >
               {loading ? "Publicando..." : "Publicar mercancía"}
             </button>
           </form>
         </div>
 
-        <div className="bg-white rounded-[24px] shadow-sm border border-gray-200 p-4">
+        <div className="rounded-[30px] bg-white/90 backdrop-blur-xl shadow-[0_22px_65px_rgba(15,23,42,0.10)] border border-white p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-lg font-bold text-gray-900">
+              <h2 className="text-lg font-black text-gray-950">
                 Mis publicaciones
               </h2>
               <p className="text-sm text-gray-600">
-                Mercancía que tienes activa o publicada
+                Controla tu mercancía activa, disponibilidad real y precio
+                publicado
               </p>
             </div>
 
             <button
               type="button"
               onClick={fetchMyGoodsOffers}
-              className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center"
+              className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center border border-gray-200"
             >
               <i className="ri-refresh-line text-lg"></i>
             </button>
@@ -705,11 +755,11 @@ const CaptainGoodsOffers = () => {
               Cargando publicaciones...
             </div>
           ) : myOffers.length === 0 ? (
-            <div className="rounded-2xl bg-gray-50 px-4 py-6 text-sm text-gray-600 text-center">
+            <div className="rounded-2xl bg-gray-50 px-4 py-6 text-sm text-gray-600 text-center border border-gray-200">
               Aún no has publicado mercancía.
             </div>
           ) : (
-            <div className="space-y-3">
+            <div className="space-y-5">
               {myOffers.map((offer) => renderOfferCard(offer))}
             </div>
           )}
