@@ -4,6 +4,9 @@ const GoodsOffer = require("../models/goodsOffer.model");
 const SpaceOffer = require("../models/spaceOffer.model");
 const SeatOffer = require("../models/seatOffer.model");
 const OfferBid = require("../models/offerBid.model");
+const User = require("../models/user.model");
+const Captain = require("../models/captain.model");
+const { sendMessageToSocketId } = require("../socket");
 
 const PRICE_TYPE_LABELS = {
     por_kg: "por kg",
@@ -45,6 +48,154 @@ const getCustomerNameFromBid = (bid) => {
     const full = `${first} ${last}`.trim();
 
     return full || bid?.customer?.email || "Cliente";
+};
+
+const getCaptainName = (captain) => {
+    const first = captain?.fullname?.firstname || "";
+    const last = captain?.fullname?.lastname || "";
+    return `${first} ${last}`.trim() || "Transportador";
+};
+
+const getListingTitleFromBid = (bid) => {
+    if (bid?.listingType === "goods") {
+        return bid?.goodsOffer?.productName || "Mercancía";
+    }
+
+    if (bid?.listingType === "space") {
+        return bid?.spaceOffer?.cargoType
+            ? `Espacio para ${bid.spaceOffer.cargoType}`
+            : "Espacio disponible";
+    }
+
+    if (bid?.listingType === "seat") {
+        return "Cupos disponibles";
+    }
+
+    return "Oferta";
+};
+
+const buildBidNotificationPayload = (bid, extra = {}) => {
+    return {
+        bidId: String(bid?._id || ""),
+        listingType: bid?.listingType || "",
+        status: bid?.status || "",
+        title: getListingTitleFromBid(bid),
+        requestedQuantity: normalizeNumber(bid?.requestedQuantity),
+        requestedUnit: bid?.requestedUnit || "",
+        offeredPrice: normalizeNumber(bid?.offeredPrice),
+        offeredPriceLabel: formatCOP(bid?.offeredPrice),
+        counterPrice: bid?.counterPrice || null,
+        counterPriceLabel: bid?.counterPrice ? formatCOP(bid.counterPrice) : "",
+        message: bid?.message || "",
+        counterMessage: bid?.counterMessage || "",
+        customerName: getCustomerNameFromBid(bid),
+        captainName: getCaptainName(bid?.driver),
+        createdAt: bid?.createdAt,
+        updatedAt: bid?.updatedAt,
+        ...extra,
+    };
+};
+
+const notifyCaptainNewBid = async (bidId) => {
+    try {
+        const bid = await OfferBid.findById(bidId)
+            .populate("customer", "fullname email")
+            .populate("driver", "fullname vehicle socketId")
+            .populate("goodsOffer")
+            .populate("spaceOffer")
+            .populate("seatOffer");
+
+        if (!bid?.driver) return;
+
+        const captain = await Captain.findById(bid.driver._id || bid.driver).select("socketId");
+
+        if (!captain?.socketId) {
+            console.log("[offers] captain offline, notification skipped:", String(bid.driver._id || bid.driver));
+            return;
+        }
+
+        sendMessageToSocketId(captain.socketId, {
+            event: "new-offer-bid",
+            data: buildBidNotificationPayload(bid, {
+                notificationTitle: "Nueva oferta recibida",
+                notificationBody: `${getCustomerNameFromBid(bid)} ofertó ${bid.requestedQuantity} ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`,
+            }),
+        });
+    } catch (error) {
+        console.error("[offers] notifyCaptainNewBid error:", error);
+    }
+};
+
+const notifyUserBidUpdated = async (bidId, action) => {
+    try {
+        const bid = await OfferBid.findById(bidId)
+            .populate("customer", "fullname email socketId")
+            .populate("driver", "fullname vehicle")
+            .populate("goodsOffer")
+            .populate("spaceOffer")
+            .populate("seatOffer");
+
+        if (!bid?.customer) return;
+
+        const user = await User.findById(bid.customer._id || bid.customer).select("socketId");
+
+        if (!user?.socketId) {
+            console.log("[offers] user offline, notification skipped:", String(bid.customer._id || bid.customer));
+            return;
+        }
+
+        const actionLabels = {
+            accepted: "aceptó",
+            rejected: "rechazó",
+            countered: "envió una contraoferta",
+            completed: "completó",
+            cancelled: "canceló",
+        };
+
+        sendMessageToSocketId(user.socketId, {
+            event: "offer-bid-updated",
+            data: buildBidNotificationPayload(bid, {
+                action,
+                notificationTitle: "Respuesta a tu oferta",
+                notificationBody: `${getCaptainName(bid.driver)} ${actionLabels[action] || "respondió"} tu oferta.`,
+            }),
+        });
+    } catch (error) {
+        console.error("[offers] notifyUserBidUpdated error:", error);
+    }
+};
+
+const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
+    try {
+        const bid = await OfferBid.findById(bidId)
+            .populate("customer", "fullname email")
+            .populate("driver", "fullname vehicle socketId")
+            .populate("goodsOffer")
+            .populate("spaceOffer")
+            .populate("seatOffer");
+
+        if (!bid?.driver) return;
+
+        const captain = await Captain.findById(bid.driver._id || bid.driver).select("socketId");
+
+        if (!captain?.socketId) {
+            console.log("[offers] captain offline, counter response notification skipped:", String(bid.driver._id || bid.driver));
+            return;
+        }
+
+        const actionLabel = action === "accepted" ? "aceptó" : "rechazó";
+
+        sendMessageToSocketId(captain.socketId, {
+            event: "offer-counter-response",
+            data: buildBidNotificationPayload(bid, {
+                action,
+                notificationTitle: "Respuesta a tu contraoferta",
+                notificationBody: `${getCustomerNameFromBid(bid)} ${actionLabel} tu contraoferta.`,
+            }),
+        });
+    } catch (error) {
+        console.error("[offers] notifyCaptainCustomerCounterResponse error:", error);
+    }
 };
 
 const buildSalesMap = async ({ listingType, fieldName, offerIds }) => {
@@ -126,18 +277,14 @@ const attachGoodsComputedFields = (offer, salesInfo = null) => {
     return {
         ...obj,
         priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-
         publishedQuantity,
         publishedLabel: `${publishedQuantity} ${obj.quantityUnit || ""} publicados`,
-
         soldQuantity,
         soldMoney,
         soldLabel: `${soldQuantity} ${obj.quantityUnit || ""} vendidos`,
-
         realAvailable,
         availableReal: realAvailable,
         availableLabel: `${realAvailable} ${obj.quantityUnit || ""} disponibles`,
-
         sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
     };
 };
@@ -153,18 +300,14 @@ const attachSpaceComputedFields = (offer, salesInfo = null) => {
     return {
         ...obj,
         priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-
         publishedQuantity,
         publishedLabel: `${publishedQuantity} ${obj.capacityUnit || ""} publicados`,
-
         soldQuantity,
         soldMoney,
         soldLabel: `${soldQuantity} ${obj.capacityUnit || ""} vendidos`,
-
         realAvailable,
         availableReal: realAvailable,
         availableLabel: `${realAvailable} ${obj.capacityUnit || ""} disponibles`,
-
         sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
     };
 };
@@ -180,18 +323,14 @@ const attachSeatComputedFields = (offer, salesInfo = null) => {
     return {
         ...obj,
         priceLabel: `${formatCOP(obj.suggestedPrice)} por ${obj.seatUnit || "cupo"}`,
-
         publishedQuantity,
         publishedLabel: `${publishedQuantity} ${obj.seatUnit || "cupos"} publicados`,
-
         soldQuantity,
         soldMoney,
         soldLabel: `${soldQuantity} ${obj.seatUnit || "cupos"} vendidos`,
-
         realAvailable,
         availableReal: realAvailable,
         availableLabel: `${realAvailable} ${obj.seatUnit || "cupos"} disponibles`,
-
         sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
     };
 };
@@ -741,6 +880,8 @@ module.exports.createBid = async (req, res) => {
 
         const bid = await OfferBid.create(bidPayload);
 
+        await notifyCaptainNewBid(bid._id);
+
         return res.status(201).json({
             bid,
             message: "Solicitud enviada correctamente.",
@@ -785,6 +926,7 @@ module.exports.respondToBid = async (req, res) => {
         }
 
         let updatedListing = null;
+        let finalAction = action;
 
         if (action === "accepted") {
             updatedListing = await discountAvailabilityForBid(bid);
@@ -812,6 +954,8 @@ module.exports.respondToBid = async (req, res) => {
                 message: "Acción inválida.",
             });
         }
+
+        await notifyUserBidUpdated(bid._id, finalAction);
 
         const populatedBid = await OfferBid.findById(bid._id)
             .populate("customer", "fullname email")
@@ -884,6 +1028,8 @@ module.exports.customerRespondToBid = async (req, res) => {
                 message: "Acción inválida.",
             });
         }
+
+        await notifyCaptainCustomerCounterResponse(bid._id, action);
 
         const populatedBid = await OfferBid.findById(bid._id)
             .populate("customer", "fullname email")
