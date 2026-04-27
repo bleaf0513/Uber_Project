@@ -29,19 +29,21 @@ import EnterpriseClients from "./pages/EnterpriseClients";
 import SuperAdminLogin from "./pages/SuperAdminLogin";
 import SuperAdminDashboard from "./pages/SuperAdminDashboard";
 
-// Nuevas páginas del conductor
 import CaptainGoodsOffers from "./pages/CaptainGoodsOffers";
 import CaptainSpaceOffers from "./pages/CaptainSpaceOffers";
 import CaptainSeatOffers from "./pages/CaptainSeatOffers";
 import CaptainReceivedBids from "./pages/CaptainReceivedBids";
 
-// Nuevas páginas del usuario
 import AvailableOffers from "./pages/AvailableOffers";
 import UserSentBids from "./pages/UserSentBids";
+
+import GlobalOfferNotifications from "./components/GlobalOfferNotifications";
 
 const App = () => {
   return (
     <div>
+      <GlobalOfferNotifications />
+
       <Routes>
         <Route path="/" element={<Start />} />
         <Route path="/login" element={<UserLogin />} />
