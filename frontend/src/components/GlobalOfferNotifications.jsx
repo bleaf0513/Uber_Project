@@ -1,6 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useContext, useEffect, useRef, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { io } from "socket.io-client";
 import { getApiBaseUrl } from "../apiBase";
+import { CaptainDataContext } from "../context/CaptainContext";
+import { UserDataContext } from "../context/UserContext";
 
 const SOUND_KEY = "centralgo_offer_sound_enabled";
 
@@ -12,13 +15,34 @@ const safeParse = (value) => {
   }
 };
 
+const decodeJwtPayload = (token) => {
+  try {
+    if (!token || !token.includes(".")) return null;
+
+    const base64 = token.split(".")[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = decodeURIComponent(
+      window
+        .atob(base64)
+        .split("")
+        .map((c) => `%${`00${c.charCodeAt(0).toString(16)}`.slice(-2)}`)
+        .join("")
+    );
+
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+};
+
 const findIdDeep = (obj) => {
   if (!obj || typeof obj !== "object") return "";
 
   if (obj._id) return String(obj._id);
   if (obj.id) return String(obj.id);
+  if (obj.userId) return String(obj.userId);
+  if (obj.captainId) return String(obj.captainId);
 
-  const commonKeys = [
+  const keys = [
     "user",
     "captain",
     "data",
@@ -28,26 +52,22 @@ const findIdDeep = (obj) => {
     "currentCaptain",
   ];
 
-  for (const key of commonKeys) {
-    if (obj[key] && typeof obj[key] === "object") {
-      const found = findIdDeep(obj[key]);
-      if (found) return found;
-    }
+  for (const key of keys) {
+    const found = findIdDeep(obj[key]);
+    if (found) return found;
   }
 
   return "";
 };
 
-const getLocalStorageValue = (keys) => {
+const getIdFromStorage = (keys) => {
   for (const key of keys) {
-    const value = localStorage.getItem(key);
-    if (!value) continue;
+    const raw = localStorage.getItem(key);
+    if (!raw) continue;
 
-    if (key.toLowerCase().includes("id")) {
-      return value;
-    }
+    if (key.toLowerCase().includes("id")) return raw;
 
-    const parsed = safeParse(value);
+    const parsed = safeParse(raw);
     const found = findIdDeep(parsed);
 
     if (found) return found;
@@ -56,14 +76,37 @@ const getLocalStorageValue = (keys) => {
   return "";
 };
 
-const getSessionInfo = () => {
-  const token =
+const isCaptainPath = (pathname) => {
+  return (
+    pathname.startsWith("/captain") ||
+    pathname.includes("/captain/") ||
+    pathname === "/captain-home"
+  );
+};
+
+const isUserPath = (pathname) => {
+  return (
+    pathname === "/home" ||
+    pathname === "/available-offers" ||
+    pathname === "/my-sent-bids" ||
+    pathname === "/user-logout"
+  );
+};
+
+const getToken = () => {
+  return (
     localStorage.getItem("token") ||
     localStorage.getItem("userToken") ||
     localStorage.getItem("captainToken") ||
-    "";
+    ""
+  );
+};
 
-  const userId = getLocalStorageValue([
+const getSessionFromStorage = (pathname) => {
+  const token = getToken();
+  const decoded = decodeJwtPayload(token);
+
+  const storageUserId = getIdFromStorage([
     "userId",
     "user",
     "userData",
@@ -71,13 +114,35 @@ const getSessionInfo = () => {
     "currentUser",
   ]);
 
-  const captainId = getLocalStorageValue([
+  const storageCaptainId = getIdFromStorage([
     "captainId",
     "captain",
     "captainData",
     "captainInfo",
     "currentCaptain",
   ]);
+
+  const decodedId =
+    decoded?.captain?._id ||
+    decoded?.captain?.id ||
+    decoded?.captainId ||
+    decoded?.user?._id ||
+    decoded?.user?.id ||
+    decoded?.userId ||
+    decoded?._id ||
+    decoded?.id ||
+    "";
+
+  let userId = storageUserId;
+  let captainId = storageCaptainId;
+
+  if (!userId && !captainId && decodedId) {
+    if (isCaptainPath(pathname)) {
+      captainId = String(decodedId);
+    } else if (isUserPath(pathname)) {
+      userId = String(decodedId);
+    }
+  }
 
   return {
     token,
@@ -95,16 +160,16 @@ const playLoudSound = () => {
     const now = ctx.currentTime;
 
     const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(0.95, now);
+    masterGain.gain.setValueAtTime(1.0, now);
     masterGain.connect(ctx.destination);
 
     const tones = [
-      { freq: 880, start: 0 },
-      { freq: 1250, start: 0.14 },
-      { freq: 1650, start: 0.28 },
-      { freq: 1250, start: 0.48 },
-      { freq: 880, start: 0.62 },
-      { freq: 1650, start: 0.82 },
+      { freq: 900, start: 0 },
+      { freq: 1300, start: 0.13 },
+      { freq: 1700, start: 0.26 },
+      { freq: 1300, start: 0.44 },
+      { freq: 900, start: 0.57 },
+      { freq: 1700, start: 0.75 },
     ];
 
     tones.forEach((tone) => {
@@ -115,7 +180,7 @@ const playLoudSound = () => {
       osc.frequency.setValueAtTime(tone.freq, now + tone.start);
 
       gain.gain.setValueAtTime(0.0001, now + tone.start);
-      gain.gain.exponentialRampToValueAtTime(0.9, now + tone.start + 0.025);
+      gain.gain.exponentialRampToValueAtTime(0.95, now + tone.start + 0.025);
       gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.13);
 
       osc.connect(gain);
@@ -131,7 +196,7 @@ const playLoudSound = () => {
       } catch {
         // ignore
       }
-    }, 1500);
+    }, 1600);
   } catch (error) {
     console.warn("[GLOBAL NOTIFICATIONS] No se pudo reproducir sonido:", error);
   }
@@ -154,7 +219,13 @@ const showBrowserNotification = (title, body) => {
 };
 
 const GlobalOfferNotifications = () => {
-  const [session, setSession] = useState(getSessionInfo);
+  const location = useLocation();
+  const { user } = useContext(UserDataContext);
+  const { captain } = useContext(CaptainDataContext);
+
+  const [session, setSession] = useState(() =>
+    getSessionFromStorage(location.pathname)
+  );
   const [banner, setBanner] = useState(null);
   const [soundEnabled, setSoundEnabled] = useState(
     localStorage.getItem(SOUND_KEY) === "true"
@@ -164,15 +235,23 @@ const GlobalOfferNotifications = () => {
   const userSocketRef = useRef(null);
   const captainSocketRef = useRef(null);
   const bannerTimerRef = useRef(null);
-  const sessionRef = useRef(session);
+
+  const buildSession = useCallback(() => {
+    const storage = getSessionFromStorage(location.pathname);
+
+    const contextUserId = findIdDeep(user);
+    const contextCaptainId = findIdDeep(captain);
+
+    return {
+      token: storage.token,
+      userId: contextUserId || storage.userId || "",
+      captainId: contextCaptainId || storage.captainId || "",
+    };
+  }, [user, captain, location.pathname]);
 
   useEffect(() => {
-    sessionRef.current = session;
-  }, [session]);
-
-  useEffect(() => {
-    const refreshSession = () => {
-      const next = getSessionInfo();
+    const refresh = () => {
+      const next = buildSession();
 
       setSession((prev) => {
         if (
@@ -188,19 +267,19 @@ const GlobalOfferNotifications = () => {
       });
     };
 
-    refreshSession();
+    refresh();
 
-    const interval = setInterval(refreshSession, 1000);
+    const interval = setInterval(refresh, 1000);
 
-    window.addEventListener("storage", refreshSession);
-    window.addEventListener("focus", refreshSession);
+    window.addEventListener("focus", refresh);
+    window.addEventListener("storage", refresh);
 
     return () => {
       clearInterval(interval);
-      window.removeEventListener("storage", refreshSession);
-      window.removeEventListener("focus", refreshSession);
+      window.removeEventListener("focus", refresh);
+      window.removeEventListener("storage", refresh);
     };
-  }, []);
+  }, [buildSession]);
 
   const showAlert = useCallback((title, body, type = "offer") => {
     if (bannerTimerRef.current) {
@@ -258,7 +337,9 @@ const GlobalOfferNotifications = () => {
         console.log("[GLOBAL SOCKET] Captain socket-joined:", data);
 
         if (!data?.ok) {
-          setDebugStatus(`Error join conductor: ${data?.message || "sin detalle"}`);
+          setDebugStatus(`Error conductor: ${data?.message || "join falló"}`);
+        } else {
+          setDebugStatus("Conductor conectado a notificaciones");
         }
       });
 
@@ -296,14 +377,9 @@ const GlobalOfferNotifications = () => {
         );
       });
 
-      socket.on("disconnect", (reason) => {
-        console.log("[GLOBAL SOCKET] Captain desconectado:", reason);
-        setDebugStatus("Conductor desconectado de notificaciones");
-      });
-
       socket.on("connect_error", (error) => {
         console.error("[GLOBAL SOCKET] Captain error:", error);
-        setDebugStatus("Error conectando notificaciones conductor");
+        setDebugStatus("Error conectando conductor");
       });
     },
     [showAlert]
@@ -342,7 +418,9 @@ const GlobalOfferNotifications = () => {
         console.log("[GLOBAL SOCKET] User socket-joined:", data);
 
         if (!data?.ok) {
-          setDebugStatus(`Error join usuario: ${data?.message || "sin detalle"}`);
+          setDebugStatus(`Error usuario: ${data?.message || "join falló"}`);
+        } else {
+          setDebugStatus("Usuario conectado a notificaciones");
         }
       });
 
@@ -365,30 +443,23 @@ const GlobalOfferNotifications = () => {
         );
       });
 
-      socket.on("disconnect", (reason) => {
-        console.log("[GLOBAL SOCKET] User desconectado:", reason);
-        setDebugStatus("Usuario desconectado de notificaciones");
-      });
-
       socket.on("connect_error", (error) => {
         console.error("[GLOBAL SOCKET] User error:", error);
-        setDebugStatus("Error conectando notificaciones usuario");
+        setDebugStatus("Error conectando usuario");
       });
     },
     [showAlert]
   );
 
   useEffect(() => {
-    const { token, userId, captainId } = session;
+    if (!session.token) return;
 
-    if (!token) return;
-
-    if (captainId) {
-      connectCaptainSocket(captainId);
+    if (session.captainId) {
+      connectCaptainSocket(session.captainId);
     }
 
-    if (userId) {
-      connectUserSocket(userId);
+    if (session.userId) {
+      connectUserSocket(session.userId);
     }
   }, [session, connectCaptainSocket, connectUserSocket]);
 
@@ -411,17 +482,13 @@ const GlobalOfferNotifications = () => {
   }, []);
 
   const enableSound = async () => {
-    try {
-      localStorage.setItem(SOUND_KEY, "true");
-      setSoundEnabled(true);
+    localStorage.setItem(SOUND_KEY, "true");
+    setSoundEnabled(true);
 
-      playLoudSound();
+    playLoudSound();
 
-      if ("Notification" in window && Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-    } catch (error) {
-      console.warn("[GLOBAL NOTIFICATIONS] No se pudieron activar:", error);
+    if ("Notification" in window && Notification.permission === "default") {
+      await Notification.requestPermission();
     }
   };
 
@@ -438,7 +505,7 @@ const GlobalOfferNotifications = () => {
     <>
       <div className="fixed bottom-4 right-4 z-[9999] flex flex-col items-end gap-2">
         {debugStatus ? (
-          <div className="max-w-[260px] rounded-2xl bg-black/80 text-white px-3 py-2 text-[10px] font-bold shadow-xl">
+          <div className="max-w-[280px] rounded-2xl bg-black/80 text-white px-3 py-2 text-[10px] font-bold shadow-xl">
             {debugStatus}
           </div>
         ) : null}
