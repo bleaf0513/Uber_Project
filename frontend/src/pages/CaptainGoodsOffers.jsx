@@ -188,18 +188,33 @@ const CaptainGoodsOffers = () => {
   const fetchMyGoodsOffers = async () => {
     try {
       setLoadingMine(true);
+      setMessage("");
 
-      const response = await axios.get(`${getApiBaseUrl()}/offers/goods/list`, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      const statuses = ["active", "sold_out", "paused", "completed"];
+
+      const responses = await Promise.all(
+        statuses.map((status) =>
+          axios.get(`${getApiBaseUrl()}/offers/goods/list?status=${status}`, {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          })
+        )
+      );
+
+      const allOffers = responses.flatMap((response) =>
+        Array.isArray(response?.data?.offers) ? response.data.offers : []
+      );
+
+      const uniqueOffersMap = new Map();
+
+      allOffers.forEach((offer) => {
+        if (offer?._id) {
+          uniqueOffersMap.set(String(offer._id), offer);
+        }
       });
 
-      const offers = Array.isArray(response?.data?.offers)
-        ? response.data.offers
-        : [];
-
-      const mine = offers.filter(
+      const mine = Array.from(uniqueOffersMap.values()).filter(
         (offer) =>
           String(offer?.driver?._id || offer?.driver) === String(captain?._id)
       );
@@ -323,11 +338,98 @@ const CaptainGoodsOffers = () => {
     }
   };
 
+  const renderSalesBlock = (offer) => {
+    const sales = Array.isArray(offer.sales) ? offer.sales : [];
+    const soldQuantity = Number(offer.soldQuantity) || 0;
+    const soldMoney = Number(offer.soldMoney) || 0;
+    const unit = offer.quantityUnit || "";
+
+    if (sales.length === 0) {
+      return (
+        <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
+          <p className="text-sm text-gray-500">
+            Aún no hay ventas aceptadas para esta publicación.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="rounded-2xl bg-white border border-emerald-100 px-4 py-3">
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <div>
+            <p className="text-xs font-black text-emerald-700 uppercase">
+              Ventas realizadas
+            </p>
+            <p className="text-sm text-gray-600">
+              {soldQuantity} {unit} vendidos · {formatCOP(soldMoney)}
+            </p>
+          </div>
+
+          <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-700 flex items-center justify-center border border-emerald-100">
+            <i className="ri-money-dollar-circle-line text-xl" />
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          {sales.map((sale) => (
+            <div
+              key={sale.bidId || `${sale.customerName}-${sale.date}`}
+              className="rounded-2xl bg-emerald-50 border border-emerald-100 p-3"
+            >
+              <p className="text-sm font-black text-gray-950">
+                {sale.customerName || "Cliente"}
+              </p>
+
+              {sale.customerEmail ? (
+                <p className="text-xs text-gray-500">{sale.customerEmail}</p>
+              ) : null}
+
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <div className="rounded-xl bg-white px-3 py-2 border border-emerald-100">
+                  <p className="text-[11px] text-gray-500 font-bold">
+                    Compró
+                  </p>
+                  <p className="text-sm font-black text-gray-950">
+                    {Number(sale.quantity) || 0} {sale.unit || unit}
+                  </p>
+                </div>
+
+                <div className="rounded-xl bg-white px-3 py-2 border border-emerald-100">
+                  <p className="text-[11px] text-gray-500 font-bold">
+                    Valor
+                  </p>
+                  <p className="text-sm font-black text-emerald-800">
+                    {formatCOP(sale.price)}
+                  </p>
+                </div>
+              </div>
+
+              {sale.date ? (
+                <p className="text-[11px] text-gray-500 mt-2">
+                  {new Date(sale.date).toLocaleString("es-CO")}
+                </p>
+              ) : null}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const renderOfferCard = (offer) => {
     const availableLabel =
       offer.availableLabel ||
       `${offer.quantityAvailable} ${offer.quantityUnit} disponibles`;
 
+    const publishedLabel =
+      offer.publishedLabel ||
+      `${offer.quantityAvailable} ${offer.quantityUnit} publicados`;
+
+    const soldLabel =
+      offer.soldLabel || `${Number(offer.soldQuantity) || 0} ${offer.quantityUnit} vendidos`;
+
+    const soldMoney = Number(offer.soldMoney) || 0;
     const priceLabel = buildPriceLabel(offer);
 
     return (
@@ -386,6 +488,29 @@ const CaptainGoodsOffers = () => {
             </div>
           </div>
 
+          <div className="grid grid-cols-2 gap-3 mt-3">
+            <div className="rounded-2xl bg-gray-50 border border-gray-200 px-4 py-3">
+              <p className="text-xs text-gray-500 font-bold">
+                Cantidad publicada
+              </p>
+              <p className="text-base font-black text-gray-900 mt-1">
+                {publishedLabel}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3">
+              <p className="text-xs text-emerald-700 font-bold">
+                Total vendido
+              </p>
+              <p className="text-base font-black text-emerald-800 mt-1">
+                {soldLabel}
+              </p>
+              <p className="text-xs text-emerald-700 font-bold mt-1">
+                {formatCOP(soldMoney)}
+              </p>
+            </div>
+          </div>
+
           <div className="mt-3 rounded-2xl bg-gray-50 border border-gray-200 p-4 space-y-2">
             <p className="text-sm text-gray-700">
               <span className="font-black">Negociable:</span>{" "}
@@ -414,6 +539,8 @@ const CaptainGoodsOffers = () => {
                 <p className="text-sm text-gray-700">{offer.notes}</p>
               </div>
             ) : null}
+
+            {renderSalesBlock(offer)}
           </div>
 
           <div className="mt-4">
@@ -422,7 +549,7 @@ const CaptainGoodsOffers = () => {
               onClick={fetchMyGoodsOffers}
               className="w-full rounded-2xl bg-gray-100 text-gray-800 py-3 font-black border border-gray-200"
             >
-              Actualizar disponibilidad
+              Actualizar disponibilidad y ventas
             </button>
           </div>
         </div>
@@ -739,8 +866,8 @@ const CaptainGoodsOffers = () => {
                 Mis publicaciones
               </h2>
               <p className="text-sm text-gray-600">
-                Controla tu mercancía activa, disponibilidad real y precio
-                publicado
+                Controla tu mercancía activa, disponibilidad real, ventas y
+                compradores
               </p>
             </div>
 
