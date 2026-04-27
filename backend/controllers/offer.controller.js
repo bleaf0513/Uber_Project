@@ -196,6 +196,21 @@ const attachSeatComputedFields = (offer, salesInfo = null) => {
     };
 };
 
+const shouldIncludeEmpty = (req) => {
+    return String(req.query.includeEmpty || "false") === "true";
+};
+
+const filterAvailableOnly = (offers, req) => {
+    if (shouldIncludeEmpty(req)) {
+        return offers;
+    }
+
+    return offers.filter((offer) => {
+        const available = Number(offer.availableReal ?? offer.realAvailable ?? 0);
+        return available > 0;
+    });
+};
+
 const getListingConfigFromBid = (bid) => {
     if (bid.listingType === "goods") {
         return {
@@ -439,10 +454,14 @@ module.exports.listGoodsOffers = async (req, res) => {
             offerIds: offers.map((offer) => offer._id),
         });
 
+        let computedOffers = offers.map((offer) =>
+            attachGoodsComputedFields(offer, salesMap[String(offer._id)])
+        );
+
+        computedOffers = filterAvailableOnly(computedOffers, req);
+
         return res.status(200).json({
-            offers: offers.map((offer) =>
-                attachGoodsComputedFields(offer, salesMap[String(offer._id)])
-            ),
+            offers: computedOffers,
         });
     } catch (error) {
         console.error("Error listing goods offers:", error);
@@ -516,10 +535,14 @@ module.exports.listSpaceOffers = async (req, res) => {
             offerIds: offers.map((offer) => offer._id),
         });
 
+        let computedOffers = offers.map((offer) =>
+            attachSpaceComputedFields(offer, salesMap[String(offer._id)])
+        );
+
+        computedOffers = filterAvailableOnly(computedOffers, req);
+
         return res.status(200).json({
-            offers: offers.map((offer) =>
-                attachSpaceComputedFields(offer, salesMap[String(offer._id)])
-            ),
+            offers: computedOffers,
         });
     } catch (error) {
         console.error("Error listing space offers:", error);
@@ -592,10 +615,14 @@ module.exports.listSeatOffers = async (req, res) => {
             offerIds: offers.map((offer) => offer._id),
         });
 
+        let computedOffers = offers.map((offer) =>
+            attachSeatComputedFields(offer, salesMap[String(offer._id)])
+        );
+
+        computedOffers = filterAvailableOnly(computedOffers, req);
+
         return res.status(200).json({
-            offers: offers.map((offer) =>
-                attachSeatComputedFields(offer, salesMap[String(offer._id)])
-            ),
+            offers: computedOffers,
         });
     } catch (error) {
         console.error("Error listing seat offers:", error);
