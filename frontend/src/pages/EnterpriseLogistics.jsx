@@ -559,6 +559,17 @@ const EnterpriseLogistics = () => {
 
   const [formData, setFormData] = useState(emptyFormData);
 
+  const [smartRoutesLoading, setSmartRoutesLoading] = useState(false);
+  const [smartRoutesOptimizing, setSmartRoutesOptimizing] = useState(false);
+  const [smartRoutesAssigning, setSmartRoutesAssigning] = useState(false);
+  const [smartRouteName, setSmartRouteName] = useState("");
+  const [smartBaseAddress, setSmartBaseAddress] = useState("");
+  const [smartBaseLat, setSmartBaseLat] = useState("");
+  const [smartBaseLng, setSmartBaseLng] = useState("");
+  const [selectedSmartDriverId, setSelectedSmartDriverId] = useState("");
+  const [selectedSmartRouteGroupId, setSelectedSmartRouteGroupId] = useState("");
+  const [lastOptimizedRoute, setLastOptimizedRoute] = useState(null);
+
   const driverIdValue = (driver) => String(driver?._id || driver?.id || "");
   const clientIdValue = (client) => String(client?._id || client?.id || "");
 
@@ -1371,6 +1382,154 @@ const EnterpriseLogistics = () => {
     }
   };
 
+  const handleRefreshSmartRoutes = async () => {
+    try {
+      setSmartRoutesLoading(true);
+      await fetchDeliveries(true);
+    } catch (error) {
+      console.error("Error actualizando rutas inteligentes:", error);
+      alert(error.message || "No se pudieron actualizar las rutas inteligentes.");
+    } finally {
+      setSmartRoutesLoading(false);
+    }
+  };
+
+  const handleOptimizeSmartRoutes = async () => {
+    const pendingRoutes = deliveries.filter((delivery) => {
+      const assignedDriverId = getDeliveryAssignedId(delivery);
+      return (
+        delivery?.status === "Pendiente" &&
+        delivery?.optimizationStatus === "pending" &&
+        !assignedDriverId
+      );
+    });
+
+    if (pendingRoutes.length === 0) {
+      alert("No tienes pedidos pendientes para optimizar.");
+      return;
+    }
+
+    const baseLat = String(smartBaseLat || "").trim();
+    const baseLng = String(smartBaseLng || "").trim();
+
+    const baseLocation =
+      baseLat && baseLng
+        ? {
+            address: smartBaseAddress || "Punto de carga de la empresa",
+            lat: Number(baseLat),
+            lng: Number(baseLng),
+          }
+        : undefined;
+
+    try {
+      setSmartRoutesOptimizing(true);
+
+      const response = await fetch(`${API_BASE}/enterprise-deliveries/optimize-routes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          routeName:
+            smartRouteName ||
+            `Ruta inteligente ${new Date().toLocaleDateString("es-CO")}`,
+          baseLocation,
+          deliveryIds: pendingRoutes.map((delivery) => delivery?._id || delivery?.id),
+        }),
+      });
+
+      const data = await parseJsonSafe(
+        response,
+        "POST /enterprise-deliveries/optimize-routes"
+      );
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo optimizar la ruta.");
+      }
+
+      setLastOptimizedRoute(data.route || null);
+      setSelectedSmartRouteGroupId(data.route?.routeGroupId || "");
+      await fetchDeliveries(true);
+
+      alert(data.message || "Ruta optimizada correctamente.");
+    } catch (error) {
+      console.error("Error optimizando ruta inteligente:", error);
+      alert(error.message || "No se pudo optimizar la ruta.");
+    } finally {
+      setSmartRoutesOptimizing(false);
+    }
+  };
+
+  const handleAssignSmartRoute = async () => {
+    const routeGroupIdToAssign =
+      selectedSmartRouteGroupId || currentSmartRoute?.routeGroupId || "";
+
+    if (!routeGroupIdToAssign) {
+      alert("Primero optimiza o selecciona una ruta inteligente.");
+      return;
+    }
+
+    if (!selectedSmartDriverId) {
+      alert("Selecciona el conductor que recibirá esta ruta.");
+      return;
+    }
+
+    const selectedDriverForRoute = drivers.find(
+      (driver) => driverIdValue(driver) === String(selectedSmartDriverId)
+    );
+
+    if (!selectedDriverForRoute) {
+      alert("Selecciona un conductor válido.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      `¿Asignar esta ruta completa a ${selectedDriverForRoute.name}?`
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setSmartRoutesAssigning(true);
+
+      const response = await fetch(`${API_BASE}/enterprise-deliveries/assign-route`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        credentials: "include",
+        body: JSON.stringify({
+          routeGroupId: routeGroupIdToAssign,
+          assignedDriverId: selectedSmartDriverId,
+        }),
+      });
+
+      const data = await parseJsonSafe(
+        response,
+        "POST /enterprise-deliveries/assign-route"
+      );
+
+      if (!response.ok) {
+        throw new Error(data.message || "No se pudo asignar la ruta.");
+      }
+
+      setLastOptimizedRoute(null);
+      setSelectedSmartRouteGroupId("");
+      setSelectedSmartDriverId("");
+
+      await fetchDeliveries(true);
+      await fetchDrivers(true);
+
+      alert(data.message || "Ruta asignada correctamente.");
+    } catch (error) {
+      console.error("Error asignando ruta inteligente:", error);
+      alert(error.message || "No se pudo asignar la ruta.");
+    } finally {
+      setSmartRoutesAssigning(false);
+    }
+  };
+
   const selectedDriver = useMemo(() => {
     return drivers.find(
       (driver) => driverIdValue(driver) === String(selectedDriverFilter)
@@ -1465,6 +1624,76 @@ const EnterpriseLogistics = () => {
         return bTime - aTime;
       });
   }, [deliveries, listDriverFilter, listStatusFilter, listDateFilter, listScopeFilter]);
+
+  const pendingSmartRouteDeliveries = useMemo(() => {
+    return deliveries
+      .filter((delivery) => {
+        const assignedDriverId = getDeliveryAssignedId(delivery);
+        return (
+          delivery?.status === "Pendiente" &&
+          delivery?.optimizationStatus === "pending" &&
+          !assignedDriverId
+        );
+      })
+      .sort((a, b) => {
+        const aTime = new Date(a?.createdAt || a?.updatedAt || 0).getTime();
+        const bTime = new Date(b?.createdAt || b?.updatedAt || 0).getTime();
+        return aTime - bTime;
+      });
+  }, [deliveries]);
+
+  const optimizedSmartRouteGroups = useMemo(() => {
+    const groups = new Map();
+
+    deliveries
+      .filter((delivery) => {
+        const assignedDriverId = getDeliveryAssignedId(delivery);
+        return (
+          delivery?.status === "Pendiente" &&
+          delivery?.optimizationStatus === "optimized" &&
+          delivery?.routeGroupId &&
+          !assignedDriverId
+        );
+      })
+      .forEach((delivery) => {
+        const groupId = String(delivery.routeGroupId || "");
+        if (!groups.has(groupId)) {
+          groups.set(groupId, {
+            routeGroupId: groupId,
+            routeName: delivery.routeName || "Ruta inteligente",
+            routeMeta: delivery.routeMeta || {},
+            deliveries: [],
+          });
+        }
+
+        groups.get(groupId).deliveries.push(delivery);
+      });
+
+    return Array.from(groups.values())
+      .map((group) => ({
+        ...group,
+        deliveries: group.deliveries.sort((a, b) => {
+          const aOrder = Number(a?.routeOrder || 9999);
+          const bOrder = Number(b?.routeOrder || 9999);
+          return aOrder - bOrder;
+        }),
+      }))
+      .sort((a, b) => String(a.routeName).localeCompare(String(b.routeName)));
+  }, [deliveries]);
+
+  const currentSmartRoute = useMemo(() => {
+    if (lastOptimizedRoute?.routeGroupId === selectedSmartRouteGroupId) {
+      return lastOptimizedRoute;
+    }
+
+    return (
+      optimizedSmartRouteGroups.find(
+        (group) => String(group.routeGroupId) === String(selectedSmartRouteGroupId)
+      ) ||
+      optimizedSmartRouteGroups[0] ||
+      null
+    );
+  }, [lastOptimizedRoute, optimizedSmartRouteGroups, selectedSmartRouteGroupId]);
 
   const activeOrLastDelivery =
     selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
@@ -1877,6 +2106,312 @@ const EnterpriseLogistics = () => {
                 : "Guardar y asignar entrega"}
             </button>
           </form>
+        </div>
+
+        <div
+          id="rutas-inteligentes"
+          className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white shadow p-5 mb-5"
+        >
+          <div className="absolute right-0 top-0 h-28 w-28 rounded-bl-full bg-blue-50" />
+
+          <div className="relative flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between mb-5">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-xs font-bold text-blue-700 border border-blue-100">
+                🧠 Optimización operativa
+              </div>
+              <h2 className="text-2xl font-extrabold text-gray-900 mt-3">
+                Rutas inteligentes
+              </h2>
+              <p className="text-sm text-gray-500 mt-1 max-w-3xl">
+                Organiza los pedidos guardados como pendiente de ruta, calcula un orden sugerido por cercanía desde el punto de carga y asigna la ruta completa a un conductor.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-3 min-w-full lg:min-w-[520px]">
+              <div className="rounded-2xl bg-yellow-50 border border-yellow-100 p-4">
+                <p className="text-xs font-semibold text-yellow-700">Pendientes</p>
+                <p className="text-3xl font-extrabold text-yellow-700 mt-1">
+                  {pendingSmartRouteDeliveries.length}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-blue-50 border border-blue-100 p-4">
+                <p className="text-xs font-semibold text-blue-700">Rutas listas</p>
+                <p className="text-3xl font-extrabold text-blue-700 mt-1">
+                  {optimizedSmartRouteGroups.length}
+                </p>
+              </div>
+
+              <div className="rounded-2xl bg-emerald-50 border border-emerald-100 p-4 col-span-2 md:col-span-1">
+                <p className="text-xs font-semibold text-emerald-700">Conductores</p>
+                <p className="text-3xl font-extrabold text-emerald-700 mt-1">
+                  {drivers.length}
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="relative grid grid-cols-1 xl:grid-cols-3 gap-5">
+            <div className="xl:col-span-1 rounded-2xl border border-gray-200 bg-gray-50 p-4">
+              <h3 className="text-lg font-bold text-gray-900">1. Parámetros de optimización</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Si la empresa ya tiene punto base configurado en backend, puedes dejar latitud y longitud vacías. Si no, escríbelas manualmente para esta optimización.
+              </p>
+
+              <div className="grid grid-cols-1 gap-3 mt-4">
+                <input
+                  type="text"
+                  value={smartRouteName}
+                  onChange={(e) => setSmartRouteName(e.target.value)}
+                  placeholder="Nombre de ruta, ej: Ruta Sur"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
+                />
+
+                <input
+                  type="text"
+                  value={smartBaseAddress}
+                  onChange={(e) => setSmartBaseAddress(e.target.value)}
+                  placeholder="Punto de carga, ej: Central Mayorista"
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
+                />
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <input
+                    type="number"
+                    step="any"
+                    value={smartBaseLat}
+                    onChange={(e) => setSmartBaseLat(e.target.value)}
+                    placeholder="Latitud base"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
+                  />
+
+                  <input
+                    type="number"
+                    step="any"
+                    value={smartBaseLng}
+                    onChange={(e) => setSmartBaseLng(e.target.value)}
+                    placeholder="Longitud base"
+                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={handleOptimizeSmartRoutes}
+                  disabled={smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0}
+                  className={`w-full rounded-xl px-4 py-3 font-bold text-white ${
+                    smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0
+                      ? "bg-gray-300 cursor-not-allowed"
+                      : "bg-blue-600 hover:bg-blue-700"
+                  }`}
+                >
+                  {smartRoutesOptimizing ? "Optimizando ruta..." : "Optimizar pedidos pendientes"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRefreshSmartRoutes}
+                  disabled={smartRoutesLoading}
+                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-bold text-gray-700 hover:bg-gray-100"
+                >
+                  {smartRoutesLoading ? "Actualizando..." : "Actualizar pendientes"}
+                </button>
+              </div>
+            </div>
+
+            <div className="xl:col-span-2 rounded-2xl border border-gray-200 bg-white p-4">
+              <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 mb-4">
+                <div>
+                  <h3 className="text-lg font-bold text-gray-900">2. Pedidos pendientes de ruta</h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Aquí aparecen las entregas creadas con la opción “Pendiente de ruta inteligente”.
+                  </p>
+                </div>
+
+                <span className="rounded-full bg-yellow-50 px-3 py-1 text-xs font-bold text-yellow-700 border border-yellow-100">
+                  {pendingSmartRouteDeliveries.length} por organizar
+                </span>
+              </div>
+
+              {pendingSmartRouteDeliveries.length === 0 ? (
+                <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 px-4 py-8 text-center">
+                  <p className="text-sm font-semibold text-gray-700">
+                    No hay pedidos pendientes para rutas inteligentes.
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Crea una entrega y selecciona “Pendiente de ruta inteligente” como conductor.
+                  </p>
+                </div>
+              ) : (
+                <div className="max-h-[360px] overflow-y-auto pr-1 space-y-3">
+                  {pendingSmartRouteDeliveries.map((delivery, index) => {
+                    const hasCoords =
+                      Number.isFinite(Number(delivery?.deliveryLocation?.lat)) &&
+                      Number.isFinite(Number(delivery?.deliveryLocation?.lng));
+
+                    return (
+                      <div
+                        key={delivery?._id || delivery?.id || index}
+                        className="rounded-2xl border border-gray-200 bg-gray-50 p-4"
+                      >
+                        <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-2">
+                          <div>
+                            <p className="text-sm font-extrabold text-gray-900">
+                              #{delivery.invoiceNumber} · {delivery.clientName}
+                            </p>
+                            <p className="text-sm text-gray-600 mt-1">
+                              {delivery.address}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              Tel: {delivery.clientPhone || "-"} · Barrio: {delivery.neighborhood || "Sin barrio"}
+                            </p>
+                          </div>
+
+                          <span
+                            className={`rounded-full px-3 py-1 text-xs font-bold ${
+                              hasCoords
+                                ? "bg-emerald-100 text-emerald-700"
+                                : "bg-red-100 text-red-700"
+                            }`}
+                          >
+                            {hasCoords ? "Con coordenadas" : "Sin coordenadas"}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="relative mt-5 rounded-2xl border border-blue-100 bg-gradient-to-r from-blue-50 to-indigo-50 p-4">
+            <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4">
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900">3. Ruta optimizada y asignación</h3>
+                <p className="text-xs text-gray-500 mt-1">
+                  Después de optimizar, revisa el orden sugerido y asigna toda la ruta a un conductor.
+                </p>
+
+                {optimizedSmartRouteGroups.length > 0 ? (
+                  <select
+                    value={selectedSmartRouteGroupId || currentSmartRoute?.routeGroupId || ""}
+                    onChange={(e) => setSelectedSmartRouteGroupId(e.target.value)}
+                    className="mt-3 w-full rounded-xl border border-blue-100 bg-white px-4 py-3 outline-none"
+                  >
+                    <option value="">Seleccionar ruta optimizada</option>
+                    {optimizedSmartRouteGroups.map((route) => (
+                      <option key={route.routeGroupId} value={route.routeGroupId}>
+                        {route.routeName} · {route.deliveries.length} pedidos
+                      </option>
+                    ))}
+                  </select>
+                ) : null}
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-3 w-full lg:w-[560px]">
+                <select
+                  value={selectedSmartDriverId}
+                  onChange={(e) => setSelectedSmartDriverId(e.target.value)}
+                  className="w-full rounded-xl border border-blue-100 bg-white px-4 py-3 outline-none"
+                >
+                  <option value="">Seleccionar conductor para asignar ruta</option>
+                  {drivers.map((driver) => (
+                    <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
+                      {driver.name} - CC {driver.cedula} - {driver.vehicle}
+                    </option>
+                  ))}
+                </select>
+
+                <button
+                  type="button"
+                  onClick={handleAssignSmartRoute}
+                  disabled={
+                    smartRoutesAssigning ||
+                    !selectedSmartDriverId ||
+                    !(selectedSmartRouteGroupId || currentSmartRoute?.routeGroupId)
+                  }
+                  className={`rounded-xl px-5 py-3 font-bold text-white ${
+                    smartRoutesAssigning ||
+                    !selectedSmartDriverId ||
+                    !(selectedSmartRouteGroupId || currentSmartRoute?.routeGroupId)
+                      ? "bg-gray-300 cursor-not-allowed"
+                      : "bg-emerald-600 hover:bg-emerald-700"
+                  }`}
+                >
+                  {smartRoutesAssigning ? "Asignando..." : "Asignar ruta"}
+                </button>
+              </div>
+            </div>
+
+            {currentSmartRoute ? (
+              <div className="mt-4 rounded-2xl border border-blue-100 bg-white p-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+                  <div className="rounded-xl bg-blue-50 p-3">
+                    <p className="text-xs font-semibold text-blue-700">Ruta</p>
+                    <p className="font-bold text-gray-900 mt-1">
+                      {currentSmartRoute.routeName || "Ruta inteligente"}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-indigo-50 p-3">
+                    <p className="text-xs font-semibold text-indigo-700">Paradas</p>
+                    <p className="font-bold text-gray-900 mt-1">
+                      {currentSmartRoute.deliveries?.length || currentSmartRoute.totalStops || 0}
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-emerald-50 p-3">
+                    <p className="text-xs font-semibold text-emerald-700">Distancia estimada</p>
+                    <p className="font-bold text-gray-900 mt-1">
+                      {Number(
+                        currentSmartRoute.estimatedDistanceKm ||
+                          currentSmartRoute.routeMeta?.estimatedDistanceKm ||
+                          0
+                      ).toFixed(2)} km
+                    </p>
+                  </div>
+
+                  <div className="rounded-xl bg-amber-50 p-3">
+                    <p className="text-xs font-semibold text-amber-700">Tiempo estimado</p>
+                    <p className="font-bold text-gray-900 mt-1">
+                      {Number(
+                        currentSmartRoute.estimatedDurationMin ||
+                          currentSmartRoute.routeMeta?.estimatedDurationMin ||
+                          0
+                      )} min
+                    </p>
+                  </div>
+                </div>
+
+                <div className="space-y-2 max-h-[320px] overflow-y-auto pr-1">
+                  {(currentSmartRoute.deliveries || []).map((delivery, index) => (
+                    <div
+                      key={delivery?._id || delivery?.id || index}
+                      className="flex flex-col md:flex-row md:items-center gap-3 rounded-xl border border-gray-100 bg-gray-50 p-3"
+                    >
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-blue-600 text-sm font-extrabold text-white">
+                        {delivery.routeOrder || index + 1}
+                      </div>
+
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-gray-900">
+                          #{delivery.invoiceNumber} · {delivery.clientName}
+                        </p>
+                        <p className="text-xs text-gray-600 mt-1">
+                          {delivery.address}
+                        </p>
+                      </div>
+
+                      <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-gray-600 border border-gray-200">
+                        {delivery.neighborhood || "Sin barrio"}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         <div className="bg-white rounded-2xl shadow p-5 mb-5">

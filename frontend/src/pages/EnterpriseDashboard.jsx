@@ -8,6 +8,7 @@ const EnterpriseDashboard = () => {
   const [driversCount, setDriversCount] = useState(0);
   const [deliveriesInProgress, setDeliveriesInProgress] = useState(0);
   const [deliveriesFinishedToday, setDeliveriesFinishedToday] = useState(0);
+  const [pendingSmartRoutes, setPendingSmartRoutes] = useState(0);
   const [loading, setLoading] = useState(true);
 
   const parseJsonSafe = async (response, label = "API") => {
@@ -47,6 +48,7 @@ const EnterpriseDashboard = () => {
         driversResponse,
         "GET /enterprise-drivers"
       );
+
       const deliveriesData = await parseJsonSafe(
         deliveriesResponse,
         "GET /enterprise-deliveries"
@@ -88,8 +90,24 @@ const EnterpriseDashboard = () => {
         );
       }).length;
 
+      const pendingRoutes = deliveries.filter((delivery) => {
+        const assignedDriverId =
+          delivery?.assignedDriverId?._id ||
+          delivery?.assignedDriverId ||
+          delivery?.driver?._id ||
+          delivery?.driver ||
+          "";
+
+        return (
+          delivery?.status === "Pendiente" &&
+          delivery?.optimizationStatus === "pending" &&
+          !assignedDriverId
+        );
+      }).length;
+
       setDeliveriesInProgress(inProgress);
       setDeliveriesFinishedToday(finishedToday);
+      setPendingSmartRoutes(pendingRoutes);
     } catch (error) {
       console.error("Error cargando estadísticas empresariales:", error);
       alert(error.message || "Error cargando estadísticas.");
@@ -153,6 +171,17 @@ const EnterpriseDashboard = () => {
       icon: "📦",
       badge: "Operación",
       accent: "from-violet-500 to-indigo-500",
+    },
+    {
+      to: "/enterprise-logistics#rutas-inteligentes",
+      title: "Rutas inteligentes",
+      description:
+        pendingSmartRoutes > 0
+          ? `Tienes ${pendingSmartRoutes} pedido${pendingSmartRoutes === 1 ? "" : "s"} pendiente${pendingSmartRoutes === 1 ? "" : "s"} para organizar por cercanía.`
+          : "Organiza pedidos pendientes por cercanía, optimiza recorridos y asigna rutas completas a conductores.",
+      icon: "🧠",
+      badge: pendingSmartRoutes > 0 ? `${pendingSmartRoutes} pendientes` : "Inteligencia",
+      accent: "from-sky-500 to-blue-600",
     },
     {
       to: "/enterprise-clients",
@@ -252,6 +281,32 @@ const EnterpriseDashboard = () => {
       </div>
 
       <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
+        {pendingSmartRoutes > 0 ? (
+          <Link
+            to="/enterprise-logistics#rutas-inteligentes"
+            className="mb-6 block rounded-[28px] border border-blue-200 bg-gradient-to-r from-blue-50 to-sky-50 p-5 shadow-[0_12px_35px_rgba(37,99,235,0.12)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(37,99,235,0.18)]"
+          >
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <p className="text-sm font-bold text-blue-700">
+                  🧠 Rutas inteligentes pendientes
+                </p>
+                <h2 className="mt-1 text-xl font-extrabold text-slate-900">
+                  Tienes {pendingSmartRoutes} pedido
+                  {pendingSmartRoutes === 1 ? "" : "s"} esperando organización de ruta
+                </h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Entra al panel de logística para optimizar por cercanía y asignar la ruta completa a un conductor.
+                </p>
+              </div>
+
+              <div className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">
+                Abrir rutas inteligentes →
+              </div>
+            </div>
+          </Link>
+        ) : null}
+
         <div className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
           <div>
             <h2 className="text-xl font-extrabold text-slate-900">
