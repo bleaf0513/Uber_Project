@@ -7,6 +7,7 @@ import EnterpriseDeliveryChat from "./EnterpriseDeliveryChat";
 
 const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
+const PENDING_ROUTE_VALUE = "PENDING_ROUTE";
 
 const TRUCK_SVG = `
 <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
@@ -653,6 +654,11 @@ const EnterpriseLogistics = () => {
         String(a?.invoiceNumber || "") !== String(b?.invoiceNumber || "") ||
         String(a?.invoiceValue || "") !== String(b?.invoiceValue || "") ||
         String(a?.paymentMethod || "") !== String(b?.paymentMethod || "") ||
+        String(a?.assignedDriverName || "") !== String(b?.assignedDriverName || "") ||
+        String(a?.optimizationStatus || "") !== String(b?.optimizationStatus || "") ||
+        String(a?.routeGroupId || "") !== String(b?.routeGroupId || "") ||
+        String(a?.routeName || "") !== String(b?.routeName || "") ||
+        String(a?.routeOrder || "") !== String(b?.routeOrder || "") ||
         String(aDriverId) !== String(bDriverId)
       ) {
         return false;
@@ -960,7 +966,11 @@ const EnterpriseLogistics = () => {
     const candidateDeliveries = [...deliveries]
       .filter((delivery) => {
         const status = String(delivery?.status || "");
-        return status === "Pendiente" || status === "En curso" || status === "Finalizada";
+        const assignedDriverId = getDeliveryAssignedId(delivery);
+        return (
+          Boolean(assignedDriverId) &&
+          (status === "Pendiente" || status === "En curso" || status === "Finalizada")
+        );
       })
       .sort((a, b) => {
         const aTime = new Date(
@@ -1251,17 +1261,21 @@ const EnterpriseLogistics = () => {
     } = formData;
 
     if (!invoiceNumber || !clientId || !assignedDriverId) {
-      alert("Debes seleccionar cliente, número de factura y conductor.");
+      alert("Debes seleccionar cliente, número de factura y conductor o pendiente de ruta.");
       return;
     }
 
-    const selectedDriver = drivers.find(
-      (driver) => driverIdValue(driver) === String(assignedDriverId)
-    );
+    const isPendingRoute = String(assignedDriverId) === PENDING_ROUTE_VALUE;
 
-    if (!selectedDriver) {
-      alert("Debes seleccionar un conductor válido.");
-      return;
+    if (!isPendingRoute) {
+      const selectedDriver = drivers.find(
+        (driver) => driverIdValue(driver) === String(assignedDriverId)
+      );
+
+      if (!selectedDriver) {
+        alert("Debes seleccionar un conductor válido.");
+        return;
+      }
     }
 
     const currentClient =
@@ -1288,6 +1302,24 @@ const EnterpriseLogistics = () => {
           invoiceValue: Number(invoiceValue || 0),
           paymentMethod: paymentMethod || "Efectivo",
           notes,
+
+          // Coordenadas del cliente para rutas inteligentes.
+          // Si el cliente todavía no tiene lat/lng, el backend lo guardará sin coordenadas.
+          lat:
+            currentClient?.deliveryLocation?.lat ??
+            currentClient?.location?.lat ??
+            currentClient?.lat ??
+            null,
+          lng:
+            currentClient?.deliveryLocation?.lng ??
+            currentClient?.location?.lng ??
+            currentClient?.lng ??
+            null,
+          formattedAddress:
+            currentClient?.deliveryLocation?.formattedAddress ||
+            currentClient?.formattedAddress ||
+            currentClient?.address ||
+            "",
         }),
       });
 
@@ -1302,7 +1334,11 @@ const EnterpriseLogistics = () => {
       await fetchDeliveries(true);
       await fetchDrivers(true);
 
-      alert("Entrega guardada y asignada correctamente.");
+      alert(
+        isPendingRoute
+          ? "Entrega guardada como pendiente de ruta inteligente."
+          : "Entrega guardada y asignada correctamente."
+      );
     } catch (error) {
       console.error("Error guardando la entrega:", error);
       alert(error.message || "No fue posible guardar la entrega.");
@@ -1787,6 +1823,11 @@ const EnterpriseLogistics = () => {
                   ? "No hay conductores disponibles"
                   : "Seleccionar conductor"}
               </option>
+
+              <option value={PENDING_ROUTE_VALUE}>
+                Pendiente de ruta inteligente
+              </option>
+
               {drivers.map((driver) => (
                 <option key={driverIdValue(driver)} value={driverIdValue(driver)}>
                   {driver.name} - CC {driver.cedula} - {driver.vehicle}
@@ -1829,7 +1870,11 @@ const EnterpriseLogistics = () => {
               disabled={savingDelivery}
               className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-60"
             >
-              {savingDelivery ? "Guardando..." : "Guardar y asignar entrega"}
+              {savingDelivery
+                ? "Guardando..."
+                : formData.assignedDriverId === PENDING_ROUTE_VALUE
+                ? "Guardar como pendiente de ruta"
+                : "Guardar y asignar entrega"}
             </button>
           </form>
         </div>
@@ -2361,7 +2406,9 @@ const EnterpriseLogistics = () => {
                       Asignado a:{" "}
                       {delivery.assignedDriverName ||
                         delivery.assignedDriverId?.name ||
-                        "Sin nombre"}
+                        (delivery.optimizationStatus === "pending"
+                          ? "Pendiente de ruta inteligente"
+                          : "Sin nombre")}
                     </p>
 
                     <p className="text-sm text-gray-700 mt-1">

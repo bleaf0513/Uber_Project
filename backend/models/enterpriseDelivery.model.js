@@ -58,10 +58,26 @@ const enterpriseDeliverySchema = new mongoose.Schema(
             trim: true,
         },
 
+        deliveryLocation: {
+            lat: {
+                type: Number,
+                default: null,
+            },
+            lng: {
+                type: Number,
+                default: null,
+            },
+            formattedAddress: {
+                type: String,
+                default: '',
+                trim: true,
+            },
+        },
+
         assignedDriverId: {
             type: mongoose.Schema.Types.ObjectId,
             ref: 'EnterpriseDriver',
-            required: true,
+            default: null,
             index: true,
         },
 
@@ -96,6 +112,57 @@ const enterpriseDeliverySchema = new mongoose.Schema(
             index: true,
         },
 
+        optimizationStatus: {
+            type: String,
+            enum: ['none', 'pending', 'optimized', 'assigned'],
+            default: 'none',
+            index: true,
+        },
+
+        routeGroupId: {
+            type: String,
+            default: '',
+            trim: true,
+            index: true,
+        },
+
+        routeName: {
+            type: String,
+            default: '',
+            trim: true,
+        },
+
+        routeOrder: {
+            type: Number,
+            default: null,
+            index: true,
+        },
+
+        routeMeta: {
+            estimatedDistanceKm: {
+                type: Number,
+                default: 0,
+            },
+            estimatedDurationMin: {
+                type: Number,
+                default: 0,
+            },
+            totalStopsInRoute: {
+                type: Number,
+                default: 0,
+            },
+        },
+
+        optimizedAt: {
+            type: Date,
+            default: null,
+        },
+
+        assignedAt: {
+            type: Date,
+            default: null,
+        },
+
         startedAt: {
             type: Date,
             default: null,
@@ -116,5 +183,9 @@ enterpriseDeliverySchema.index({ enterprise: 1, status: 1 });
 enterpriseDeliverySchema.index({ enterprise: 1, assignedDriverId: 1, status: 1 });
 enterpriseDeliverySchema.index({ enterprise: 1, clientId: 1 });
 enterpriseDeliverySchema.index({ enterprise: 1, invoiceNumber: 1 });
+
+enterpriseDeliverySchema.index({ enterprise: 1, optimizationStatus: 1, createdAt: -1 });
+enterpriseDeliverySchema.index({ enterprise: 1, routeGroupId: 1, routeOrder: 1 });
+enterpriseDeliverySchema.index({ enterprise: 1, assignedDriverId: 1, routeGroupId: 1 });
 
 module.exports = mongoose.model('EnterpriseDelivery', enterpriseDeliverySchema);
