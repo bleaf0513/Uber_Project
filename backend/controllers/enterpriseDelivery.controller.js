@@ -4,6 +4,16 @@ const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 const EnterpriseDriver = require('../models/enterpriseDriver.model');
 const EnterpriseClient = require('../models/enterpriseClient.model');
 
+let mapService = null;
+
+try {
+    mapService = require('../services/maps.service');
+} catch (error) {
+    console.warn(
+        '[enterpriseDelivery.controller] No se pudo cargar maps.service. La optimización seguirá funcionando solo con coordenadas ya guardadas.'
+    );
+}
+
 const PENDING_ROUTE_VALUE = 'PENDING_ROUTE';
 const PENDING_ROUTE_NAME = 'Pendiente de ruta inteligente';
 
@@ -21,11 +31,134 @@ const normalizeCoordinate = (value) => {
 };
 
 const hasValidLocation = (location) => {
-    return (
-        location &&
-        Number.isFinite(Number(location.lat)) &&
-        Number.isFinite(Number(location.lng))
+    const lat = Number(location?.lat);
+    const lng = Number(location?.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        return false;
+    }
+
+    /**
+     * 0,0 no es una ubicación útil para Colombia.
+     * Ese punto queda en el océano y hacía que la ruta saliera en 0.00 km.
+     */
+    if (lat === 0 && lng === 0) {
+        return false;
+    }
+
+    return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+};
+
+const normalizeGoogleCoordinates = (coordinates) => {
+    if (!coordinates) return null;
+
+    const lat = Number(
+        coordinates.lat ??
+            coordinates.ltd ??
+            coordinates.latitude ??
+            coordinates.location?.lat ??
+            coordinates.geometry?.location?.lat ??
+            coordinates.coordinates?.lat
     );
+
+    const lng = Number(
+        coordinates.lng ??
+            coordinates.longitude ??
+            coordinates.location?.lng ??
+            coordinates.geometry?.location?.lng ??
+            coordinates.coordinates?.lng
+    );
+
+    const location = {
+        lat,
+        lng,
+        formattedAddress: normalizeString(
+            coordinates.formattedAddress ||
+                coordinates.formatted_address ||
+                coordinates.address ||
+                coordinates.name
+        ),
+    };
+
+    return hasValidLocation(location) ? location : null;
+};
+
+const callMapServiceCoordinates = async (address) => {
+    const cleanAddress = normalizeString(address);
+
+    if (!cleanAddress || !mapService) {
+        return null;
+    }
+
+    /**
+     * Soporte flexible por si tu servicio tiene otro nombre de función.
+     * Esto evita romper el backend si maps.service está escrito distinto.
+     */
+    const possibleMethods = [
+        'getAddressCoordinates',
+        'getCoordinates',
+        'getCoordinatesFromAddress',
+        'getLocationFromAddress',
+        'geocodeAddress',
+    ];
+
+    for (const methodName of possibleMethods) {
+        if (typeof mapService[methodName] !== 'function') {
+            continue;
+        }
+
+        try {
+            const coordinates = await mapService[methodName](cleanAddress);
+            const normalized = normalizeGoogleCoordinates(coordinates);
+
+            if (normalized) {
+                return normalized;
+            }
+        } catch (error) {
+            console.error(`[maps.service.${methodName}] No resolvió coordenadas:`, {
+                address: cleanAddress,
+                error: error.message,
+            });
+        }
+    }
+
+    return null;
+};
+
+const resolveDeliveryLocation = async ({
+    currentLocation,
+    address,
+    formattedAddress,
+}) => {
+    if (hasValidLocation(currentLocation)) {
+        return {
+            lat: Number(currentLocation.lat),
+            lng: Number(currentLocation.lng),
+            formattedAddress: normalizeString(
+                currentLocation.formattedAddress ||
+                    formattedAddress ||
+                    address
+            ),
+        };
+    }
+
+    const cleanAddress = normalizeString(formattedAddress || address);
+
+    if (!cleanAddress) {
+        return null;
+    }
+
+    const resolved = await callMapServiceCoordinates(cleanAddress);
+
+    if (!resolved) {
+        return null;
+    }
+
+    return {
+        lat: resolved.lat,
+        lng: resolved.lng,
+        formattedAddress: resolved.formattedAddress || cleanAddress,
+    };
 };
 
 const toRad = (degrees) => {
@@ -64,11 +197,6 @@ const buildRouteGroupId = () => {
 };
 
 const estimateDurationMin = (distanceKm) => {
-    /**
-     * Estimación sencilla para V1:
-     * velocidad urbana promedio aproximada de 22 km/h.
-     * Más adelante podemos reemplazar esto por Google Distance Matrix / Routes API.
-     */
     const avgUrbanSpeedKmH = 22;
 
     if (!Number.isFinite(distanceKm) || distanceKm <= 0) {
@@ -280,8 +408,18 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
 
         const safeInvoiceValue = Math.max(0, normalizeNumber(invoiceValue, 0));
 
-        const finalLat = normalizeCoordinate(deliveryLat ?? lat);
-        const finalLng = normalizeCoordinate(deliveryLng ?? lng);
+        const incomingLat = normalizeCoordinate(deliveryLat ?? lat);
+        const incomingLng = normalizeCoordinate(deliveryLng ?? lng);
+
+        const resolvedDeliveryLocation = await resolveDeliveryLocation({
+            currentLocation: {
+                lat: incomingLat,
+                lng: incomingLng,
+                formattedAddress: normalizeString(formattedAddress || resolvedAddress),
+            },
+            address: resolvedAddress,
+            formattedAddress: formattedAddress || resolvedAddress,
+        });
 
         const deliveryPayload = {
             enterprise: req.enterprise._id,
@@ -315,12 +453,8 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
             assignedAt: isPendingRoute ? null : new Date(),
         };
 
-        if (finalLat !== null || finalLng !== null || formattedAddress) {
-            deliveryPayload.deliveryLocation = {
-                lat: finalLat,
-                lng: finalLng,
-                formattedAddress: normalizeString(formattedAddress || resolvedAddress),
-            };
+        if (resolvedDeliveryLocation) {
+            deliveryPayload.deliveryLocation = resolvedDeliveryLocation;
         }
 
         const delivery = await EnterpriseDelivery.create(deliveryPayload);
@@ -336,21 +470,17 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
             delivery: populatedDelivery,
         });
     } catch (error) {
-    console.error('Error creando entrega:', error);
+        console.error('Error creando entrega:', error);
 
-    return res.status(500).json({
-        message: error.message || 'Error creando entrega.',
-        error: error.name || 'Error',
-        details: error.errors || null,
-        stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
-    });
-}
+        return res.status(500).json({
+            message: error.message || 'Error creando entrega.',
+            error: error.name || 'Error',
+            details: error.errors || null,
+            stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+        });
+    }
 };
 
-/**
- * RUTAS INTELIGENTES
- * Trae las entregas pendientes de optimización.
- */
 module.exports.getPendingRouteDeliveries = async (req, res) => {
     try {
         const deliveries = await EnterpriseDelivery.find({
@@ -389,23 +519,9 @@ module.exports.getPendingRouteDeliveries = async (req, res) => {
     }
 };
 
-/**
- * RUTAS INTELIGENTES
- * Optimiza por cercanía desde el punto base de la empresa.
- *
- * V1:
- * - Toma pedidos pendientes.
- * - Usa baseLocation de la empresa o baseLocation enviada en el body.
- * - Ordena por el vecino más cercano.
- * - Guarda routeGroupId, routeName y routeOrder.
- */
 module.exports.optimizeEnterpriseRoutes = async (req, res) => {
     try {
-        const {
-            routeName,
-            baseLocation,
-            deliveryIds,
-        } = req.body;
+        const { routeName, baseLocation, deliveryIds } = req.body;
 
         const enterprise = await Enterprise.findOne({
             _id: req.enterprise._id,
@@ -417,22 +533,61 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
             });
         }
 
-        const bodyBaseLat = normalizeCoordinate(baseLocation?.lat);
-        const bodyBaseLng = normalizeCoordinate(baseLocation?.lng);
-
-        const origin = {
-            lat: bodyBaseLat ?? normalizeCoordinate(enterprise.baseLocation?.lat),
-            lng: bodyBaseLng ?? normalizeCoordinate(enterprise.baseLocation?.lng),
-            address:
-                normalizeString(baseLocation?.address) ||
-                normalizeString(enterprise.baseLocation?.address) ||
-                normalizeString(enterprise.companyName),
+        const bodyOrigin = {
+            lat: normalizeCoordinate(baseLocation?.lat),
+            lng: normalizeCoordinate(baseLocation?.lng),
+            formattedAddress: normalizeString(
+                baseLocation?.formattedAddress || baseLocation?.address
+            ),
         };
+
+        let origin = hasValidLocation(bodyOrigin)
+            ? {
+                  lat: bodyOrigin.lat,
+                  lng: bodyOrigin.lng,
+                  address:
+                      normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
+                      normalizeString(enterprise.companyName),
+              }
+            : null;
+
+        if (!origin && hasValidLocation(enterprise.baseLocation)) {
+            origin = {
+                lat: Number(enterprise.baseLocation.lat),
+                lng: Number(enterprise.baseLocation.lng),
+                address:
+                    normalizeString(enterprise.baseLocation.formattedAddress) ||
+                    normalizeString(enterprise.baseLocation.address) ||
+                    normalizeString(enterprise.companyName),
+            };
+        }
+
+        if (!origin) {
+            const resolvedOrigin = await resolveDeliveryLocation({
+                currentLocation: null,
+                address:
+                    normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
+                    normalizeString(enterprise.baseLocation?.formattedAddress) ||
+                    normalizeString(enterprise.baseLocation?.address),
+                formattedAddress:
+                    normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
+                    normalizeString(enterprise.baseLocation?.formattedAddress) ||
+                    normalizeString(enterprise.baseLocation?.address),
+            });
+
+            if (resolvedOrigin) {
+                origin = {
+                    lat: resolvedOrigin.lat,
+                    lng: resolvedOrigin.lng,
+                    address: resolvedOrigin.formattedAddress,
+                };
+            }
+        }
 
         if (!hasValidLocation(origin)) {
             return res.status(400).json({
                 message:
-                    'Primero debes configurar el punto de carga de la empresa o enviar baseLocation con lat y lng.',
+                    'Primero debes configurar el punto de carga de la empresa o enviar baseLocation con lat y lng válidos.',
             });
         }
 
@@ -459,11 +614,34 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
             });
         }
 
-        const deliveriesWithLocation = deliveries.filter((delivery) =>
+        const deliveriesReadyForOptimization = [];
+
+        for (const delivery of deliveries) {
+            if (hasValidLocation(delivery.deliveryLocation)) {
+                deliveriesReadyForOptimization.push(delivery);
+                continue;
+            }
+
+            const resolvedLocation = await resolveDeliveryLocation({
+                currentLocation: delivery.deliveryLocation,
+                address: delivery.address,
+                formattedAddress:
+                    delivery.deliveryLocation?.formattedAddress || delivery.address,
+            });
+
+            if (resolvedLocation) {
+                delivery.deliveryLocation = resolvedLocation;
+                await delivery.save();
+            }
+
+            deliveriesReadyForOptimization.push(delivery);
+        }
+
+        const deliveriesWithLocation = deliveriesReadyForOptimization.filter((delivery) =>
             hasValidLocation(delivery.deliveryLocation)
         );
 
-        const deliveriesWithoutLocation = deliveries.filter(
+        const deliveriesWithoutLocation = deliveriesReadyForOptimization.filter(
             (delivery) => !hasValidLocation(delivery.deliveryLocation)
         );
 
@@ -482,7 +660,8 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
 
         const routeGroupId = buildRouteGroupId();
         const finalRouteName =
-            normalizeString(routeName) || `Ruta inteligente ${new Date().toLocaleDateString('es-CO')}`;
+            normalizeString(routeName) ||
+            `Ruta inteligente ${new Date().toLocaleDateString('es-CO')}`;
 
         const optimized = optimizeNearestNeighbor(origin, deliveriesWithLocation);
 
@@ -543,21 +722,16 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
     } catch (error) {
         console.error('Error optimizando rutas:', error);
         return res.status(500).json({
-            message: 'Error optimizando rutas.',
+            message: error.message || 'Error optimizando rutas.',
+            error: error.name || 'Error',
+            details: error.errors || null,
         });
     }
 };
 
-/**
- * RUTAS INTELIGENTES
- * Asigna una ruta ya optimizada a un conductor.
- */
 module.exports.assignOptimizedRoute = async (req, res) => {
     try {
-        const {
-            routeGroupId,
-            assignedDriverId,
-        } = req.body;
+        const { routeGroupId, assignedDriverId } = req.body;
 
         if (!routeGroupId) {
             return res.status(400).json({
