@@ -511,6 +511,7 @@ const emptyFormData = {
 };
 
 const EnterpriseLogistics = () => {
+  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const todayDate = new Date().toISOString().slice(0, 10);
 
   const [drivers, setDrivers] = useState([]);
@@ -569,6 +570,13 @@ const EnterpriseLogistics = () => {
   const [selectedSmartDriverId, setSelectedSmartDriverId] = useState("");
   const [selectedSmartRouteGroupId, setSelectedSmartRouteGroupId] = useState("");
   const [lastOptimizedRoute, setLastOptimizedRoute] = useState(null);
+  const [smartBasePlaceId, setSmartBasePlaceId] = useState("");
+  const [smartBaseFormattedAddress, setSmartBaseFormattedAddress] = useState("");
+  const [smartBaseValidated, setSmartBaseValidated] = useState(false);
+  const [smartBaseMapPreviewUrl, setSmartBaseMapPreviewUrl] = useState("");
+
+  const smartBaseInputRef = useRef(null);
+  const smartBaseAutocompleteRef = useRef(null);
 
   const driverIdValue = (driver) => String(driver?._id || driver?.id || "");
   const clientIdValue = (client) => String(client?._id || client?.id || "");
@@ -1192,6 +1200,104 @@ const EnterpriseLogistics = () => {
     };
   }, []);
 
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps?.places || !smartBaseInputRef.current) {
+      return;
+    }
+
+    if (smartBaseAutocompleteRef.current) {
+      return;
+    }
+
+    const autocomplete = new window.google.maps.places.Autocomplete(
+      smartBaseInputRef.current,
+      {
+        fields: ["formatted_address", "geometry", "name", "place_id"],
+        componentRestrictions: { country: "co" },
+      }
+    );
+
+    smartBaseAutocompleteRef.current = autocomplete;
+
+    const listener = autocomplete.addListener("place_changed", () => {
+      const place = autocomplete.getPlace();
+
+      if (!place?.geometry?.location) {
+        setSmartBaseValidated(false);
+        alert("No se pudieron obtener coordenadas para esa dirección. Selecciona una sugerencia de Google Maps.");
+        return;
+      }
+
+      const lat = place.geometry.location.lat();
+      const lng = place.geometry.location.lng();
+      const formattedAddress =
+        place.formatted_address ||
+        place.name ||
+        smartBaseInputRef.current?.value ||
+        "";
+
+      setSmartBaseAddress(formattedAddress);
+      setSmartBaseFormattedAddress(formattedAddress);
+      setSmartBaseLat(String(lat));
+      setSmartBaseLng(String(lng));
+      setSmartBasePlaceId(place.place_id || "");
+      setSmartBaseValidated(true);
+      setSmartBaseMapPreviewUrl(
+        `https://www.google.com/maps?q=${encodeURIComponent(`${lat},${lng}`)}`
+      );
+    });
+
+    return () => {
+      if (listener && window.google?.maps?.event) {
+        window.google.maps.event.removeListener(listener);
+      }
+    };
+  }, [mapsApiLoaded]);
+
+  const handleManualBaseAddressChange = (value) => {
+    setSmartBaseAddress(value);
+    setSmartBaseFormattedAddress("");
+    setSmartBasePlaceId("");
+    setSmartBaseValidated(false);
+    setSmartBaseMapPreviewUrl("");
+  };
+
+  const handleManualBaseCoordinateChange = (field, value) => {
+    if (field === "lat") {
+      setSmartBaseLat(value);
+    } else {
+      setSmartBaseLng(value);
+    }
+
+    setSmartBaseValidated(false);
+  };
+
+  const clearSmartBaseLocation = () => {
+    setSmartBaseAddress("");
+    setSmartBaseLat("");
+    setSmartBaseLng("");
+    setSmartBasePlaceId("");
+    setSmartBaseFormattedAddress("");
+    setSmartBaseValidated(false);
+    setSmartBaseMapPreviewUrl("");
+
+    if (smartBaseInputRef.current) {
+      smartBaseInputRef.current.value = "";
+      smartBaseInputRef.current.focus();
+    }
+  };
+
+  const useSavedCompanyBaseLocation = () => {
+    setSmartBaseAddress("");
+    setSmartBaseLat("");
+    setSmartBaseLng("");
+    setSmartBasePlaceId("");
+    setSmartBaseFormattedAddress("");
+    setSmartBaseValidated(false);
+    setSmartBaseMapPreviewUrl("");
+    alert("Listo. Se usará el punto base guardado en la empresa si existe en el backend.");
+  };
+
   const selectedClient = useMemo(() => {
     if (!formData.clientId) return null;
     return (
@@ -1412,14 +1518,29 @@ const EnterpriseLogistics = () => {
     const baseLat = String(smartBaseLat || "").trim();
     const baseLng = String(smartBaseLng || "").trim();
 
-    const baseLocation =
-      baseLat && baseLng
-        ? {
-            address: smartBaseAddress || "Punto de carga de la empresa",
-            lat: Number(baseLat),
-            lng: Number(baseLng),
-          }
-        : undefined;
+    const hasBaseCoordinates =
+      Number.isFinite(Number(baseLat)) && Number.isFinite(Number(baseLng));
+
+    if (!hasBaseCoordinates) {
+      const shouldUseSavedBase = window.confirm(
+        "No seleccionaste un punto de salida con coordenadas. ¿Quieres usar el punto base guardado en la empresa?"
+      );
+
+      if (!shouldUseSavedBase) return;
+    }
+
+    const baseLocation = hasBaseCoordinates
+      ? {
+          address:
+            smartBaseFormattedAddress ||
+            smartBaseAddress ||
+            "Punto de carga de la empresa",
+          lat: Number(baseLat),
+          lng: Number(baseLng),
+          placeId: smartBasePlaceId || "",
+          formattedAddress: smartBaseFormattedAddress || smartBaseAddress || "",
+        }
+      : undefined;
 
     try {
       setSmartRoutesOptimizing(true);
@@ -2152,67 +2273,204 @@ const EnterpriseLogistics = () => {
           </div>
 
           <div className="relative grid grid-cols-1 xl:grid-cols-3 gap-5">
-            <div className="xl:col-span-1 rounded-2xl border border-gray-200 bg-gray-50 p-4">
-              <h3 className="text-lg font-bold text-gray-900">1. Parámetros de optimización</h3>
-              <p className="text-xs text-gray-500 mt-1">
-                Si la empresa ya tiene punto base configurado en backend, puedes dejar latitud y longitud vacías. Si no, escríbelas manualmente para esta optimización.
-              </p>
+            <div className="xl:col-span-1 rounded-3xl border border-blue-100 bg-gradient-to-b from-slate-50 to-white p-5 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 className="text-lg font-extrabold text-gray-900">
+                    1. Parámetros de optimización
+                  </h3>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Busca el punto de salida en Google Maps. Al seleccionar una sugerencia, el sistema captura dirección, latitud, longitud y placeId automáticamente.
+                  </p>
+                </div>
 
-              <div className="grid grid-cols-1 gap-3 mt-4">
-                <input
-                  type="text"
-                  value={smartRouteName}
-                  onChange={(e) => setSmartRouteName(e.target.value)}
-                  placeholder="Nombre de ruta, ej: Ruta Sur"
-                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
-                />
+                <div className="rounded-2xl bg-blue-600 px-3 py-2 text-white shadow">
+                  📍
+                </div>
+              </div>
 
-                <input
-                  type="text"
-                  value={smartBaseAddress}
-                  onChange={(e) => setSmartBaseAddress(e.target.value)}
-                  placeholder="Punto de carga, ej: Central Mayorista"
-                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
-                />
-
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 mt-5">
+                <div>
+                  <label className="mb-1 block text-xs font-bold uppercase tracking-wide text-gray-500">
+                    Nombre de la ruta
+                  </label>
                   <input
-                    type="number"
-                    step="any"
-                    value={smartBaseLat}
-                    onChange={(e) => setSmartBaseLat(e.target.value)}
-                    placeholder="Latitud base"
-                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
+                    type="text"
+                    value={smartRouteName}
+                    onChange={(e) => setSmartRouteName(e.target.value)}
+                    placeholder="Ej: Ruta Sur, Ruta Oriente, Ruta Medellín"
+                    className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100"
                   />
+                </div>
 
-                  <input
-                    type="number"
-                    step="any"
-                    value={smartBaseLng}
-                    onChange={(e) => setSmartBaseLng(e.target.value)}
-                    placeholder="Longitud base"
-                    className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none"
-                  />
+                <div className="rounded-3xl border border-blue-100 bg-blue-50/60 p-4">
+                  <div className="mb-3 flex items-center justify-between gap-3">
+                    <div>
+                      <label className="block text-xs font-bold uppercase tracking-wide text-blue-700">
+                        Punto de salida / bodega
+                      </label>
+                      <p className="mt-1 text-xs text-blue-700/80">
+                        Selecciona una sugerencia real de Google Maps.
+                      </p>
+                    </div>
+
+                    <span
+                      className={`rounded-full px-3 py-1 text-xs font-bold ${
+                        smartBaseValidated
+                          ? "bg-emerald-100 text-emerald-700"
+                          : "bg-amber-100 text-amber-700"
+                      }`}
+                    >
+                      {smartBaseValidated ? "Dirección validada" : "Pendiente de validar"}
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      ref={smartBaseInputRef}
+                      type="text"
+                      value={smartBaseAddress}
+                      onChange={(e) => handleManualBaseAddressChange(e.target.value)}
+                      placeholder={
+                        mapsApiLoaded
+                          ? "Buscar en Google Maps: Central Mayorista, Itagüí..."
+                          : "Cargando Google Maps..."
+                      }
+                      disabled={!mapsApiLoaded}
+                      className="w-full rounded-2xl border border-blue-100 bg-white px-4 py-3 pr-12 outline-none transition focus:border-blue-500 focus:ring-4 focus:ring-blue-100 disabled:cursor-not-allowed disabled:bg-gray-100"
+                    />
+
+                    <div className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-lg">
+                      🔎
+                    </div>
+                  </div>
+
+                  {smartBaseValidated ? (
+                    <div className="mt-3 rounded-2xl border border-emerald-100 bg-white p-3">
+                      <p className="text-xs font-bold text-emerald-700">
+                        ✅ Punto de salida listo
+                      </p>
+                      <p className="mt-1 text-sm font-semibold text-gray-900">
+                        {smartBaseFormattedAddress || smartBaseAddress}
+                      </p>
+                      <p className="mt-1 text-xs text-gray-500">
+                        Lat: {Number(smartBaseLat).toFixed(6)} · Lng:{" "}
+                        {Number(smartBaseLng).toFixed(6)}
+                      </p>
+
+                      {smartBaseMapPreviewUrl ? (
+                        <button
+                          type="button"
+                          onClick={() => window.open(smartBaseMapPreviewUrl, "_blank")}
+                          className="mt-3 rounded-xl bg-emerald-50 px-3 py-2 text-xs font-bold text-emerald-700 hover:bg-emerald-100"
+                        >
+                          Ver punto en Google Maps ↗
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : (
+                    <div className="mt-3 rounded-2xl border border-amber-100 bg-amber-50 p-3">
+                      <p className="text-xs font-bold text-amber-700">
+                        ⚠️ Selecciona una sugerencia para obtener coordenadas exactas.
+                      </p>
+                      <p className="mt-1 text-xs text-amber-700">
+                        También puedes usar el punto base guardado en la empresa si ya fue configurado en el backend.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <button
+                      type="button"
+                      onClick={useSavedCompanyBaseLocation}
+                      className="rounded-xl border border-blue-200 bg-white px-3 py-2 text-xs font-bold text-blue-700 hover:bg-blue-50"
+                    >
+                      Usar punto base guardado
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={clearSmartBaseLocation}
+                      className="rounded-xl border border-gray-200 bg-white px-3 py-2 text-xs font-bold text-gray-700 hover:bg-gray-100"
+                    >
+                      Limpiar punto
+                    </button>
+                  </div>
+                </div>
+
+                <details className="rounded-2xl border border-gray-200 bg-white p-4">
+                  <summary className="cursor-pointer text-sm font-bold text-gray-800">
+                    Ajuste manual de coordenadas
+                  </summary>
+
+                  <p className="mt-2 text-xs text-gray-500">
+                    Úsalo solo si Google Maps no devuelve la dirección. Para la operación normal, selecciona el punto desde el buscador.
+                  </p>
+
+                  <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <input
+                      type="number"
+                      step="any"
+                      value={smartBaseLat}
+                      onChange={(e) => handleManualBaseCoordinateChange("lat", e.target.value)}
+                      placeholder="Latitud base"
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:border-blue-500"
+                    />
+
+                    <input
+                      type="number"
+                      step="any"
+                      value={smartBaseLng}
+                      onChange={(e) => handleManualBaseCoordinateChange("lng", e.target.value)}
+                      placeholder="Longitud base"
+                      className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 outline-none focus:border-blue-500"
+                    />
+                  </div>
+                </details>
+
+                <div className="rounded-3xl border border-gray-200 bg-white p-4">
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div>
+                      <p className="text-xs text-gray-500">Pedidos</p>
+                      <p className="text-xl font-extrabold text-gray-900">
+                        {pendingSmartRouteDeliveries.length}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Origen</p>
+                      <p className="text-sm font-bold text-gray-900">
+                        {smartBaseValidated ? "Maps" : "Base"}
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Estado</p>
+                      <p className="text-sm font-bold text-gray-900">
+                        {smartRoutesOptimizing ? "Procesando" : "Listo"}
+                      </p>
+                    </div>
+                  </div>
                 </div>
 
                 <button
                   type="button"
                   onClick={handleOptimizeSmartRoutes}
                   disabled={smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0}
-                  className={`w-full rounded-xl px-4 py-3 font-bold text-white ${
+                  className={`w-full rounded-2xl px-4 py-4 font-extrabold text-white shadow-lg transition ${
                     smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0
-                      ? "bg-gray-300 cursor-not-allowed"
-                      : "bg-blue-600 hover:bg-blue-700"
+                      ? "bg-gray-300 cursor-not-allowed shadow-none"
+                      : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:-translate-y-0.5 hover:shadow-blue-200"
                   }`}
                 >
-                  {smartRoutesOptimizing ? "Optimizando ruta..." : "Optimizar pedidos pendientes"}
+                  {smartRoutesOptimizing
+                    ? "Optimizando ruta..."
+                    : "Optimizar pedidos pendientes"}
                 </button>
 
                 <button
                   type="button"
                   onClick={handleRefreshSmartRoutes}
                   disabled={smartRoutesLoading}
-                  className="w-full rounded-xl border border-gray-200 bg-white px-4 py-3 font-bold text-gray-700 hover:bg-gray-100"
+                  className="w-full rounded-2xl border border-gray-200 bg-white px-4 py-3 font-bold text-gray-700 hover:bg-gray-100 disabled:opacity-60"
                 >
                   {smartRoutesLoading ? "Actualizando..." : "Actualizar pendientes"}
                 </button>
