@@ -26,6 +26,19 @@ const enterpriseClientRoutes = require('./routes/enterpriseClient.routes');
 
 const superAdminRoutes = require('./routes/superAdmin.routes');
 
+/**
+ * IMPORTS DIRECTOS PARA RUTAS INTELIGENTES
+ * Esto funciona como respaldo por si el router enterpriseDelivery.routes
+ * no queda tomando estas rutas en producción.
+ */
+const authEnterprise = require('./middlewares/authEnterprise');
+
+const {
+    getPendingRouteDeliveries,
+    optimizeEnterpriseRoutes,
+    assignOptimizedRoute,
+} = require('./controllers/enterpriseDelivery.controller');
+
 app.use(
     cors({
         origin: true,
@@ -54,6 +67,36 @@ app.use('/offers', offerRoutes);
 app.use('/enterprise', enterpriseRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);
 app.use('/enterprise-deliveries', enterpriseDeliveryRoutes);
+
+/**
+ * RUTAS INTELIGENTES — REGISTRO DIRECTO DE RESPALDO
+ *
+ * Estas rutas son las que necesita el frontend:
+ * GET  /enterprise-deliveries/pending-routes
+ * POST /enterprise-deliveries/optimize-routes
+ * POST /enterprise-deliveries/assign-route
+ *
+ * Si el router ya las tiene, no daña nada.
+ * Si el router no las está exponiendo en Render, estas las dejan activas.
+ */
+app.get(
+    '/enterprise-deliveries/pending-routes',
+    authEnterprise,
+    getPendingRouteDeliveries
+);
+
+app.post(
+    '/enterprise-deliveries/optimize-routes',
+    authEnterprise,
+    optimizeEnterpriseRoutes
+);
+
+app.post(
+    '/enterprise-deliveries/assign-route',
+    authEnterprise,
+    assignOptimizedRoute
+);
+
 app.use('/enterprise-clients', enterpriseClientRoutes);
 app.use('/', enterpriseChatRoutes);
 
