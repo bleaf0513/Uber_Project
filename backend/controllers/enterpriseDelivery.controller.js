@@ -336,11 +336,15 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
             delivery: populatedDelivery,
         });
     } catch (error) {
-        console.error('Error creando entrega:', error);
-        return res.status(500).json({
-            message: 'Error creando entrega.',
-        });
-    }
+    console.error('Error creando entrega:', error);
+
+    return res.status(500).json({
+        message: error.message || 'Error creando entrega.',
+        error: error.name || 'Error',
+        details: error.errors || null,
+        stack: process.env.NODE_ENV === 'production' ? undefined : error.stack,
+    });
+}
 };
 
 /**
