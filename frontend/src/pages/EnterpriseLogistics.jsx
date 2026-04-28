@@ -512,6 +512,7 @@ const emptyFormData = {
 
 const EnterpriseLogistics = () => {
   const todayDate = new Date().toISOString().slice(0, 10);
+  const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
   const [drivers, setDrivers] = useState([]);
   const [deliveries, setDeliveries] = useState([]);
@@ -1543,28 +1544,80 @@ const EnterpriseLogistics = () => {
       return [];
     }
 
-    const normalizedQuery = normalizeAddressQuery(cleanQuery);
+    if (!mapsApiLoaded || !window.google?.maps) {
+      throw new Error("Google Maps todavía no está cargado. Espera unos segundos e intenta de nuevo.");
+    }
 
-    const response = await fetch(
-      `${API_BASE}/maps/get-suggestions?input=${encodeURIComponent(normalizedQuery)}`,
-      {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      }
-    );
+    const { AutocompleteSuggestion } = await window.google.maps.importLibrary("places");
 
-    const data = await parseJsonSafe(response, "GET /maps/get-suggestions");
+    const response = await AutocompleteSuggestion.fetchAutocompleteSuggestions({
+      input: normalizeAddressQuery(cleanQuery),
+    });
 
     if (seq !== null && seq !== smartBaseSuggestionSeqRef.current) {
       return [];
     }
 
-    if (!response.ok) {
-      throw new Error(data.message || "No se pudieron cargar sugerencias de Google Maps.");
-    }
+    const rawSuggestions = response?.suggestions || [];
 
-    return extractSuggestionsFromResponse(data);
+    return rawSuggestions
+      .map((item) => item?.placePrediction)
+      .filter(Boolean)
+      .map((prediction) => {
+        const mainText = prediction?.mainText?.text || "";
+        const secondaryText = prediction?.secondaryText?.text || "";
+        const description =
+          prediction?.text?.text ||
+          [mainText, secondaryText].filter(Boolean).join(", ");
+
+        return {
+          description: description || "",
+          place_id: prediction?.placeId || "",
+          mainText,
+          secondaryText,
+        };
+      })
+      .filter((item) => item.description)
+      .slice(0, 8);
+  };
+
+  const geocodeSmartBasePoint = ({ label, placeId }) => {
+    return new Promise((resolve, reject) => {
+      if (!mapsApiLoaded || !window.google?.maps) {
+        reject(new Error("Google Maps todavía no está cargado. Espera unos segundos e intenta de nuevo."));
+        return;
+      }
+
+      const geocoder = new window.google.maps.Geocoder();
+      const request = placeId
+        ? { placeId }
+        : { address: normalizeAddressQuery(label) };
+
+      geocoder.geocode(request, (results, status) => {
+        if (status !== "OK" || !Array.isArray(results) || results.length === 0) {
+          reject(new Error("No se pudieron obtener coordenadas para esa dirección. Selecciona una sugerencia de Google Maps."));
+          return;
+        }
+
+        const first = results[0];
+        const location = first?.geometry?.location;
+        const lat = typeof location?.lat === "function" ? location.lat() : null;
+        const lng = typeof location?.lng === "function" ? location.lng() : null;
+
+        if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+          reject(new Error("Google Maps no devolvió coordenadas válidas para esa dirección."));
+          return;
+        }
+
+        resolve({
+          address: label || first?.formatted_address || "Punto de salida",
+          formattedAddress: first?.formatted_address || label || "Punto de salida",
+          placeId: placeId || first?.place_id || "",
+          lat: Number(lat),
+          lng: Number(lng),
+        });
+      });
+    });
   };
 
   const resolveSmartBaseCoordinates = async ({ label, placeId, suggestion }) => {
@@ -1583,44 +1636,10 @@ const EnterpriseLogistics = () => {
       };
     }
 
-    const params = new URLSearchParams();
-
-    if (placeId) {
-      params.set("placeId", placeId);
-    }
-
-    if (label) {
-      params.set("address", normalizeAddressQuery(label));
-    }
-
-    const response = await fetch(
-      `${API_BASE}/maps/get-coordinates?${params.toString()}`,
-      {
-        method: "GET",
-        credentials: "include",
-        cache: "no-store",
-      }
-    );
-
-    const data = await parseJsonSafe(response, "GET /maps/get-coordinates");
-
-    if (!response.ok) {
-      throw new Error(data.message || "No se pudieron obtener coordenadas para esa dirección.");
-    }
-
-    const { lat, lng } = extractCoordinatesFromResponse(data);
-
-    if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
-      throw new Error("La API de mapas no devolvió coordenadas válidas para esa dirección.");
-    }
-
-    return {
-      address: label,
-      formattedAddress: getFormattedAddressFromResponse(data, label),
-      placeId: placeId || data?.placeId || data?.place_id || "",
-      lat: Number(lat),
-      lng: Number(lng),
-    };
+    return geocodeSmartBasePoint({
+      label,
+      placeId,
+    });
   };
 
   const handleSmartBaseSearchChange = (value) => {
