@@ -5,7 +5,38 @@ import { getApiBaseUrl } from "../apiBase";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import EnterpriseDeliveryChat from "./EnterpriseDeliveryChat";
 
-const API_BASE = getApiBaseUrl();
+const PROD_API = "https://uber-project-psfi.onrender.com";
+
+const cleanApiUrl = (value) => {
+  return String(value || "").trim().replace(/\/+$/, "");
+};
+
+const API_BASE = (() => {
+  const value = cleanApiUrl(getApiBaseUrl());
+
+  // Si por alguna razón viene vacío, usamos Render.
+  if (!value) {
+    return PROD_API;
+  }
+
+  // En producción web, jamás debe usar el mismo dominio del frontend como API.
+  if (typeof window !== "undefined") {
+    const currentOrigin = cleanApiUrl(window.location.origin);
+
+    if (value === currentOrigin) {
+      return PROD_API;
+    }
+
+    if (value.includes("centralgo.mercalan.com.co")) {
+      return PROD_API;
+    }
+  }
+
+  return value;
+})();
+
+console.log("✅ API_BASE EnterpriseLogistics:", API_BASE);
+
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 const PENDING_ROUTE_VALUE = "PENDING_ROUTE";
 
