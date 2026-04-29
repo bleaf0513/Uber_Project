@@ -17,6 +17,9 @@ import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import LiveTracking from "../../components/LiveTracking";
 
+const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
   const locationWatchIdRef = useRef(null);
@@ -32,15 +35,84 @@ const CaptainHome = () => {
 
   const [ridePopup, setRidePopup] = useState(false);
   const [ride, setRide] = useState(null);
+  const [availableRides, setAvailableRides] = useState([]);
+
   const [socketReady, setSocketReady] = useState(false);
   const [locationReady, setLocationReady] = useState(false);
   const [processing, setProcessing] = useState(false);
+  const [processingRideId, setProcessingRideId] = useState(null);
 
   const [geoSupported, setGeoSupported] = useState(true);
   const [locationPermission, setLocationPermission] = useState("prompt");
   const [locationError, setLocationError] = useState("");
   const [requestingLocation, setRequestingLocation] = useState(false);
   const [showGpsPrompt, setShowGpsPrompt] = useState(false);
+
+  const formatCOP = (value) => {
+    const number = Number(value) || 0;
+
+    return new Intl.NumberFormat("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    }).format(Math.ceil(number));
+  };
+
+  const formatShortAddress = (address = "") => {
+    const safe = String(address || "").trim();
+
+    if (!safe) return "Dirección no disponible";
+
+    const parts = safe.split(",").map((item) => item.trim()).filter(Boolean);
+
+    if (parts.length <= 2) return safe;
+
+    return `${parts[0]}, ${parts[1]}`;
+  };
+
+  const getUserName = (rideData) => {
+    const user = rideData?.user || {};
+    const fullname = user?.fullname || {};
+
+    return (
+      [fullname?.firstname, fullname?.lastname].filter(Boolean).join(" ") ||
+      user?.name ||
+      "Usuario"
+    );
+  };
+
+  const upsertAvailableRide = useCallback((rideData) => {
+    if (!rideData?._id) return;
+
+    const rideId = String(rideData._id);
+
+    if (ignoredRideIdsRef.current.has(rideId)) return;
+
+    setAvailableRides((prev) => {
+      const exists = prev.some((item) => String(item._id) === rideId);
+
+      if (exists) {
+        return prev.map((item) =>
+          String(item._id) === rideId ? { ...item, ...rideData } : item
+        );
+      }
+
+      return [rideData, ...prev];
+    });
+  }, []);
+
+  const removeAvailableRide = useCallback((rideId) => {
+    if (!rideId) return;
+
+    setAvailableRides((prev) =>
+      prev.filter((item) => String(item._id) !== String(rideId))
+    );
+
+    if (String(ride?._id || "") === String(rideId)) {
+      setRidePopup(false);
+      setRide(null);
+    }
+  }, [ride?._id]);
 
   const emitCaptainJoin = useCallback(() => {
     if (!captain?._id) {
@@ -259,8 +331,6 @@ const CaptainHome = () => {
   const fetchAvailableRidesForCaptain = useCallback(async () => {
     try {
       if (!captain?._id) return;
-      if (processing) return;
-      if (ridePopup) return;
 
       const token = localStorage.getItem("token");
 
@@ -279,22 +349,19 @@ const CaptainHome = () => {
         ? response.data.rides
         : [];
 
-      const nextRide = rides.find((item) => {
+      const filteredRides = rides.filter((item) => {
         if (!item?._id) return false;
         return !ignoredRideIdsRef.current.has(String(item._id));
       });
 
-      if (!nextRide?._id) return;
-
-      setRide(nextRide);
-      setRidePopup(true);
+      setAvailableRides(filteredRides);
     } catch (error) {
       console.warn(
         "[captain-home] No se pudieron consultar viajes abiertos:",
         error?.response?.data?.message || error?.message
       );
     }
-  }, [captain?._id, processing, ridePopup]);
+  }, [captain?._id]);
 
   useEffect(() => {
     if (!socket) return;
@@ -306,6 +373,10 @@ const CaptainHome = () => {
       setTimeout(() => {
         requestAndEmitCurrentLocation("connect-refresh");
       }, 500);
+
+      setTimeout(() => {
+        fetchAvailableRidesForCaptain();
+      }, 700);
     };
 
     const onDisconnect = () => {
@@ -314,38 +385,33 @@ const CaptainHome = () => {
 
     const onNewRide = (rideData) => {
       if (!rideData?._id) return;
-
-      if (ignoredRideIdsRef.current.has(String(rideData._id))) {
-        return;
-      }
-
-      setRide(rideData);
-      setRidePopup(true);
+      upsertAvailableRide(rideData);
     };
 
     const onRideNoLongerAvailable = (payload) => {
-      const currentRideId = String(ride?._id || "");
-      const payloadRideId = String(payload?.rideId || "");
+      const payloadRideId = String(payload?.rideId || payload?._id || "");
 
-      if (currentRideId && payloadRideId && currentRideId === payloadRideId) {
-        setRidePopup(false);
-        setRide(null);
-        alert(payload?.message || "Este viaje ya fue tomado por otro conductor.");
+      if (!payloadRideId) return;
+
+      removeAvailableRide(payloadRideId);
+
+      if (payload?.message) {
+        console.log("[captain-home] ride no disponible:", payload.message);
       }
     };
 
     const onRideOfferRejected = (payload) => {
       const rideId = String(payload?._id || payload?.rideId || "");
-      const currentRideId = String(ride?._id || "");
 
-      if (rideId && currentRideId && rideId === currentRideId) {
-        alert("El usuario rechazó tu oferta para este viaje.");
-        setRidePopup(false);
-        setRide(null);
+      alert("El usuario rechazó tu oferta para este viaje.");
 
+      setRidePopup(false);
+      setRide(null);
+
+      if (rideId) {
         setTimeout(() => {
           fetchAvailableRidesForCaptain();
-        }, 1200);
+        }, 800);
       }
     };
 
@@ -360,6 +426,8 @@ const CaptainHome = () => {
         navigate("/captain-riding", {
           state: { ride: payload },
         });
+      } else if (acceptedRideId) {
+        removeAvailableRide(acceptedRideId);
       }
     };
 
@@ -396,6 +464,8 @@ const CaptainHome = () => {
     ride?._id,
     navigate,
     fetchAvailableRidesForCaptain,
+    upsertAvailableRide,
+    removeAvailableRide,
   ]);
 
   useEffect(() => {
@@ -436,18 +506,21 @@ const CaptainHome = () => {
     };
   }, [captain?._id, fetchAvailableRidesForCaptain]);
 
-  const sendRideOffer = async ({ price, message = "" }) => {
+  const sendRideOffer = async ({ targetRide, price, message = "" }) => {
     try {
-      if (!ride?._id) {
+      const rideToOffer = targetRide || ride;
+
+      if (!rideToOffer?._id) {
         return;
       }
 
       setProcessing(true);
+      setProcessingRideId(String(rideToOffer._id));
 
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/captain-offer`,
         {
-          rideId: ride._id,
+          rideId: rideToOffer._id,
           price,
           message,
         },
@@ -458,8 +531,14 @@ const CaptainHome = () => {
         }
       );
 
-      setRide(response?.data || ride);
+      const updatedRide = response?.data || rideToOffer;
+
+      setRide(updatedRide);
       setRidePopup(false);
+
+      setAvailableRides((prev) =>
+        prev.filter((item) => String(item._id) !== String(rideToOffer._id))
+      );
 
       alert("Oferta enviada al usuario correctamente.");
     } catch (error) {
@@ -469,17 +548,25 @@ const CaptainHome = () => {
       );
     } finally {
       setProcessing(false);
+      setProcessingRideId(null);
     }
   };
 
-  const confirmRide = async () => {
+  const confirmRide = async (targetRide = null) => {
     try {
-      if (!ride?._id) {
+      const rideToConfirm = targetRide || ride;
+
+      if (!rideToConfirm?._id) {
         return;
       }
 
       const currentFare =
-        Number(ride?.offeredFare ?? ride?.fare ?? ride?.suggestedFare ?? 0) || 0;
+        Number(
+          rideToConfirm?.offeredFare ??
+            rideToConfirm?.fare ??
+            rideToConfirm?.suggestedFare ??
+            0
+        ) || 0;
 
       if (!currentFare || currentFare <= 0) {
         alert("No hay un valor válido para aceptar este viaje.");
@@ -487,6 +574,7 @@ const CaptainHome = () => {
       }
 
       await sendRideOffer({
+        targetRide: rideToConfirm,
         price: currentFare,
         message: "Acepto el valor propuesto por el usuario.",
       });
@@ -497,14 +585,25 @@ const CaptainHome = () => {
 
   const handleCounterOffer = async ({ value, message }) => {
     await sendRideOffer({
+      targetRide: ride,
       price: Number(value || 0),
       message: message || "Contraoferta del conductor.",
     });
   };
 
-  const ignoreRide = () => {
-    if (ride?._id) {
-      ignoredRideIdsRef.current.add(String(ride._id));
+  const openCounterOffer = (rideData) => {
+    if (!rideData?._id) return;
+
+    setRide(rideData);
+    setRidePopup(true);
+  };
+
+  const ignoreRide = (rideData = null) => {
+    const rideToIgnore = rideData || ride;
+
+    if (rideToIgnore?._id) {
+      ignoredRideIdsRef.current.add(String(rideToIgnore._id));
+      removeAvailableRide(rideToIgnore._id);
     }
 
     setRidePopup(false);
@@ -649,29 +748,32 @@ const CaptainHome = () => {
             </div>
 
             <p className="text-[12px] text-gray-500 text-center mt-4 leading-5">
-              Sin ubicación activa el conductor no podrá ser monitoreado ni recibir
-              correctamente servicios en tiempo real.
+              Sin ubicación activa el conductor no podrá ser monitoreado ni
+              recibir correctamente servicios en tiempo real.
             </p>
           </div>
         </div>
       )}
 
-      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[52%]">
+      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[58%]">
         <div className="pt-2">
           <div className="flex justify-center py-2">
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
           </div>
 
           <div className="px-5 pb-2 flex items-center justify-between gap-3">
-            <p className="inline-flex items-center rounded-full bg-emerald-50 text-emerald-700 px-4 py-2 text-sm font-semibold">
+            <p
+              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-semibold text-white"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
               Panel del transportador
             </p>
 
-            {ride?._id && ridePopup && (
-              <div className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-2 text-xs font-bold">
-                Nueva solicitud
-              </div>
-            )}
+            <div className="inline-flex items-center rounded-full bg-purple-50 text-purple-700 px-3 py-2 text-xs font-bold">
+              {availableRides.length} solicitudes
+            </div>
           </div>
 
           {gpsBlocked && (
@@ -702,7 +804,154 @@ const CaptainHome = () => {
           <CaptainDetails />
 
           <div className="px-4 pb-5">
-            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
+            <div className="rounded-[24px] border border-purple-100 bg-purple-50 p-4 mt-2">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div>
+                  <h3 className="text-lg font-black text-gray-900">
+                    Solicitudes disponibles
+                  </h3>
+                  <p className="text-sm text-purple-700">
+                    Mira varias solicitudes y oferta solo a la que más te convenga.
+                  </p>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={fetchAvailableRidesForCaptain}
+                  className="w-11 h-11 rounded-2xl bg-white border border-purple-200 flex items-center justify-center"
+                >
+                  <i className="ri-refresh-line text-xl text-purple-700"></i>
+                </button>
+              </div>
+
+              {availableRides.length === 0 ? (
+                <div className="rounded-3xl bg-white border border-purple-100 p-5 text-center">
+                  <div
+                    className="w-16 h-16 mx-auto rounded-full flex items-center justify-center"
+                    style={{ background: PURPLE_GRADIENT }}
+                  >
+                    <i className="ri-taxi-line text-3xl text-white"></i>
+                  </div>
+
+                  <p className="text-base font-bold text-gray-900 mt-3">
+                    No hay solicitudes abiertas
+                  </p>
+
+                  <p className="text-sm text-gray-500 mt-1">
+                    Apenas un usuario cree un viaje, aparecerá aquí.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {availableRides.map((item) => {
+                    const rideId = String(item?._id || "");
+                    const isThisProcessing =
+                      processing && processingRideId === rideId;
+
+                    return (
+                      <div
+                        key={rideId}
+                        className="rounded-[24px] bg-white border border-purple-100 shadow-sm overflow-hidden"
+                      >
+                        <div
+                          className="px-4 py-3 text-white"
+                          style={{
+                            background: PURPLE_GRADIENT,
+                          }}
+                        >
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="min-w-0">
+                              <p className="text-[11px] uppercase tracking-wide text-white/80">
+                                Nueva solicitud
+                              </p>
+                              <h4 className="text-lg font-black truncate">
+                                {getUserName(item)}
+                              </h4>
+                            </div>
+
+                            <div className="text-right shrink-0">
+                              <p className="text-[11px] uppercase tracking-wide text-white/80">
+                                Oferta usuario
+                              </p>
+                              <p className="text-lg font-black">
+                                {formatCOP(
+                                  item?.offeredFare ??
+                                    item?.fare ??
+                                    item?.suggestedFare ??
+                                    0
+                                )}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="p-4 space-y-3">
+                          <div className="grid grid-cols-[42px_1fr] gap-3">
+                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center">
+                              <i className="ri-map-pin-range-fill text-purple-700 text-lg"></i>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-gray-500">
+                                Recoger en
+                              </p>
+                              <p className="text-sm font-bold text-gray-900 truncate">
+                                {formatShortAddress(item?.pickup)}
+                              </p>
+                            </div>
+
+                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center">
+                              <i className="ri-flag-fill text-purple-700 text-lg"></i>
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-bold text-gray-500">
+                                Llevar a
+                              </p>
+                              <p className="text-sm font-bold text-gray-900 truncate">
+                                {formatShortAddress(item?.destination)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-2">
+                            <button
+                              type="button"
+                              disabled={isThisProcessing}
+                              onClick={() => confirmRide(item)}
+                              className="rounded-2xl py-3 text-white text-xs font-black disabled:opacity-60"
+                              style={{
+                                background: PURPLE_GRADIENT,
+                              }}
+                            >
+                              {isThisProcessing ? "Enviando..." : "Aceptar valor"}
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={processing}
+                              onClick={() => openCounterOffer(item)}
+                              className="rounded-2xl py-3 bg-purple-100 text-purple-800 text-xs font-black disabled:opacity-60"
+                            >
+                              Contraofertar
+                            </button>
+
+                            <button
+                              type="button"
+                              disabled={processing}
+                              onClick={() => ignoreRide(item)}
+                              className="rounded-2xl py-3 bg-gray-100 text-gray-700 text-xs font-black disabled:opacity-60"
+                            >
+                              Ocultar
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-4">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">
@@ -793,8 +1042,8 @@ const CaptainHome = () => {
           <RidePopup
             setRidePopup={setRidePopup}
             ride={ride}
-            confirmRide={confirmRide}
-            onIgnoreRide={ignoreRide}
+            confirmRide={() => confirmRide(ride)}
+            onIgnoreRide={() => ignoreRide(ride)}
             onCounterOffer={handleCounterOffer}
             isSubmitting={processing}
           />
