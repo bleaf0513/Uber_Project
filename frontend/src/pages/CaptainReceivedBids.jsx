@@ -14,6 +14,7 @@ import { CaptainDataContext } from "../context/CaptainContext";
 
 const formatCOP = (value) => {
   const number = Number(value) || 0;
+
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -57,66 +58,6 @@ const getStoredCaptainId = () => {
     return parsed?._id || parsed?.id || "";
   } catch {
     return "";
-  }
-};
-
-const playOfferSound = () => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-
-    const ctx = new AudioContext();
-    const now = ctx.currentTime;
-
-    const tones = [
-      { freq: 950, start: 0 },
-      { freq: 1250, start: 0.18 },
-      { freq: 1450, start: 0.36 },
-    ];
-
-    tones.forEach((tone) => {
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(tone.freq, now + tone.start);
-
-      gain.gain.setValueAtTime(0.0001, now + tone.start);
-      gain.gain.exponentialRampToValueAtTime(0.22, now + tone.start + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.14);
-
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-
-      oscillator.start(now + tone.start);
-      oscillator.stop(now + tone.start + 0.16);
-    });
-
-    setTimeout(() => {
-      try {
-        ctx.close();
-      } catch {
-        // ignore
-      }
-    }, 900);
-  } catch (error) {
-    console.warn("No se pudo reproducir sonido:", error);
-  }
-};
-
-const showBrowserNotification = (title, body) => {
-  try {
-    if (!("Notification" in window)) return;
-
-    if (Notification.permission === "granted") {
-      new Notification(title, {
-        body,
-        icon: "/favicon.ico",
-        tag: "central-go-offer-bid",
-      });
-    }
-  } catch (error) {
-    console.warn("No se pudo mostrar notificación:", error);
   }
 };
 
@@ -165,6 +106,7 @@ const getAvailableInfo = (bid) => {
         bid.goodsOffer.quantityAvailable ??
         0
     );
+
     const unit = bid.goodsOffer.quantityUnit || "";
 
     return {
@@ -182,6 +124,7 @@ const getAvailableInfo = (bid) => {
         bid.spaceOffer.capacityAvailable ??
         0
     );
+
     const unit = bid.spaceOffer.capacityUnit || "";
 
     return {
@@ -199,6 +142,7 @@ const getAvailableInfo = (bid) => {
         bid.seatOffer.seatsAvailable ??
         0
     );
+
     const unit = bid.seatOffer.seatUnit || "";
 
     return {
@@ -303,7 +247,6 @@ const CaptainReceivedBids = () => {
   const [counterInputs, setCounterInputs] = useState({});
   const [message, setMessage] = useState("");
   const [socketStatus, setSocketStatus] = useState("Desconectado");
-  const [soundEnabled, setSoundEnabled] = useState(false);
   const [notificationBanner, setNotificationBanner] = useState(null);
 
   const socketRef = useRef(null);
@@ -340,6 +283,7 @@ const CaptainReceivedBids = () => {
         setBids(Array.isArray(response?.data?.bids) ? response.data.bids : []);
       } catch (error) {
         console.error("Error cargando ofertas recibidas:", error);
+
         setMessage(
           error?.response?.data?.message ||
             "No se pudieron cargar las ofertas recibidas."
@@ -372,6 +316,7 @@ const CaptainReceivedBids = () => {
 
     socket.on("connect", () => {
       setSocketStatus("Conectado");
+
       socket.emit("join", {
         userId: captainId,
         userType: "captain",
@@ -406,8 +351,6 @@ const CaptainReceivedBids = () => {
         createdAt: new Date().toISOString(),
       });
 
-      playOfferSound();
-      showBrowserNotification(title, body);
       await fetchReceivedBids(false);
 
       setTimeout(() => {
@@ -425,22 +368,6 @@ const CaptainReceivedBids = () => {
     };
   }, [captainId, fetchReceivedBids]);
 
-  const enableSoundAndNotifications = async () => {
-    try {
-      playOfferSound();
-      setSoundEnabled(true);
-
-      if ("Notification" in window && Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-
-      setMessage("Notificaciones y sonido activados para ofertas.");
-    } catch (error) {
-      console.warn("No se pudieron activar notificaciones:", error);
-      setMessage("No se pudieron activar las notificaciones del navegador.");
-    }
-  };
-
   const updateCounterInput = (bidId, field, value) => {
     setCounterInputs((prev) => ({
       ...prev,
@@ -457,6 +384,7 @@ const CaptainReceivedBids = () => {
       setMessage("");
 
       const currentCounter = counterInputs[bidId] || {};
+
       const payload = {
         bidId,
         action,
@@ -489,6 +417,7 @@ const CaptainReceivedBids = () => {
       await fetchReceivedBids(false);
     } catch (error) {
       console.error("Error respondiendo oferta:", error);
+
       setMessage(
         error?.response?.data?.message || "No se pudo responder la oferta."
       );
@@ -554,6 +483,7 @@ const CaptainReceivedBids = () => {
               <p className="text-xs text-white/60 font-bold">
                 Solicita el cliente
               </p>
+
               <p className="text-lg font-black mt-1">
                 {bid.requestedQuantity} {humanizeUnit(bid.requestedUnit)}
               </p>
@@ -563,6 +493,7 @@ const CaptainReceivedBids = () => {
               <p className="text-xs text-emerald-700 font-bold">
                 Disponible actual
               </p>
+
               <p className="text-lg font-black text-emerald-800 mt-1">
                 {available.label}
               </p>
@@ -591,6 +522,7 @@ const CaptainReceivedBids = () => {
                 <p className="text-xs font-black text-gray-500 mb-1">
                   Mensaje del cliente
                 </p>
+
                 <p className="text-sm text-gray-700">{bid.message}</p>
               </div>
             ) : null}
@@ -723,6 +655,7 @@ const CaptainReceivedBids = () => {
               <h1 className="text-lg font-black text-gray-950">
                 Ofertas recibidas
               </h1>
+
               <p className="text-xs text-gray-600">
                 Acepta, rechaza o contraoferta
               </p>
@@ -743,18 +676,6 @@ const CaptainReceivedBids = () => {
             Estado socket:{" "}
             <span className="font-black text-gray-900">{socketStatus}</span>
           </div>
-
-          <button
-            type="button"
-            onClick={enableSoundAndNotifications}
-            className={`px-3 py-2 rounded-2xl text-xs font-black border ${
-              soundEnabled
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-orange-50 text-orange-700 border-orange-200"
-            }`}
-          >
-            {soundEnabled ? "Sonido activo" : "Activar sonido"}
-          </button>
         </div>
 
         <div className="grid grid-cols-4 gap-2 mt-4">
@@ -792,6 +713,7 @@ const CaptainReceivedBids = () => {
                 <p className="text-sm font-black">
                   {notificationBanner.title}
                 </p>
+
                 <p className="text-sm text-white/80 mt-1">
                   {notificationBanner.body}
                 </p>

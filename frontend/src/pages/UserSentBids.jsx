@@ -6,6 +6,7 @@ import { getApiBaseUrl } from "../apiBase";
 
 const formatCOP = (value) => {
   const number = Number(value) || 0;
+
   return new Intl.NumberFormat("es-CO", {
     style: "currency",
     currency: "COP",
@@ -26,66 +27,6 @@ const getStoredUserId = () => {
     return parsed?._id || parsed?.id || "";
   } catch {
     return "";
-  }
-};
-
-const playOfferSound = () => {
-  try {
-    const AudioContext = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContext) return;
-
-    const ctx = new AudioContext();
-    const now = ctx.currentTime;
-
-    const tones = [
-      { freq: 900, start: 0 },
-      { freq: 1200, start: 0.18 },
-      { freq: 1500, start: 0.36 },
-    ];
-
-    tones.forEach((tone) => {
-      const oscillator = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      oscillator.type = "sine";
-      oscillator.frequency.setValueAtTime(tone.freq, now + tone.start);
-
-      gain.gain.setValueAtTime(0.0001, now + tone.start);
-      gain.gain.exponentialRampToValueAtTime(0.22, now + tone.start + 0.03);
-      gain.gain.exponentialRampToValueAtTime(0.0001, now + tone.start + 0.14);
-
-      oscillator.connect(gain);
-      gain.connect(ctx.destination);
-
-      oscillator.start(now + tone.start);
-      oscillator.stop(now + tone.start + 0.16);
-    });
-
-    setTimeout(() => {
-      try {
-        ctx.close();
-      } catch {
-        // ignore
-      }
-    }, 900);
-  } catch (error) {
-    console.warn("No se pudo reproducir sonido:", error);
-  }
-};
-
-const showBrowserNotification = (title, body) => {
-  try {
-    if (!("Notification" in window)) return;
-
-    if (Notification.permission === "granted") {
-      new Notification(title, {
-        body,
-        icon: "/favicon.ico",
-        tag: "central-go-user-bid",
-      });
-    }
-  } catch (error) {
-    console.warn("No se pudo mostrar notificación:", error);
   }
 };
 
@@ -239,7 +180,6 @@ const UserSentBids = () => {
   const [error, setError] = useState("");
   const [actingId, setActingId] = useState("");
   const [socketStatus, setSocketStatus] = useState("Desconectado");
-  const [soundEnabled, setSoundEnabled] = useState(false);
   const [notificationBanner, setNotificationBanner] = useState(null);
 
   const socketRef = useRef(null);
@@ -297,6 +237,7 @@ const UserSentBids = () => {
 
     socket.on("connect", () => {
       setSocketStatus("Conectado");
+
       socket.emit("join", {
         userId,
         userType: "user",
@@ -322,7 +263,9 @@ const UserSentBids = () => {
       const title = data.notificationTitle || "Respuesta a tu oferta";
       const body =
         data.notificationBody ||
-        `El transportador respondió tu oferta para ${data.title || "una publicación"}.`;
+        `El transportador respondió tu oferta para ${
+          data.title || "una publicación"
+        }.`;
 
       setNotificationBanner({
         type: data.action || data.status || "updated",
@@ -331,8 +274,6 @@ const UserSentBids = () => {
         createdAt: new Date().toISOString(),
       });
 
-      playOfferSound();
-      showBrowserNotification(title, body);
       await fetchMySentBids(false);
 
       setTimeout(() => {
@@ -349,22 +290,6 @@ const UserSentBids = () => {
       socket.disconnect();
     };
   }, [userId, fetchMySentBids]);
-
-  const enableSoundAndNotifications = async () => {
-    try {
-      playOfferSound();
-      setSoundEnabled(true);
-
-      if ("Notification" in window && Notification.permission === "default") {
-        await Notification.requestPermission();
-      }
-
-      setError("");
-    } catch (err) {
-      console.warn("No se pudieron activar notificaciones:", err);
-      setError("No se pudieron activar las notificaciones del navegador.");
-    }
-  };
 
   const handleCustomerResponse = async (bidId, action) => {
     try {
@@ -449,7 +374,9 @@ const UserSentBids = () => {
               </p>
             </div>
 
-            <div className={`${theme.softBg} border ${theme.border} rounded-2xl px-4 py-3`}>
+            <div
+              className={`${theme.softBg} border ${theme.border} rounded-2xl px-4 py-3`}
+            >
               <p className={`text-xs font-bold ${theme.text}`}>Tu oferta</p>
               <p className={`text-lg font-black mt-1 ${theme.text}`}>
                 {formatCOP(bid.offeredPrice)}
@@ -528,6 +455,7 @@ const UserSentBids = () => {
                 disabled={actingId === `${bid._id}-rejected`}
                 className="rounded-2xl bg-red-600 text-white py-3 font-black disabled:opacity-60 shadow-lg shadow-red-600/20"
               >
+                {actingId === `${bid._id}-rejected`}
                 {actingId === `${bid._id}-rejected`
                   ? "Rechazando..."
                   : "Rechazar"}
@@ -575,18 +503,6 @@ const UserSentBids = () => {
             Estado socket:{" "}
             <span className="font-black text-gray-900">{socketStatus}</span>
           </div>
-
-          <button
-            type="button"
-            onClick={enableSoundAndNotifications}
-            className={`px-3 py-2 rounded-2xl text-xs font-black border ${
-              soundEnabled
-                ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                : "bg-orange-50 text-orange-700 border-orange-200"
-            }`}
-          >
-            {soundEnabled ? "Sonido activo" : "Activar sonido"}
-          </button>
         </div>
       </div>
 
@@ -599,9 +515,7 @@ const UserSentBids = () => {
               </div>
 
               <div className="flex-1">
-                <p className="text-sm font-black">
-                  {notificationBanner.title}
-                </p>
+                <p className="text-sm font-black">{notificationBanner.title}</p>
                 <p className="text-sm text-white/80 mt-1">
                   {notificationBanner.body}
                 </p>
