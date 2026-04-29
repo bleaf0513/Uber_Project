@@ -63,7 +63,10 @@ const CaptainHome = () => {
 
     if (!safe) return "Dirección no disponible";
 
-    const parts = safe.split(",").map((item) => item.trim()).filter(Boolean);
+    const parts = safe
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean);
 
     if (parts.length <= 2) return safe;
 
@@ -101,18 +104,21 @@ const CaptainHome = () => {
     });
   }, []);
 
-  const removeAvailableRide = useCallback((rideId) => {
-    if (!rideId) return;
+  const removeAvailableRide = useCallback(
+    (rideId) => {
+      if (!rideId) return;
 
-    setAvailableRides((prev) =>
-      prev.filter((item) => String(item._id) !== String(rideId))
-    );
+      setAvailableRides((prev) =>
+        prev.filter((item) => String(item._id) !== String(rideId))
+      );
 
-    if (String(ride?._id || "") === String(rideId)) {
-      setRidePopup(false);
-      setRide(null);
-    }
-  }, [ride?._id]);
+      if (String(ride?._id || "") === String(rideId)) {
+        setRidePopup(false);
+        setRide(null);
+      }
+    },
+    [ride?._id]
+  );
 
   const emitCaptainJoin = useCallback(() => {
     if (!captain?._id) {
@@ -691,6 +697,139 @@ const CaptainHome = () => {
         <LiveTracking />
       </div>
 
+      {availableRides.length > 0 && (
+        <div className="absolute top-[92px] left-0 right-0 z-40 px-3">
+          <div className="flex items-center justify-between px-2 mb-2">
+            <div
+              className="rounded-full px-4 py-2 shadow-lg text-white text-xs font-black"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
+              {availableRides.length} solicitudes disponibles
+            </div>
+
+            <button
+              type="button"
+              onClick={fetchAvailableRidesForCaptain}
+              className="w-10 h-10 rounded-full bg-white shadow-lg border border-purple-100 flex items-center justify-center"
+            >
+              <i className="ri-refresh-line text-xl text-purple-700"></i>
+            </button>
+          </div>
+
+          <div className="flex gap-3 overflow-x-auto pb-3 snap-x snap-mandatory">
+            {availableRides.map((item) => {
+              const rideId = String(item?._id || "");
+              const isThisProcessing = processing && processingRideId === rideId;
+
+              return (
+                <div
+                  key={rideId}
+                  className="snap-start shrink-0 w-[86vw] max-w-[380px] rounded-[26px] bg-white shadow-2xl border border-purple-100 overflow-hidden"
+                >
+                  <div
+                    className="px-4 py-3 text-white"
+                    style={{
+                      background: PURPLE_GRADIENT,
+                    }}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-[11px] uppercase tracking-wide text-white/80">
+                          Nueva solicitud
+                        </p>
+
+                        <h4 className="text-lg font-black truncate">
+                          {getUserName(item)}
+                        </h4>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <p className="text-[11px] uppercase tracking-wide text-white/80">
+                          Oferta usuario
+                        </p>
+
+                        <p className="text-lg font-black">
+                          {formatCOP(
+                            item?.offeredFare ??
+                              item?.fare ??
+                              item?.suggestedFare ??
+                              0
+                          )}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="p-4 space-y-3">
+                    <div className="grid grid-cols-[38px_1fr] gap-3">
+                      <div className="w-9 h-9 rounded-2xl bg-purple-100 flex items-center justify-center">
+                        <i className="ri-map-pin-range-fill text-purple-700 text-lg"></i>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-500">
+                          Recoger en
+                        </p>
+                        <p className="text-sm font-bold text-gray-900 truncate">
+                          {formatShortAddress(item?.pickup)}
+                        </p>
+                      </div>
+
+                      <div className="w-9 h-9 rounded-2xl bg-purple-100 flex items-center justify-center">
+                        <i className="ri-flag-fill text-purple-700 text-lg"></i>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-xs font-bold text-gray-500">
+                          Llevar a
+                        </p>
+                        <p className="text-sm font-bold text-gray-900 truncate">
+                          {formatShortAddress(item?.destination)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-2">
+                      <button
+                        type="button"
+                        disabled={isThisProcessing}
+                        onClick={() => confirmRide(item)}
+                        className="rounded-2xl py-3 text-white text-xs font-black disabled:opacity-60"
+                        style={{
+                          background: PURPLE_GRADIENT,
+                        }}
+                      >
+                        {isThisProcessing ? "Enviando..." : "Aceptar"}
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={processing}
+                        onClick={() => openCounterOffer(item)}
+                        className="rounded-2xl py-3 bg-purple-100 text-purple-800 text-xs font-black disabled:opacity-60"
+                      >
+                        Ofertar
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={processing}
+                        onClick={() => ignoreRide(item)}
+                        className="rounded-2xl py-3 bg-gray-100 text-gray-700 text-xs font-black disabled:opacity-60"
+                      >
+                        Ocultar
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {showGpsPrompt && (
         <div className="fixed inset-0 z-[90] bg-black/55 flex items-center justify-center px-5">
           <div className="w-full max-w-md rounded-[28px] bg-white shadow-2xl p-6">
@@ -755,7 +894,7 @@ const CaptainHome = () => {
         </div>
       )}
 
-      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[58%]">
+      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[42%]">
         <div className="pt-2">
           <div className="flex justify-center py-2">
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
@@ -804,154 +943,7 @@ const CaptainHome = () => {
           <CaptainDetails />
 
           <div className="px-4 pb-5">
-            <div className="rounded-[24px] border border-purple-100 bg-purple-50 p-4 mt-2">
-              <div className="flex items-center justify-between gap-3 mb-3">
-                <div>
-                  <h3 className="text-lg font-black text-gray-900">
-                    Solicitudes disponibles
-                  </h3>
-                  <p className="text-sm text-purple-700">
-                    Mira varias solicitudes y oferta solo a la que más te convenga.
-                  </p>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={fetchAvailableRidesForCaptain}
-                  className="w-11 h-11 rounded-2xl bg-white border border-purple-200 flex items-center justify-center"
-                >
-                  <i className="ri-refresh-line text-xl text-purple-700"></i>
-                </button>
-              </div>
-
-              {availableRides.length === 0 ? (
-                <div className="rounded-3xl bg-white border border-purple-100 p-5 text-center">
-                  <div
-                    className="w-16 h-16 mx-auto rounded-full flex items-center justify-center"
-                    style={{ background: PURPLE_GRADIENT }}
-                  >
-                    <i className="ri-taxi-line text-3xl text-white"></i>
-                  </div>
-
-                  <p className="text-base font-bold text-gray-900 mt-3">
-                    No hay solicitudes abiertas
-                  </p>
-
-                  <p className="text-sm text-gray-500 mt-1">
-                    Apenas un usuario cree un viaje, aparecerá aquí.
-                  </p>
-                </div>
-              ) : (
-                <div className="space-y-3">
-                  {availableRides.map((item) => {
-                    const rideId = String(item?._id || "");
-                    const isThisProcessing =
-                      processing && processingRideId === rideId;
-
-                    return (
-                      <div
-                        key={rideId}
-                        className="rounded-[24px] bg-white border border-purple-100 shadow-sm overflow-hidden"
-                      >
-                        <div
-                          className="px-4 py-3 text-white"
-                          style={{
-                            background: PURPLE_GRADIENT,
-                          }}
-                        >
-                          <div className="flex items-center justify-between gap-3">
-                            <div className="min-w-0">
-                              <p className="text-[11px] uppercase tracking-wide text-white/80">
-                                Nueva solicitud
-                              </p>
-                              <h4 className="text-lg font-black truncate">
-                                {getUserName(item)}
-                              </h4>
-                            </div>
-
-                            <div className="text-right shrink-0">
-                              <p className="text-[11px] uppercase tracking-wide text-white/80">
-                                Oferta usuario
-                              </p>
-                              <p className="text-lg font-black">
-                                {formatCOP(
-                                  item?.offeredFare ??
-                                    item?.fare ??
-                                    item?.suggestedFare ??
-                                    0
-                                )}
-                              </p>
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="p-4 space-y-3">
-                          <div className="grid grid-cols-[42px_1fr] gap-3">
-                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center">
-                              <i className="ri-map-pin-range-fill text-purple-700 text-lg"></i>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-gray-500">
-                                Recoger en
-                              </p>
-                              <p className="text-sm font-bold text-gray-900 truncate">
-                                {formatShortAddress(item?.pickup)}
-                              </p>
-                            </div>
-
-                            <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center">
-                              <i className="ri-flag-fill text-purple-700 text-lg"></i>
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-xs font-bold text-gray-500">
-                                Llevar a
-                              </p>
-                              <p className="text-sm font-bold text-gray-900 truncate">
-                                {formatShortAddress(item?.destination)}
-                              </p>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-3 gap-2">
-                            <button
-                              type="button"
-                              disabled={isThisProcessing}
-                              onClick={() => confirmRide(item)}
-                              className="rounded-2xl py-3 text-white text-xs font-black disabled:opacity-60"
-                              style={{
-                                background: PURPLE_GRADIENT,
-                              }}
-                            >
-                              {isThisProcessing ? "Enviando..." : "Aceptar valor"}
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={processing}
-                              onClick={() => openCounterOffer(item)}
-                              className="rounded-2xl py-3 bg-purple-100 text-purple-800 text-xs font-black disabled:opacity-60"
-                            >
-                              Contraofertar
-                            </button>
-
-                            <button
-                              type="button"
-                              disabled={processing}
-                              onClick={() => ignoreRide(item)}
-                              className="rounded-2xl py-3 bg-gray-100 text-gray-700 text-xs font-black disabled:opacity-60"
-                            >
-                              Ocultar
-                            </button>
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-4">
+            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <h3 className="text-lg font-bold text-gray-900">
