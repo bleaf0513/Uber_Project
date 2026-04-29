@@ -22,7 +22,7 @@ import LiveTracking from "../../components/LiveTracking";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
 
-const OFFER_TTL_MS = 10000;
+const OFFER_TTL_MS = 60000;
 
 function Home() {
   const submitHandler = (e) => {
