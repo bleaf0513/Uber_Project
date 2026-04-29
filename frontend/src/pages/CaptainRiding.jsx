@@ -477,13 +477,13 @@ const CaptainRiding = () => {
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
       <div className="absolute inset-0 z-10">
         <LiveTracking
-          pickup={rideData?.pickup || ""}
-          selectedCaptainId={rideData?.captain?._id || null}
-          showRouteToPickup={true}
-          showPickupRadar={true}
-          autoFetchNearbyDrivers={true}
-          onEtaUpdate={setEtaInfo}
-        />
+  pickup={rideData?.pickup || ""}
+  selectedCaptainId={rideData?.captain?._id || null}
+  showRouteToPickup={true}
+  showPickupRadar={false}
+  autoFetchNearbyDrivers={false}
+  onEtaUpdate={setEtaInfo}
+/>
       </div>
 
       <div className="absolute top-3 left-3 z-40">

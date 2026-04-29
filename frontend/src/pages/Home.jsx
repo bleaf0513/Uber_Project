@@ -734,13 +734,13 @@ function Home() {
         }}
       >
         <LiveTracking
-          pickup={driverSelected ? ride?.pickup || pickup : pickup}
-          nearbyDrivers={nearbyDrivers}
-          showPickupRadar={vehicleFound || driverSelected}
-          selectedCaptainId={ride?.captain?._id || null}
-          showRouteToPickup={driverSelected}
-          onEtaUpdate={setEtaInfo}
-        />
+  pickup={driverSelected ? ride?.pickup || pickup : pickup}
+  nearbyDrivers={nearbyDrivers}
+  showPickupRadar={vehicleFound && !driverSelected}
+  selectedCaptainId={ride?.captain?._id || null}
+  showRouteToPickup={driverSelected}
+  onEtaUpdate={setEtaInfo}
+/>
       </div>
 
       {vehicleFound && liveOffers.length > 0 && (
@@ -999,9 +999,9 @@ function Home() {
       </div>
 
       <div
-        ref={driverSelectedRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto h-[38%] shadow-2xl"
-      >
+  ref={driverSelectedRef}
+  className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto max-h-[72%] shadow-2xl"
+>
        <DriverSelected
   ride={ride}
   captainArrived={captainArrived}

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
-import { getApiBaseUrl } from "../src/apiBase";
+import { getApiBaseUrl } from "../apiBase";
 
 const DriverSelected = (props) => {
   const ride = props?.ride || null;

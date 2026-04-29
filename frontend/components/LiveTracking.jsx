@@ -36,6 +36,11 @@ const toFiniteNumber = (value) => {
   return Number.isFinite(num) ? num : null;
 };
 
+const roundCoord = (value, digits = 5) => {
+  const num = Number(value);
+  return Number.isFinite(num) ? Number(num.toFixed(digits)) : null;
+};
+
 const LiveTracking = ({
   pickup = "",
   nearbyDrivers = [],
@@ -94,6 +99,7 @@ const LiveTracking = ({
     if (Array.isArray(nearbyDrivers) && nearbyDrivers.length > 0) {
       return nearbyDrivers;
     }
+
     return fetchedDrivers;
   }, [nearbyDrivers, fetchedDrivers]);
 
@@ -123,6 +129,7 @@ const LiveTracking = ({
           `driver-${index}`;
 
         const rawName = driver?.name || driver?.fullname || driver?.fullName;
+
         const name =
           typeof rawName === "string"
             ? rawName
@@ -151,11 +158,37 @@ const LiveTracking = ({
 
   const selectedDriver = useMemo(() => {
     if (!selectedCaptainId) return safeNearbyDrivers[0] || null;
+
     return (
       safeNearbyDrivers.find((d) => String(d.id) === String(selectedCaptainId)) ||
       null
     );
   }, [safeNearbyDrivers, selectedCaptainId]);
+
+  const stableMapFocusKey = useMemo(() => {
+    return JSON.stringify({
+      pickup: pickupPosition
+        ? {
+            lat: roundCoord(pickupPosition.lat),
+            lng: roundCoord(pickupPosition.lng),
+          }
+        : null,
+      routeToPickup: Boolean(showRouteToPickup),
+      selectedCaptainId: selectedCaptainId ? String(selectedCaptainId) : null,
+      selectedDriverId: selectedDriver?.id || null,
+      mode: showRouteToPickup
+        ? "route-to-pickup"
+        : showPickupRadar
+        ? "searching-driver"
+        : "normal",
+    });
+  }, [
+    pickupPosition,
+    selectedCaptainId,
+    selectedDriver?.id,
+    showRouteToPickup,
+    showPickupRadar,
+  ]);
 
   const markUserInteraction = () => {
     isUserInteractingRef.current = true;
@@ -168,6 +201,23 @@ const LiveTracking = ({
       isUserInteractingRef.current = false;
     }, 4000);
   };
+
+  const handleMapLoad = (mapInstance) => {
+    setMap(mapInstance);
+
+    if (currentPosition) {
+      mapInstance.setCenter(currentPosition);
+      mapInstance.setZoom(zoom);
+    } else {
+      mapInstance.setCenter(DEFAULT_CENTER);
+      mapInstance.setZoom(zoom);
+    }
+  };
+
+  useEffect(() => {
+    hasAutoFittedRef.current = false;
+    lastFocusKeyRef.current = "";
+  }, [stableMapFocusKey]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -209,7 +259,7 @@ const LiveTracking = ({
     navigator.geolocation.getCurrentPosition(handlePositionUpdate, handleGeoError, {
       enableHighAccuracy: false,
       timeout: 30000,
-      maximumAge: 0,
+      maximumAge: 5000,
     });
 
     watchIdRef.current = navigator.geolocation.watchPosition(
@@ -218,7 +268,7 @@ const LiveTracking = ({
       {
         enableHighAccuracy: false,
         timeout: 30000,
-        maximumAge: 0,
+        maximumAge: 5000,
       }
     );
 
@@ -246,6 +296,7 @@ const LiveTracking = ({
 
       if (status === "OK" && results?.[0]?.geometry?.location) {
         const location = results[0].geometry.location;
+
         setPickupPosition({
           lat: location.lat(),
           lng: location.lng(),
@@ -258,13 +309,15 @@ const LiveTracking = ({
   }, [pickup, mapsApiLoaded]);
 
   useEffect(() => {
+    if (!showPickupRadar) return;
+
     const interval = setInterval(() => {
       setPulseRadiusA((prev) => (prev >= 280 ? 140 : prev + 12));
       setPulseRadiusB((prev) => (prev >= 420 ? 220 : prev + 14));
     }, 120);
 
     return () => clearInterval(interval);
-  }, []);
+  }, [showPickupRadar]);
 
   useEffect(() => {
     if (!autoFetchNearbyDrivers) return;
@@ -303,6 +356,7 @@ const LiveTracking = ({
 
     return () => {
       cancelled = true;
+
       if (driversIntervalRef.current) {
         clearInterval(driversIntervalRef.current);
         driversIntervalRef.current = null;
@@ -321,9 +375,11 @@ const LiveTracking = ({
       setDirections(null);
       setEtaText("");
       setDistanceText("");
+
       if (typeof onEtaUpdate === "function") {
         onEtaUpdate({ etaText: "", distanceText: "" });
       }
+
       return;
     }
 
@@ -331,9 +387,11 @@ const LiveTracking = ({
       setDirections(null);
       setEtaText("");
       setDistanceText("");
+
       if (typeof onEtaUpdate === "function") {
         onEtaUpdate({ etaText: "", distanceText: "" });
       }
+
       return;
     }
 
@@ -351,6 +409,7 @@ const LiveTracking = ({
 
         if (status === "OK" && result?.routes?.[0]?.legs?.[0]) {
           const leg = result.routes[0].legs[0];
+
           setDirections(result);
           setEtaText(leg.duration?.text || "");
           setDistanceText(leg.distance?.text || "");
@@ -365,103 +424,87 @@ const LiveTracking = ({
           setDirections(null);
           setEtaText("");
           setDistanceText("");
+
           if (typeof onEtaUpdate === "function") {
             onEtaUpdate({ etaText: "", distanceText: "" });
           }
         }
       }
     );
-  }, [mapsApiLoaded, pickupPosition, selectedDriver, showRouteToPickup, onEtaUpdate]);
+  }, [
+    mapsApiLoaded,
+    pickupPosition,
+    selectedDriver?.id,
+    selectedDriver?.lat,
+    selectedDriver?.lng,
+    showRouteToPickup,
+    onEtaUpdate,
+  ]);
 
   useEffect(() => {
     if (!map || !mapsApiLoaded || !window.google?.maps) return;
     if (isUserInteractingRef.current) return;
+    if (hasAutoFittedRef.current && lastFocusKeyRef.current === stableMapFocusKey) {
+      return;
+    }
 
     const bounds = new window.google.maps.LatLngBounds();
     let hasPoints = false;
 
-    if (currentPosition) {
-      bounds.extend(currentPosition);
-      hasPoints = true;
-    }
-
-    if (pickupPosition) {
-      bounds.extend(pickupPosition);
-      hasPoints = true;
-    }
-
-    safeNearbyDrivers.forEach((driver) => {
-      bounds.extend({ lat: driver.lat, lng: driver.lng });
-      hasPoints = true;
-    });
-
-    if (!hasPoints) return;
-
-    const focusKey = JSON.stringify({
-      pickup: pickupPosition
-        ? {
-            lat: Number(pickupPosition.lat).toFixed(5),
-            lng: Number(pickupPosition.lng).toFixed(5),
-          }
-        : null,
-      me: currentPosition
-        ? {
-            lat: Number(currentPosition.lat).toFixed(5),
-            lng: Number(currentPosition.lng).toFixed(5),
-          }
-        : null,
-      drivers: safeNearbyDrivers.map((d) => ({
-        id: d.id,
-        lat: Number(d.lat).toFixed(5),
-        lng: Number(d.lng).toFixed(5),
-      })),
-      routeToPickup: !!showRouteToPickup,
-      selectedDriver: selectedDriver
-        ? {
-            id: selectedDriver.id,
-            lat: Number(selectedDriver.lat).toFixed(5),
-            lng: Number(selectedDriver.lng).toFixed(5),
-          }
-        : null,
-    });
-
-    const shouldRefocus =
-      !hasAutoFittedRef.current || lastFocusKeyRef.current !== focusKey;
-
-    if (!shouldRefocus) return;
-
     if (showRouteToPickup && selectedDriver && pickupPosition) {
       bounds.extend({ lat: selectedDriver.lat, lng: selectedDriver.lng });
       bounds.extend(pickupPosition);
+      hasPoints = true;
+
       map.fitBounds(bounds, {
         top: 110,
         right: 60,
         bottom: 250,
         left: 60,
       });
-    } else if (pickupPosition && (currentPosition || safeNearbyDrivers.length > 0)) {
+    } else if (pickupPosition && showPickupRadar) {
+      bounds.extend(pickupPosition);
+      hasPoints = true;
+
+      if (currentPosition) {
+        bounds.extend(currentPosition);
+      }
+
+      safeNearbyDrivers.slice(0, 8).forEach((driver) => {
+        bounds.extend({ lat: driver.lat, lng: driver.lng });
+      });
+
       map.fitBounds(bounds, {
         top: 80,
         right: 60,
         bottom: 260,
         left: 60,
       });
+    } else if (pickupPosition) {
+      map.panTo(pickupPosition);
+      map.setZoom(15);
+      hasPoints = true;
     } else if (currentPosition) {
       map.panTo(currentPosition);
       map.setZoom(zoom);
+      hasPoints = true;
     }
 
+    if (!hasPoints) return;
+
     hasAutoFittedRef.current = true;
-    lastFocusKeyRef.current = focusKey;
+    lastFocusKeyRef.current = stableMapFocusKey;
   }, [
     map,
-    currentPosition,
-    pickupPosition,
-    safeNearbyDrivers,
     mapsApiLoaded,
-    zoom,
+    stableMapFocusKey,
     showRouteToPickup,
+    showPickupRadar,
     selectedDriver,
+    pickupPosition,
+    currentPosition,
+    safeNearbyDrivers,
+    zoom,
   ]);
 
   useEffect(() => {
@@ -549,11 +592,9 @@ const LiveTracking = ({
   return (
     <GoogleMap
       mapContainerStyle={containerStyle}
-      center={currentPosition || DEFAULT_CENTER}
       zoom={zoom}
-      onLoad={setMap}
+      onLoad={handleMapLoad}
       onDragStart={markUserInteraction}
-      onZoomChanged={markUserInteraction}
       onClick={markUserInteraction}
       options={mapOptions}
     >
@@ -562,6 +603,7 @@ const LiveTracking = ({
           directions={directions}
           options={{
             suppressMarkers: true,
+            preserveViewport: true,
             polylineOptions: {
               strokeColor: "#7c3aed",
               strokeOpacity: 0.85,
@@ -586,6 +628,7 @@ const LiveTracking = ({
               visible: true,
             }}
           />
+
           <Marker position={currentPosition} icon={userDotIcon} zIndex={50} />
         </>
       )}
@@ -606,6 +649,7 @@ const LiveTracking = ({
                   clickable: false,
                 }}
               />
+
               <Circle
                 center={pickupPosition}
                 radius={pulseRadiusB}
@@ -669,31 +713,34 @@ const LiveTracking = ({
           />
         ))}
 
-      {showRouteToPickup && selectedDriver && pickupPosition && (etaText || distanceText) && (
-        <OverlayView
-          position={pickupPosition}
-          mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
-        >
-          <div
-            style={{
-              transform: "translate(-50%, 18px)",
-              background: "rgba(255,255,255,0.96)",
-              color: "#111827",
-              padding: "10px 14px",
-              borderRadius: "16px",
-              fontSize: "12px",
-              fontWeight: 700,
-              boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-              whiteSpace: "nowrap",
-              border: "1px solid #e5e7eb",
-            }}
+      {showRouteToPickup &&
+        selectedDriver &&
+        pickupPosition &&
+        (etaText || distanceText) && (
+          <OverlayView
+            position={pickupPosition}
+            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
           >
-            {etaText ? `Llega en ${etaText}` : ""}
-            {etaText && distanceText ? " · " : ""}
-            {distanceText || ""}
-          </div>
-        </OverlayView>
-      )}
+            <div
+              style={{
+                transform: "translate(-50%, 18px)",
+                background: "rgba(255,255,255,0.96)",
+                color: "#111827",
+                padding: "10px 14px",
+                borderRadius: "16px",
+                fontSize: "12px",
+                fontWeight: 700,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                whiteSpace: "nowrap",
+                border: "1px solid #e5e7eb",
+              }}
+            >
+              {etaText ? `Llega en ${etaText}` : ""}
+              {etaText && distanceText ? " · " : ""}
+              {distanceText || ""}
+            </div>
+          </OverlayView>
+        )}
     </GoogleMap>
   );
 };
