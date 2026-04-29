@@ -84,9 +84,8 @@ const ConfirmRidePickup = (props) => {
   const { firstPart: firstPartDest, secondPart: secondPartDest } =
     formatAddress(props.ride?.destination);
 
-  const customerName = `${props.ride?.user?.fullname?.firstname || ""} ${
-    props.ride?.user?.fullname?.lastname || ""
-  }`.trim();
+  const customerName = `${props.ride?.user?.fullname?.firstname || ""} ${props.ride?.user?.fullname?.lastname || ""
+    }`.trim();
 
   const vehicleType =
     props.ride?.vehicleType ||

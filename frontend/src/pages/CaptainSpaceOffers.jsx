@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { CaptainDataContext } from "../context/CaptainContext";
@@ -17,30 +17,17 @@ const GOODS_UNITS = [
 ];
 
 const GOODS_PRICE_TYPES = [
-  { value: "por_kg", label: "Por kg", unit: "kg" },
-  { value: "por_gramo", label: "Por gramo", unit: "gramos" },
-  { value: "por_libra", label: "Por libra", unit: "libras" },
-  { value: "por_bulto", label: "Por bulto", unit: "bultos" },
-  { value: "por_paca", label: "Por paca", unit: "pacas" },
-  { value: "por_caja", label: "Por caja", unit: "cajas" },
-  { value: "por_canastilla", label: "Por canastilla", unit: "canastillas" },
-  { value: "por_tonelada", label: "Por tonelada", unit: "toneladas" },
-  { value: "por_unidad", label: "Por unidad", unit: "unidades" },
-  { value: "precio_total", label: "Precio total", unit: "" },
+  { value: "por_kg", label: "Por kg" },
+  { value: "por_gramo", label: "Por gramo" },
+  { value: "por_libra", label: "Por libra" },
+  { value: "por_bulto", label: "Por bulto" },
+  { value: "por_paca", label: "Por paca" },
+  { value: "por_caja", label: "Por caja" },
+  { value: "por_canastilla", label: "Por canastilla" },
+  { value: "por_tonelada", label: "Por tonelada" },
+  { value: "por_unidad", label: "Por unidad" },
+  { value: "precio_total", label: "Precio total" },
 ];
-
-const PRICE_TYPE_LABELS = {
-  por_kg: "por kg",
-  por_gramo: "por gramo",
-  por_libra: "por libra",
-  por_bulto: "por bulto",
-  por_paca: "por paca",
-  por_caja: "por caja",
-  por_canastilla: "por canastilla",
-  por_tonelada: "por tonelada",
-  por_unidad: "por unidad",
-  precio_total: "precio total",
-};
 
 const VEHICLE_TYPES = [
   { value: "", label: "Selecciona vehículo" },
@@ -58,27 +45,6 @@ const formatCOP = (value) => {
     currency: "COP",
     maximumFractionDigits: 0,
   }).format(number);
-};
-
-const humanizePriceType = (priceType) => {
-  return PRICE_TYPE_LABELS[priceType] || "precio";
-};
-
-const getPriceTypeConfig = (priceType) => {
-  return (
-    GOODS_PRICE_TYPES.find((item) => item.value === priceType) ||
-    GOODS_PRICE_TYPES[0]
-  );
-};
-
-const buildPriceLabel = (offerOrForm) => {
-  if (!offerOrForm) return formatCOP(0);
-
-  if (offerOrForm.priceLabel) return offerOrForm.priceLabel;
-
-  return `${formatCOP(offerOrForm.suggestedPrice)} ${humanizePriceType(
-    offerOrForm.priceType
-  )}`;
 };
 
 const CaptainGoodsOffers = () => {
@@ -106,44 +72,12 @@ const CaptainGoodsOffers = () => {
 
   const token = localStorage.getItem("token");
 
-  const priceTypeConfig = useMemo(() => {
-    return getPriceTypeConfig(form.priceType);
-  }, [form.priceType]);
-
-  const preview = useMemo(() => {
-    const product = form.productName.trim() || "Producto";
-    const quantity = Number(form.quantityAvailable) || 0;
-    const unit = form.quantityUnit || "kg";
-    const suggestedPrice = Number(form.suggestedPrice) || 0;
-
-    return {
-      product,
-      availableLabel: `${quantity} ${unit} disponibles`,
-      priceLabel: `${formatCOP(suggestedPrice)} ${humanizePriceType(
-        form.priceType
-      )}`,
-    };
-  }, [form]);
-
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-
-    setForm((prev) => {
-      const next = {
-        ...prev,
-        [name]: type === "checkbox" ? checked : value,
-      };
-
-      if (name === "priceType") {
-        const config = getPriceTypeConfig(value);
-
-        if (value !== "precio_total" && config.unit) {
-          next.quantityUnit = config.unit;
-        }
-      }
-
-      return next;
-    });
+    setForm((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value,
+    }));
   };
 
   const resetForm = () => {
@@ -193,62 +127,11 @@ const CaptainGoodsOffers = () => {
   useEffect(() => {
     if (!captain?._id || !token) return;
     fetchMyGoodsOffers();
-  }, [captain?._id, token]);
-
-  const validateForm = () => {
-    const productName = form.productName.trim();
-    const origin = form.origin.trim();
-    const destination = form.destination.trim();
-    const quantityAvailable = Number(form.quantityAvailable);
-    const suggestedPrice = Number(form.suggestedPrice);
-
-    if (!productName || productName.length < 2) {
-      return "Debes ingresar un producto válido.";
-    }
-
-    if (!Number.isFinite(quantityAvailable) || quantityAvailable <= 0) {
-      return "La cantidad disponible debe ser mayor que 0.";
-    }
-
-    if (!form.quantityUnit) {
-      return "Debes seleccionar una unidad.";
-    }
-
-    if (!Number.isFinite(suggestedPrice) || suggestedPrice <= 0) {
-      return "Debes ingresar un precio mayor que 0.";
-    }
-
-    if (!form.priceType) {
-      return "Debes seleccionar el tipo de precio.";
-    }
-
-    if (form.priceType !== "precio_total" && priceTypeConfig.unit) {
-      if (form.quantityUnit !== priceTypeConfig.unit) {
-        return `Para evitar confusiones, si el precio es ${priceTypeConfig.label.toLowerCase()}, la unidad disponible debe ser ${priceTypeConfig.unit}.`;
-      }
-    }
-
-    if (!origin || origin.length < 3) {
-      return "Debes ingresar un origen válido.";
-    }
-
-    if (!destination || destination.length < 3) {
-      return "Debes ingresar un destino válido.";
-    }
-
-    return "";
-  };
+  }, [captain?._id]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setMessage("");
-
-    const validationError = validateForm();
-
-    if (validationError) {
-      setMessage(validationError);
-      return;
-    }
 
     try {
       setLoading(true);
@@ -280,100 +163,16 @@ const CaptainGoodsOffers = () => {
 
       setMessage("Oferta de mercancía publicada correctamente.");
       resetForm();
-      await fetchMyGoodsOffers();
+      fetchMyGoodsOffers();
     } catch (error) {
       console.error("Error publicando oferta de mercancía:", error);
-
-      const apiErrors = error?.response?.data?.errors;
-      const apiMessage = error?.response?.data?.message;
-
-      if (Array.isArray(apiErrors) && apiErrors.length > 0) {
-        setMessage(apiErrors[0]?.msg || "Datos inválidos para publicar.");
-      } else {
-        setMessage(apiMessage || "No se pudo publicar la oferta de mercancía.");
-      }
+      setMessage(
+        error?.response?.data?.message ||
+          "No se pudo publicar la oferta de mercancía."
+      );
     } finally {
       setLoading(false);
     }
-  };
-
-  const renderOfferCard = (offer) => {
-    const availableLabel =
-      offer.availableLabel ||
-      `${offer.quantityAvailable} ${offer.quantityUnit} disponibles`;
-
-    const priceLabel = buildPriceLabel(offer);
-
-    return (
-      <div
-        key={offer._id}
-        className="rounded-2xl border border-gray-200 p-4 bg-gray-50"
-      >
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <h3 className="text-base font-bold text-gray-900">
-              {offer.productName}
-            </h3>
-
-            <p className="text-sm text-gray-600 mt-1">
-              {offer.origin} → {offer.destination}
-            </p>
-          </div>
-
-          <span
-            className={`text-xs font-semibold px-3 py-1 rounded-full ${
-              offer.status === "sold_out"
-                ? "bg-red-100 text-red-700"
-                : offer.status === "paused"
-                ? "bg-yellow-100 text-yellow-700"
-                : "bg-emerald-100 text-emerald-700"
-            }`}
-          >
-            {offer.status || "active"}
-          </span>
-        </div>
-
-        <div className="grid grid-cols-1 gap-2 mt-3">
-          <div className="rounded-2xl bg-white border border-gray-200 px-4 py-3">
-            <p className="text-xs text-gray-500 font-semibold">
-              Cantidad disponible real
-            </p>
-            <p className="text-base font-bold text-gray-900">
-              {availableLabel}
-            </p>
-          </div>
-
-          <div className="rounded-2xl bg-orange-50 border border-orange-100 px-4 py-3">
-            <p className="text-xs text-orange-700 font-semibold">
-              Precio publicado
-            </p>
-            <p className="text-base font-bold text-orange-800">
-              {priceLabel}
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-3 space-y-1 text-sm text-gray-700">
-          <p>
-            <span className="font-semibold">Negociable:</span>{" "}
-            {offer.isNegotiable ? "Sí" : "No"}
-          </p>
-
-          {offer.description ? (
-            <p>
-              <span className="font-semibold">Descripción:</span>{" "}
-              {offer.description}
-            </p>
-          ) : null}
-
-          {offer.notes ? (
-            <p>
-              <span className="font-semibold">Notas:</span> {offer.notes}
-            </p>
-          ) : null}
-        </div>
-      </div>
-    );
   };
 
   return (
@@ -408,11 +207,6 @@ const CaptainGoodsOffers = () => {
             <p className="inline-flex items-center rounded-full bg-orange-50 text-orange-700 px-3 py-1 text-xs font-semibold">
               Nueva publicación
             </p>
-
-            <p className="text-sm text-gray-600 mt-3">
-              Llena la cantidad total que tienes disponible y especifica si el
-              precio es por kg, por caja, por bulto, por unidad o por el total.
-            </p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -431,127 +225,78 @@ const CaptainGoodsOffers = () => {
               />
             </div>
 
-            <div className="rounded-[22px] border border-gray-200 bg-gray-50 p-3">
-              <p className="text-xs font-bold text-gray-700 uppercase mb-3">
-                Cantidad total disponible
-              </p>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 block mb-1">
-                    Cantidad
-                  </label>
-                  <input
-                    type="number"
-                    name="quantityAvailable"
-                    value={form.quantityAvailable}
-                    onChange={handleChange}
-                    placeholder="Ej: 200"
-                    min="1"
-                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 block mb-1">
-                    Unidad
-                  </label>
-                  <select
-                    name="quantityUnit"
-                    value={form.quantityUnit}
-                    onChange={handleChange}
-                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
-                    required
-                  >
-                    {GOODS_UNITS.map((unit) => (
-                      <option key={unit} value={unit}>
-                        {unit}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-1">
+                  Cantidad disponible
+                </label>
+                <input
+                  type="number"
+                  name="quantityAvailable"
+                  value={form.quantityAvailable}
+                  onChange={handleChange}
+                  placeholder="Ej: 20"
+                  min="0"
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none"
+                  required
+                />
               </div>
 
-              <p className="text-xs text-gray-500 mt-2">
-                Ejemplo: si traes 200 kilos, coloca cantidad 200 y unidad kg.
-              </p>
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-1">
+                  Unidad
+                </label>
+                <select
+                  name="quantityUnit"
+                  value={form.quantityUnit}
+                  onChange={handleChange}
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
+                  required
+                >
+                  {GOODS_UNITS.map((unit) => (
+                    <option key={unit} value={unit}>
+                      {unit}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
 
-            <div className="rounded-[22px] border border-orange-100 bg-orange-50 p-3">
-              <p className="text-xs font-bold text-orange-700 uppercase mb-3">
-                Precio de venta
-              </p>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 block mb-1">
-                    Precio
-                  </label>
-                  <input
-                    type="number"
-                    name="suggestedPrice"
-                    value={form.suggestedPrice}
-                    onChange={handleChange}
-                    placeholder="Ej: 20000"
-                    min="1"
-                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
-                    required
-                  />
-                </div>
-
-                <div>
-                  <label className="text-sm font-semibold text-gray-700 block mb-1">
-                    El precio es
-                  </label>
-                  <select
-                    name="priceType"
-                    value={form.priceType}
-                    onChange={handleChange}
-                    className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
-                    required
-                  >
-                    {GOODS_PRICE_TYPES.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-1">
+                  Precio sugerido
+                </label>
+                <input
+                  type="number"
+                  name="suggestedPrice"
+                  value={form.suggestedPrice}
+                  onChange={handleChange}
+                  placeholder="Ej: 85000"
+                  min="0"
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none"
+                  required
+                />
               </div>
 
-              <div className="rounded-2xl bg-white border border-orange-100 px-4 py-3 mt-3">
-                <p className="text-xs text-orange-700 font-semibold">
-                  Así verá el usuario tu publicación
-                </p>
-                <p className="text-base font-bold text-gray-900 mt-1">
-                  {preview.product}
-                </p>
-                <p className="text-sm text-gray-700 mt-1">
-                  Disponible:{" "}
-                  <span className="font-semibold">
-                    {preview.availableLabel}
-                  </span>
-                </p>
-                <p className="text-sm text-gray-700 mt-1">
-                  Precio publicado:{" "}
-                  <span className="font-semibold">{preview.priceLabel}</span>
-                </p>
+              <div>
+                <label className="text-sm font-semibold text-gray-700 block mb-1">
+                  Tipo de precio
+                </label>
+                <select
+                  name="priceType"
+                  value={form.priceType}
+                  onChange={handleChange}
+                  className="w-full rounded-2xl border border-gray-200 px-4 py-3 outline-none bg-white"
+                  required
+                >
+                  {GOODS_PRICE_TYPES.map((item) => (
+                    <option key={item.value} value={item.value}>
+                      {item.label}
+                    </option>
+                  ))}
+                </select>
               </div>
-
-              {form.priceType !== "precio_total" ? (
-                <p className="text-xs text-orange-700 mt-2">
-                  Para evitar confusiones, al elegir{" "}
-                  <strong>{priceTypeConfig.label.toLowerCase()}</strong>, la
-                  unidad disponible debe coincidir con{" "}
-                  <strong>{priceTypeConfig.unit}</strong>.
-                </p>
-              ) : (
-                <p className="text-xs text-orange-700 mt-2">
-                  Precio total significa que el valor publicado corresponde a
-                  toda la mercancía disponible.
-                </p>
-              )}
             </div>
 
             <div>
@@ -659,13 +404,7 @@ const CaptainGoodsOffers = () => {
             </label>
 
             {message ? (
-              <div
-                className={`rounded-2xl px-4 py-3 text-sm ${
-                  message.includes("correctamente")
-                    ? "bg-emerald-50 text-emerald-700"
-                    : "bg-red-50 text-red-700"
-                }`}
-              >
+              <div className="rounded-2xl bg-gray-100 px-4 py-3 text-sm text-gray-700">
                 {message}
               </div>
             ) : null}
@@ -701,16 +440,49 @@ const CaptainGoodsOffers = () => {
           </div>
 
           {loadingMine ? (
-            <div className="text-sm text-gray-600">
-              Cargando publicaciones...
-            </div>
+            <div className="text-sm text-gray-600">Cargando publicaciones...</div>
           ) : myOffers.length === 0 ? (
             <div className="rounded-2xl bg-gray-50 px-4 py-6 text-sm text-gray-600 text-center">
               Aún no has publicado mercancía.
             </div>
           ) : (
             <div className="space-y-3">
-              {myOffers.map((offer) => renderOfferCard(offer))}
+              {myOffers.map((offer) => (
+                <div
+                  key={offer._id}
+                  className="rounded-2xl border border-gray-200 p-4 bg-gray-50"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <h3 className="text-base font-bold text-gray-900">
+                        {offer.productName}
+                      </h3>
+                      <p className="text-sm text-gray-600 mt-1">
+                        {offer.quantityAvailable} {offer.quantityUnit}
+                      </p>
+                    </div>
+
+                    <span className="text-xs font-semibold px-3 py-1 rounded-full bg-emerald-100 text-emerald-700">
+                      {offer.status || "active"}
+                    </span>
+                  </div>
+
+                  <div className="mt-3 space-y-1 text-sm text-gray-700">
+                    <p>
+                      <span className="font-semibold">Precio:</span>{" "}
+                      {formatCOP(offer.suggestedPrice)}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Ruta:</span> {offer.origin} →{" "}
+                      {offer.destination}
+                    </p>
+                    <p>
+                      <span className="font-semibold">Negociable:</span>{" "}
+                      {offer.isNegotiable ? "Sí" : "No"}
+                    </p>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </div>
