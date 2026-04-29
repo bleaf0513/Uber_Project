@@ -1002,10 +1002,16 @@ function Home() {
         ref={driverSelectedRef}
         className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto h-[38%] shadow-2xl"
       >
-        <DriverSelected ride={ride} captainArrived={captainArrived} etaInfo={etaInfo} />
+       <DriverSelected
+  ride={ride}
+  captainArrived={captainArrived}
+  etaInfo={etaInfo}
+  socket={socket}
+  user={user}
+/>
       </div>
     </div>
   );
 }
 
-export default Home;
+export default Home;Home.jsx

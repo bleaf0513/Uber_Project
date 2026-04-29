@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -7,6 +7,8 @@ import "remixicon/fonts/remixicon.css";
 import LiveTracking from "../../components/LiveTracking";
 import { ToastContainer, toast } from "react-toastify";
 import { getApiBaseUrl } from "../apiBase";
+import { SocketContext } from "../context/SocketContext";
+import { CaptainDataContext } from "../context/CaptainContext";
 
 const CANCEL_REASONS = [
   "Usuario no contesta",
@@ -20,23 +22,43 @@ const CANCEL_REASONS = [
 ];
 
 const CaptainRiding = () => {
-  const [showCancelModal, setShowCancelModal] = React.useState(false);
-  const [selectedReason, setSelectedReason] = React.useState("");
-  const [cancelNotes, setCancelNotes] = React.useState("");
-  const [sendingArrived, setSendingArrived] = React.useState(false);
-  const [sendingCancel, setSendingCancel] = React.useState(false);
-  const [finishingRide, setFinishingRide] = React.useState(false);
-  const [driverArrived, setDriverArrived] = React.useState(false);
-  const [etaInfo, setEtaInfo] = React.useState({
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [selectedReason, setSelectedReason] = useState("");
+  const [cancelNotes, setCancelNotes] = useState("");
+  const [sendingArrived, setSendingArrived] = useState(false);
+  const [sendingCancel, setSendingCancel] = useState(false);
+  const [finishingRide, setFinishingRide] = useState(false);
+  const [driverArrived, setDriverArrived] = useState(false);
+  const [etaInfo, setEtaInfo] = useState({
     etaText: "",
     distanceText: "",
   });
 
-  const cancelModalRef = React.useRef(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [messageText, setMessageText] = useState("");
+  const [hasUnreadMessage, setHasUnreadMessage] = useState(false);
+  const [messages, setMessages] = useState([]);
+
+  const cancelModalRef = useRef(null);
+  const messagesEndRef = useRef(null);
 
   const location = useLocation();
   const navigate = useNavigate();
   const rideData = location.state?.ride || null;
+
+  const { socket } = useContext(SocketContext);
+  const { captain } = useContext(CaptainDataContext);
+
+  const quickMessages = useMemo(
+    () => [
+      "Ya llegué",
+      "Voy en camino",
+      "Estoy en la entrada",
+      "No veo el punto exacto",
+      "¿Me confirmas dónde estás?",
+    ],
+    []
+  );
 
   useGSAP(() => {
     if (showCancelModal) {
@@ -56,8 +78,81 @@ const CaptainRiding = () => {
     }
   }, [showCancelModal]);
 
+  useEffect(() => {
+    if (!socket || !captain?._id) return;
+
+    const emitJoin = () => {
+      socket.emit("join", {
+        userId: captain._id,
+        userType: "captain",
+      });
+    };
+
+    if (socket.connected) {
+      emitJoin();
+    }
+
+    socket.on("connect", emitJoin);
+
+    return () => {
+      socket.off("connect", emitJoin);
+    };
+  }, [socket, captain?._id]);
+
+  useEffect(() => {
+    if (!rideData?._id) {
+      setMessages([]);
+      setChatOpen(false);
+      setHasUnreadMessage(false);
+    }
+  }, [rideData?._id]);
+
+  useEffect(() => {
+    if (!chatOpen) return;
+
+    setHasUnreadMessage(false);
+
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    }, 100);
+  }, [chatOpen, messages]);
+
+  useEffect(() => {
+    if (!socket || !rideData?._id) return;
+
+    const handleRideMessage = (payload) => {
+      if (!payload?.rideId) return;
+      if (String(payload.rideId) !== String(rideData._id)) return;
+
+      const nextMessage = {
+        id: payload?._id || `${Date.now()}-${Math.random()}`,
+        rideId: payload.rideId,
+        senderType: payload.senderType || payload.from || "user",
+        text: payload.message || payload.text || "",
+        createdAt: payload.createdAt || new Date().toISOString(),
+      };
+
+      if (!nextMessage.text) return;
+
+      setMessages((prev) => [...prev, nextMessage]);
+
+      if (!chatOpen && nextMessage.senderType !== "captain") {
+        setHasUnreadMessage(true);
+      }
+    };
+
+    socket.on("ride-message", handleRideMessage);
+    socket.on("ride-chat-message", handleRideMessage);
+
+    return () => {
+      socket.off("ride-message", handleRideMessage);
+      socket.off("ride-chat-message", handleRideMessage);
+    };
+  }, [socket, rideData?._id, chatOpen]);
+
   const formatCOP = (value) => {
     const number = Number(value) || 0;
+
     return new Intl.NumberFormat("es-CO", {
       style: "currency",
       currency: "COP",
@@ -67,9 +162,13 @@ const CaptainRiding = () => {
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
-    if (!safeAddress) return { firstPart: "", secondPart: "" };
+
+    if (!safeAddress) {
+      return { firstPart: "", secondPart: "" };
+    }
 
     const firstCommaIndex = safeAddress.indexOf(",");
+
     if (firstCommaIndex === -1) {
       return { firstPart: safeAddress, secondPart: "" };
     }
@@ -88,15 +187,78 @@ const CaptainRiding = () => {
     rideData?.captain?.profilePic ||
     "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
 
+  const getUserPhoto = () =>
+    rideData?.user?.profileImage ||
+    rideData?.user?.photo ||
+    rideData?.user?.avatar ||
+    rideData?.user?.image ||
+    rideData?.user?.profilePic ||
+    "https://cdn-icons-png.flaticon.com/512/149/149071.png";
+
   const getVehicleLabel = (vehicleType) => {
     const labels = {
       motorcycle: "Moto",
       car: "Carro",
+      motocarro: "Motocarro",
+      pickup: "Camioneta",
       light_cargo: "Carga liviana",
-      van: "Furgón / Camioneta",
+      van: "Van / Furgón",
       truck: "Camión",
+      moving: "Mudanza",
     };
+
     return labels[vehicleType] || "Vehículo";
+  };
+
+  const sendMessage = (textToSend = "") => {
+    const cleanText = String(textToSend || messageText || "").trim();
+
+    if (!cleanText || !rideData?._id) return;
+
+    const userId = rideData?.user?._id || rideData?.user || rideData?.userId || null;
+    const captainId =
+      captain?._id ||
+      rideData?.captain?._id ||
+      rideData?.captain ||
+      rideData?.captainId ||
+      null;
+
+    const newMessage = {
+      id: `${Date.now()}-${Math.random()}`,
+      rideId: rideData._id,
+      senderType: "captain",
+      text: cleanText,
+      createdAt: new Date().toISOString(),
+    };
+
+    setMessages((prev) => [...prev, newMessage]);
+    setMessageText("");
+
+    if (socket) {
+      socket.emit("ride-message", {
+        rideId: rideData._id,
+        senderType: "captain",
+        from: "captain",
+        userId,
+        captainId,
+        to: userId,
+        message: cleanText,
+        text: cleanText,
+        createdAt: newMessage.createdAt,
+      });
+
+      socket.emit("ride-chat-message", {
+        rideId: rideData._id,
+        senderType: "captain",
+        from: "captain",
+        userId,
+        captainId,
+        to: userId,
+        message: cleanText,
+        text: cleanText,
+        createdAt: newMessage.createdAt,
+      });
+    }
   };
 
   const handleArrived = async () => {
@@ -203,6 +365,7 @@ const CaptainRiding = () => {
           <h1 className="text-2xl font-bold text-gray-900">
             No hay información del servicio
           </h1>
+
           <Link
             to="/captain-home"
             className="inline-flex mt-5 rounded-2xl bg-black text-white px-5 py-3 font-semibold"
@@ -218,8 +381,9 @@ const CaptainRiding = () => {
   const destinationAddress = formatAddress(rideData?.destination);
 
   const userFullName =
-    `${rideData?.user?.fullname?.firstname || ""} ${rideData?.user?.fullname?.lastname || ""}`.trim() ||
-    "Usuario";
+    `${rideData?.user?.fullname?.firstname || ""} ${
+      rideData?.user?.fullname?.lastname || ""
+    }`.trim() || "Usuario";
 
   const userPhone =
     rideData?.user?.phone ||
@@ -231,9 +395,11 @@ const CaptainRiding = () => {
     rideData?.captain?.vehicle?.vehicleType ||
     rideData?.captain?.vehicleType ||
     rideData?.vehicleType ||
+    rideData?.vehicle ||
     "car";
 
   const vehicleLabel = getVehicleLabel(vehicleType);
+
   const plate =
     rideData?.captain?.vehicle?.plate ||
     rideData?.captain?.plate ||
@@ -253,7 +419,9 @@ const CaptainRiding = () => {
   const headerSubtext = driverArrived
     ? "El usuario ya fue notificado."
     : etaInfo?.etaText
-    ? `Tiempo estimado: ${etaInfo.etaText}${etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""}`
+    ? `Tiempo estimado: ${etaInfo.etaText}${
+        etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
+      }`
     : "Dirígete al punto de recogida del usuario.";
 
   return (
@@ -285,17 +453,34 @@ const CaptainRiding = () => {
         <i className="ri-logout-box-line ri-xl text-white"></i>
       </Link>
 
+      <button
+        type="button"
+        onClick={() => {
+          setChatOpen(true);
+          setHasUnreadMessage(false);
+        }}
+        className="absolute top-[72px] right-3 z-40 w-14 h-14 rounded-full bg-lime-300 shadow-xl flex items-center justify-center"
+      >
+        {hasUnreadMessage && (
+          <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
+        )}
+
+        <i className="ri-message-3-line text-3xl text-black"></i>
+      </button>
+
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
-        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[46vh] overflow-y-auto">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[54vh] overflow-y-auto">
           <div className="bg-gradient-to-r from-emerald-500 to-emerald-300 px-4 py-4 text-white">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-wide text-white/85">
                   Servicio en curso
                 </p>
+
                 <h2 className="text-2xl font-extrabold mt-1">
                   {headerStatus}
                 </h2>
+
                 <p className="text-sm text-white/90 mt-1">{headerSubtext}</p>
               </div>
 
@@ -303,6 +488,7 @@ const CaptainRiding = () => {
                 <p className="text-[11px] uppercase tracking-wide text-white/85">
                   Valor
                 </p>
+
                 <p className="text-2xl font-extrabold">{formatCOP(fare)}</p>
               </div>
             </div>
@@ -311,8 +497,8 @@ const CaptainRiding = () => {
           <div className="p-4 space-y-3">
             <div className="flex items-center gap-3 rounded-3xl border border-gray-200 bg-gray-50 p-3">
               <img
-                src={getDriverPhoto()}
-                alt="Conductor"
+                src={getUserPhoto()}
+                alt={userFullName}
                 className="w-16 h-16 rounded-2xl object-cover"
               />
 
@@ -320,22 +506,96 @@ const CaptainRiding = () => {
                 <p className="text-lg font-bold text-gray-900 truncate">
                   {userFullName}
                 </p>
+
                 <p className="text-sm text-gray-600 mt-1">{userPhone}</p>
+
                 <p className="text-sm text-gray-600 mt-1">
                   {vehicleLabel} · {color} · {plate}
                 </p>
               </div>
             </div>
 
+            <div className="grid grid-cols-3 gap-3 text-center">
+              <button
+                type="button"
+                onClick={() => {
+                  setChatOpen(true);
+                  setHasUnreadMessage(false);
+                }}
+                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center"
+              >
+                <div className="relative w-14 h-14 rounded-full bg-lime-300 flex items-center justify-center">
+                  {hasUnreadMessage && (
+                    <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
+                  )}
+                  <i className="ri-message-3-line text-2xl text-black"></i>
+                </div>
+
+                <p className="text-xs font-bold text-gray-800 mt-2">
+                  Chat usuario
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleArrived}
+                disabled={sendingArrived || driverArrived}
+                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center disabled:opacity-60"
+              >
+                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center">
+                  <i className="ri-map-pin-user-fill text-2xl text-emerald-700"></i>
+                </div>
+
+                <p className="text-xs font-bold text-gray-800 mt-2">
+                  {driverArrived ? "Notificado" : "Llegué"}
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(true)}
+                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center"
+              >
+                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center">
+                  <i className="ri-close-circle-line text-2xl text-red-700"></i>
+                </div>
+
+                <p className="text-xs font-bold text-gray-800 mt-2">
+                  Cancelar
+                </p>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setChatOpen(true);
+                setHasUnreadMessage(false);
+              }}
+              className="w-full rounded-xl bg-gray-100 px-4 py-4 flex items-center justify-between"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <i className="ri-message-3-line text-2xl text-gray-800"></i>
+
+                <span className="text-base font-semibold text-gray-500 truncate">
+                  ¿Enviar mensaje u observación al usuario?
+                </span>
+              </div>
+
+              <i className="ri-arrow-right-s-line text-2xl text-gray-900"></i>
+            </button>
+
             <div className="rounded-3xl border border-gray-200 bg-white p-3">
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
                   <i className="ri-map-pin-range-fill text-lg"></i>
                 </div>
+
                 <div className="min-w-0">
                   <p className="text-base font-bold text-gray-900">
                     {pickupAddress.firstPart || "Punto de recogida"}
                   </p>
+
                   <p className="text-sm text-gray-600">
                     {pickupAddress.secondPart || "Ubicación del usuario"}
                   </p>
@@ -348,10 +608,12 @@ const CaptainRiding = () => {
                 <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
                   <i className="ri-square-fill text-lg"></i>
                 </div>
+
                 <div className="min-w-0">
                   <p className="text-base font-bold text-gray-900">
                     {destinationAddress.firstPart || "Destino"}
                   </p>
+
                   <p className="text-sm text-gray-600">
                     {destinationAddress.secondPart || "Destino del servicio"}
                   </p>
@@ -364,6 +626,7 @@ const CaptainRiding = () => {
                 <p className="text-sm font-bold text-violet-900">
                   Seguimiento en tiempo real
                 </p>
+
                 <p className="text-sm text-violet-800 mt-1">
                   {etaInfo?.etaText ? `Llegas en ${etaInfo.etaText}` : ""}
                   {etaInfo?.etaText && etaInfo?.distanceText ? " · " : ""}
@@ -371,35 +634,6 @@ const CaptainRiding = () => {
                 </p>
               </div>
             )}
-
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={handleArrived}
-                disabled={sendingArrived || driverArrived}
-                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-60"
-                style={{
-                  background: "linear-gradient(to right, #1d976c, #93f9b9)",
-                }}
-              >
-                {driverArrived
-                  ? "Usuario notificado"
-                  : sendingArrived
-                  ? "Notificando..."
-                  : "Llegué"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowCancelModal(true)}
-                className="w-full rounded-2xl py-3.5 text-white font-bold"
-                style={{
-                  background: "linear-gradient(to right, #cb2d3e, #ef473a)",
-                }}
-              >
-                Cancelar solicitud
-              </button>
-            </div>
 
             <button
               type="button"
@@ -416,6 +650,129 @@ const CaptainRiding = () => {
         </div>
       </div>
 
+      {chatOpen && (
+        <div className="fixed inset-0 z-[999] bg-black/40 flex items-end">
+          <div className="w-full bg-white rounded-t-[28px] max-h-[88vh] flex flex-col shadow-2xl">
+            <div className="flex items-center justify-center pt-3">
+              <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+            </div>
+
+            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+              <div className="flex items-center gap-3 min-w-0">
+                <img
+                  src={getUserPhoto()}
+                  alt={userFullName}
+                  className="w-12 h-12 rounded-full object-cover bg-gray-200"
+                />
+
+                <div className="min-w-0">
+                  <p className="text-lg font-extrabold text-gray-900 truncate">
+                    {userFullName}
+                  </p>
+
+                  <p className="text-sm text-gray-500 truncate">
+                    Usuario del servicio
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setChatOpen(false)}
+                className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <i className="ri-close-line text-2xl"></i>
+              </button>
+            </div>
+
+            <div className="px-4 py-3 bg-gray-50 flex gap-2 overflow-x-auto">
+              {quickMessages.map((text) => (
+                <button
+                  key={text}
+                  type="button"
+                  onClick={() => sendMessage(text)}
+                  className="shrink-0 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"
+                >
+                  {text}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-4 py-4 bg-white space-y-3">
+              {messages.length === 0 ? (
+                <div className="text-center py-8">
+                  <div className="w-16 h-16 mx-auto rounded-full bg-lime-200 flex items-center justify-center">
+                    <i className="ri-message-3-line text-3xl text-gray-900"></i>
+                  </div>
+
+                  <p className="text-lg font-bold text-gray-900 mt-4">
+                    Chat con el usuario
+                  </p>
+
+                  <p className="text-sm text-gray-500 mt-1">
+                    Escríbele una observación o usa un mensaje rápido.
+                  </p>
+                </div>
+              ) : (
+                messages.map((msg) => {
+                  const isMine =
+                    msg.senderType === "captain" || msg.from === "captain";
+
+                  return (
+                    <div
+                      key={msg.id}
+                      className={`flex ${
+                        isMine ? "justify-end" : "justify-start"
+                      }`}
+                    >
+                      <div
+                        className={`max-w-[78%] rounded-2xl px-4 py-3 ${
+                          isMine
+                            ? "bg-lime-300 text-gray-950 rounded-br-md"
+                            : "bg-gray-100 text-gray-900 rounded-bl-md"
+                        }`}
+                      >
+                        <p className="text-sm font-medium leading-5">
+                          {msg.text}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+
+              <div ref={messagesEndRef}></div>
+            </div>
+
+            <div className="p-4 border-t border-gray-100 bg-white">
+              <div className="flex items-center gap-2">
+                <input
+                  value={messageText}
+                  onChange={(e) => setMessageText(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      sendMessage();
+                    }
+                  }}
+                  className="flex-1 rounded-full bg-gray-100 px-4 py-3 text-base outline-none"
+                  type="text"
+                  placeholder="Escribe un mensaje..."
+                />
+
+                <button
+                  type="button"
+                  onClick={() => sendMessage()}
+                  className="w-12 h-12 rounded-full bg-lime-300 flex items-center justify-center"
+                >
+                  <i className="ri-send-plane-fill text-2xl text-gray-950"></i>
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showCancelModal && (
         <div className="fixed inset-0 z-50 bg-black/50 flex items-end">
           <div
@@ -429,6 +786,7 @@ const CaptainRiding = () => {
             <h3 className="text-2xl font-extrabold text-gray-900">
               Cancelar solicitud
             </h3>
+
             <p className="text-sm text-gray-600 mt-2">
               Selecciona el motivo para registrar la cancelación correctamente.
             </p>
@@ -458,6 +816,7 @@ const CaptainRiding = () => {
               <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Nota adicional
               </label>
+
               <textarea
                 rows={4}
                 value={cancelNotes}
