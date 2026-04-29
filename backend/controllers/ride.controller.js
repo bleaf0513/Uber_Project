@@ -85,6 +85,7 @@ function normalizeOffer(offer) {
 
 module.exports.createRide = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -106,6 +107,12 @@ module.exports.createRide = async (req, res) => {
                 $set: {
                     status: "pending",
                     negotiationStatus: "open",
+                    cancelledAt: null,
+                    cancelledBy: null,
+                    cancelReason: "",
+                    cancelNotes: "",
+                    captain: null,
+                    selectedOfferCaptain: null,
                 },
             }
         );
@@ -267,6 +274,7 @@ module.exports.createRide = async (req, res) => {
 
 module.exports.getFare = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -292,6 +300,7 @@ module.exports.getFare = async (req, res) => {
 
 module.exports.captainOfferRide = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -311,7 +320,9 @@ module.exports.captainOfferRide = async (req, res) => {
         if (
             ride.status === "cancelled" ||
             ride.status === "completed" ||
-            ride.status === "ongoing"
+            ride.status === "ongoing" ||
+            ride.cancelledAt ||
+            ride.cancelledBy
         ) {
             return res.status(400).json({
                 message: "Este viaje ya no acepta ofertas.",
@@ -381,6 +392,8 @@ module.exports.captainOfferRide = async (req, res) => {
                 _id: rideId,
                 negotiationStatus: "open",
                 status: { $nin: ["cancelled", "completed", "ongoing"] },
+                cancelledAt: null,
+                cancelledBy: null,
             },
             {
                 $set: {
@@ -425,6 +438,7 @@ module.exports.captainOfferRide = async (req, res) => {
 
 module.exports.userRespondToCaptainOffer = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -444,6 +458,12 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
         if (String(ride.user?._id) !== String(req.user._id)) {
             return res.status(403).json({
                 message: "No autorizado para responder a este viaje.",
+            });
+        }
+
+        if (ride.cancelledAt || ride.cancelledBy || ride.status === "cancelled") {
+            return res.status(400).json({
+                message: "Este viaje ya fue cancelado.",
             });
         }
 
@@ -490,7 +510,13 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
             };
 
             const rejectResult = await rideModel.updateOne(
-                { _id: rideId, user: req.user._id },
+                {
+                    _id: rideId,
+                    user: req.user._id,
+                    cancelledAt: null,
+                    cancelledBy: null,
+                    status: { $in: ["pending", "negotiating"] },
+                },
                 {
                     $set: {
                         driverOffers: currentOffers,
@@ -558,6 +584,8 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
                 user: req.user._id,
                 negotiationStatus: "open",
                 status: { $in: ["pending", "negotiating"] },
+                cancelledAt: null,
+                cancelledBy: null,
             },
             {
                 $set: {
@@ -627,6 +655,8 @@ module.exports.getMyActiveRide = async (req, res) => {
                 status: {
                     $in: ["pending", "negotiating", "accepted", "arrived", "ongoing"],
                 },
+                cancelledAt: null,
+                cancelledBy: null,
             })
             .sort({ createdAt: -1 })
             .populate("captain")
@@ -662,12 +692,17 @@ module.exports.getAvailableForCaptain = async (req, res) => {
             });
         }
 
+        const maxAgeMinutes = 30;
+        const createdAfter = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+
         const openRides = await rideModel
             .find({
                 negotiationStatus: "open",
                 status: { $in: ["pending", "negotiating"] },
                 captain: null,
                 cancelledAt: null,
+                cancelledBy: null,
+                createdAt: { $gte: createdAfter },
             })
             .sort({ createdAt: -1 })
             .limit(20)
@@ -690,7 +725,9 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                 freshRide.negotiationStatus !== "open" ||
                 !["pending", "negotiating"].includes(freshRide.status) ||
                 freshRide.captain ||
-                freshRide.cancelledAt
+                freshRide.cancelledAt ||
+                freshRide.cancelledBy ||
+                freshRide.createdAt < createdAfter
             ) {
                 continue;
             }
@@ -939,16 +976,69 @@ module.exports.cancelRide = async (req, res) => {
     const { rideId } = req.body;
 
     try {
-        const ride = await rideService.cancelRide({
-            rideId,
-            user: req.user,
+        const ride = await rideModel
+            .findOneAndUpdate(
+                {
+                    _id: rideId,
+                    user: req.user._id,
+                    status: { $in: ["pending", "negotiating", "accepted", "arrived"] },
+                    cancelledAt: null,
+                },
+                {
+                    $set: {
+                        status: "cancelled",
+                        negotiationStatus: "closed",
+                        cancelledBy: "user",
+                        cancelReason: "Cancelado por el usuario",
+                        cancelNotes: "",
+                        cancelledAt: new Date(),
+                        captain: null,
+                        selectedOfferCaptain: null,
+                        "driverOffers.$[].status": "withdrawn",
+                    },
+                },
+                {
+                    new: true,
+                }
+            )
+            .populate("user")
+            .populate("captain")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message: "Viaje no encontrado o ya no se puede cancelar.",
+            });
+        }
+
+        for (const offer of ride.driverOffers || []) {
+            if (offer?.captain) {
+                emitToCaptain(offer.captain, {
+                    event: "ride-no-longer-available",
+                    data: {
+                        rideId: ride._id,
+                        message: "El usuario canceló este viaje.",
+                    },
+                });
+            }
+        }
+
+        emitToUser(ride.user, {
+            event: "ride-cancelled",
+            data: {
+                rideId: ride._id,
+                message: "Solicitud cancelada correctamente.",
+                ride,
+            },
         });
 
         return res.status(200).json({
-            message: "Solicitud cancelada correctamente",
+            message: "Solicitud cancelada correctamente.",
             ride,
         });
     } catch (err) {
+        console.error("[cancelRide] error:", err);
+
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
         });
