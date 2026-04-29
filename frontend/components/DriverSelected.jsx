@@ -2,10 +2,12 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
 
+const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+
 const DriverSelected = (props) => {
   const ride = props?.ride || null;
   const socket = props?.socket || null;
-  const user = props?.user || null;
   const captainArrived = props?.captainArrived || false;
   const etaInfo = props?.etaInfo || {};
 
@@ -16,6 +18,16 @@ const DriverSelected = (props) => {
   const [sendingMessage, setSendingMessage] = useState(false);
 
   const messagesEndRef = useRef(null);
+
+  const quickMessages = useMemo(
+    () => [
+      "Ya estoy afuera",
+      "Voy bajando",
+      "¿Dónde estás?",
+      "Te espero en portería",
+    ],
+    []
+  );
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
@@ -69,16 +81,6 @@ const DriverSelected = (props) => {
     return labels[vehicleType] || "Vehículo";
   };
 
-  const quickMessages = useMemo(
-    () => [
-      "Ya estoy afuera",
-      "Voy bajando",
-      "¿Dónde estás?",
-      "Te espero en portería",
-    ],
-    []
-  );
-
   useEffect(() => {
     if (!chatOpen) return;
 
@@ -101,6 +103,8 @@ const DriverSelected = (props) => {
     if (!socket || !ride?._id) return;
 
     const handleRideMessage = (payload) => {
+      console.log("[USER CHAT] Mensaje recibido:", payload);
+
       if (!payload?.rideId) return;
       if (String(payload.rideId) !== String(ride._id)) return;
 
@@ -108,15 +112,21 @@ const DriverSelected = (props) => {
         id: payload?._id || `${Date.now()}-${Math.random()}`,
         rideId: payload.rideId,
         senderType: payload.senderType || payload.from || "captain",
+        from: payload.from || payload.senderType || "captain",
         text: payload.message || payload.text || "",
+        message: payload.message || payload.text || "",
         createdAt: payload.createdAt || new Date().toISOString(),
       };
 
       if (!nextMessage.text) return;
 
       setMessages((prev) => {
-        const exists = prev.some((msg) => String(msg.id) === String(nextMessage.id));
+        const exists = prev.some(
+          (msg) => String(msg.id) === String(nextMessage.id)
+        );
+
         if (exists) return prev;
+
         return [...prev, nextMessage];
       });
 
@@ -163,11 +173,17 @@ const DriverSelected = (props) => {
     try {
       setSendingMessage(true);
 
+      console.log("[USER CHAT] Enviando mensaje:", {
+        rideId: ride._id,
+        message: cleanText,
+      });
+
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/chat-message`,
         {
           rideId: ride._id,
           message: cleanText,
+          senderType: "user",
         },
         {
           headers: {
@@ -188,7 +204,8 @@ const DriverSelected = (props) => {
                   senderType: serverMessage.senderType || "user",
                   from: serverMessage.from || "user",
                   text: serverMessage.text || serverMessage.message || cleanText,
-                  message: serverMessage.message || serverMessage.text || cleanText,
+                  message:
+                    serverMessage.message || serverMessage.text || cleanText,
                   createdAt: serverMessage.createdAt || tempMessage.createdAt,
                   pending: false,
                 }
@@ -227,6 +244,10 @@ const DriverSelected = (props) => {
     }
   };
 
+  const handleSecurity = () => {
+    alert("Centro de seguridad próximamente disponible.");
+  };
+
   if (!ride) {
     return (
       <div className="bg-white rounded-t-[24px] p-6">
@@ -253,6 +274,7 @@ const DriverSelected = (props) => {
 
   const plate = vehicle?.plate || captain?.plate || "Sin placa";
   const color = vehicle?.color || captain?.vehicleColor || "Color no disponible";
+
   const vehicleType =
     vehicle?.vehicleType ||
     captain?.vehicleType ||
@@ -271,43 +293,52 @@ const DriverSelected = (props) => {
     : "El conductor llegará pronto";
 
   return (
-    <div className="bg-white rounded-t-[24px] pb-6 relative">
+    <div className="bg-white rounded-t-[24px] pb-6 relative overflow-hidden">
       <div className="flex items-center justify-center pt-3 pb-2">
         <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
       </div>
 
-      <div className="px-5">
+      <div
+        className="mx-4 mt-2 rounded-[28px] px-5 py-5 text-white shadow-xl"
+        style={{
+          background: PURPLE_GRADIENT,
+        }}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <h2 className="text-[26px] leading-8 font-extrabold text-gray-950">
+            <p className="text-[11px] uppercase tracking-wide text-white/80">
+              Servicio confirmado
+            </p>
+
+            <h2 className="text-[26px] leading-8 font-extrabold mt-1">
               {etaText}
             </h2>
 
-            <p className="text-lg text-gray-800 mt-3">
+            <p className="text-sm text-white/90 mt-2">
               {color} {vehicleLabel}
             </p>
 
-            <div className="inline-flex mt-2 px-4 py-2 rounded-lg bg-gray-200">
-              <span className="text-xl font-extrabold tracking-wide text-gray-900">
+            <div className="inline-flex mt-3 px-4 py-2 rounded-xl bg-white/20 border border-white/20">
+              <span className="text-xl font-extrabold tracking-wide text-white">
                 {plate}
               </span>
             </div>
           </div>
 
-          <div className="shrink-0 w-24 h-20 flex items-center justify-center">
-            <i className="ri-car-fill text-6xl text-gray-600"></i>
+          <div className="shrink-0 w-20 h-20 rounded-3xl bg-white/15 flex items-center justify-center">
+            <i className="ri-car-fill text-6xl text-white"></i>
           </div>
         </div>
       </div>
 
-      <div className="px-5 mt-6">
+      <div className="px-5 mt-5">
         <div className="grid grid-cols-3 items-start gap-3 text-center">
           <div className="flex flex-col items-center">
             <div className="relative">
               <img
                 src={driverPhoto}
                 alt={driverName}
-                className="w-16 h-16 rounded-full object-cover bg-gray-200"
+                className="w-16 h-16 rounded-full object-cover bg-gray-200 border-2 border-purple-200"
               />
 
               <div className="absolute -top-1 -right-3 bg-white shadow rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
@@ -316,7 +347,7 @@ const DriverSelected = (props) => {
               </div>
             </div>
 
-            <p className="text-base font-medium text-gray-900 mt-3 leading-5">
+            <p className="text-base font-bold text-gray-900 mt-3 leading-5">
               {driverName}
             </p>
           </div>
@@ -329,27 +360,39 @@ const DriverSelected = (props) => {
             }}
             className="flex flex-col items-center"
           >
-            <div className="relative w-16 h-16 rounded-full bg-lime-300 flex items-center justify-center shadow-sm">
-              {(hasUnreadMessage || messages.length === 0) && (
+            <div
+              className="relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
+              {hasUnreadMessage && (
                 <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
               )}
 
-              <i className="ri-phone-line text-3xl text-black"></i>
-              <i className="ri-message-3-line text-lg text-black absolute right-3 top-3"></i>
+              <i className="ri-message-3-line text-3xl text-white"></i>
             </div>
 
-            <p className="text-base font-medium text-gray-900 mt-3 leading-5">
-              Contactar al conductor
+            <p className="text-base font-bold text-purple-800 mt-3 leading-5">
+              Contactar
             </p>
           </button>
 
-          <button type="button" className="flex flex-col items-center">
-            <div className="relative w-16 h-16 rounded-full bg-lime-300 flex items-center justify-center shadow-sm">
-              <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
-              <i className="ri-shield-check-line text-3xl text-black"></i>
+          <button
+            type="button"
+            onClick={handleSecurity}
+            className="flex flex-col items-center"
+          >
+            <div
+              className="relative w-16 h-16 rounded-full flex items-center justify-center shadow-lg"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
+              <i className="ri-shield-check-line text-3xl text-white"></i>
             </div>
 
-            <p className="text-base font-medium text-gray-900 mt-3 leading-5">
+            <p className="text-base font-bold text-purple-800 mt-3 leading-5">
               Seguridad
             </p>
           </button>
@@ -363,46 +406,50 @@ const DriverSelected = (props) => {
             setChatOpen(true);
             setHasUnreadMessage(false);
           }}
-          className="w-full rounded-xl bg-gray-100 px-4 py-4 flex items-center justify-between"
+          className="w-full rounded-xl px-4 py-4 flex items-center justify-between border border-purple-100"
+          style={{
+            background: PURPLE_SOFT,
+          }}
         >
           <div className="flex items-center gap-3 min-w-0">
-            <i className="ri-message-3-line text-2xl text-gray-800"></i>
-            <span className="text-lg font-semibold text-gray-500 truncate">
+            <i className="ri-message-3-line text-2xl text-purple-700"></i>
+
+            <span className="text-lg font-semibold text-purple-700 truncate">
               ¿Tienes alguna observación para el conductor?
             </span>
           </div>
 
-          <i className="ri-arrow-right-s-line text-2xl text-gray-900"></i>
+          <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
         </button>
       </div>
 
       <div className="px-5 mt-6">
         <p className="text-lg text-gray-500 mb-2">Pago</p>
 
-        <div className="rounded-[22px] border border-gray-200 bg-gray-50 p-4 flex items-center justify-between">
+        <div className="rounded-[22px] border border-purple-100 bg-purple-50 p-4 flex items-center justify-between">
           <div>
             <p className="text-base font-bold text-gray-900">
               Pago contra servicio
             </p>
-            <p className="text-sm text-gray-500">Valor acordado</p>
+            <p className="text-sm text-purple-700">Valor acordado</p>
           </div>
 
-          <p className="text-xl font-extrabold text-gray-900">
+          <p className="text-xl font-extrabold text-purple-900">
             {formatCOP(finalFare)}
           </p>
         </div>
       </div>
 
       <div className="px-5 mt-5">
-        <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4">
+        <div className="rounded-[24px] border border-purple-100 bg-white p-4 shadow-sm">
           <p className="text-base font-bold text-gray-900 mb-4">
             Detalles del recorrido
           </p>
 
           <div className="space-y-4">
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-white flex items-center justify-center shadow-sm">
-                <i className="ri-map-pin-range-fill text-lg"></i>
+              <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shadow-sm">
+                <i className="ri-map-pin-range-fill text-lg text-purple-700"></i>
               </div>
 
               <div className="min-w-0">
@@ -415,9 +462,11 @@ const DriverSelected = (props) => {
               </div>
             </div>
 
+            <div className="h-5 w-px bg-gray-200 ml-5"></div>
+
             <div className="flex items-start gap-3">
-              <div className="w-10 h-10 rounded-2xl bg-white flex items-center justify-center shadow-sm">
-                <i className="ri-square-fill text-lg"></i>
+              <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shadow-sm">
+                <i className="ri-square-fill text-lg text-purple-700"></i>
               </div>
 
               <div className="min-w-0">
@@ -440,19 +489,24 @@ const DriverSelected = (props) => {
               <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
             </div>
 
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div
+              className="px-5 py-4 border-b border-purple-100 flex items-center justify-between text-white"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
               <div className="flex items-center gap-3 min-w-0">
                 <img
                   src={driverPhoto}
                   alt={driverName}
-                  className="w-12 h-12 rounded-full object-cover bg-gray-200"
+                  className="w-12 h-12 rounded-full object-cover bg-gray-200 border-2 border-white"
                 />
 
                 <div className="min-w-0">
-                  <p className="text-lg font-extrabold text-gray-900 truncate">
+                  <p className="text-lg font-extrabold truncate">
                     {driverName}
                   </p>
-                  <p className="text-sm text-gray-500 truncate">
+                  <p className="text-sm text-white/80 truncate">
                     {color} {vehicleLabel} · {plate}
                   </p>
                 </div>
@@ -461,20 +515,20 @@ const DriverSelected = (props) => {
               <button
                 type="button"
                 onClick={() => setChatOpen(false)}
-                className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
+                className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center"
               >
-                <i className="ri-close-line text-2xl"></i>
+                <i className="ri-close-line text-2xl text-white"></i>
               </button>
             </div>
 
-            <div className="px-4 py-3 bg-gray-50 flex gap-2 overflow-x-auto">
+            <div className="px-4 py-3 bg-purple-50 flex gap-2 overflow-x-auto">
               {quickMessages.map((text) => (
                 <button
                   key={text}
                   type="button"
                   disabled={sendingMessage}
                   onClick={() => sendMessage(text)}
-                  className="shrink-0 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-60"
+                  className="shrink-0 rounded-full bg-white border border-purple-200 px-4 py-2 text-sm font-semibold text-purple-700 disabled:opacity-60"
                 >
                   {text}
                 </button>
@@ -484,8 +538,13 @@ const DriverSelected = (props) => {
             <div className="flex-1 overflow-y-auto px-4 py-4 bg-white space-y-3">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-lime-200 flex items-center justify-center">
-                    <i className="ri-message-3-line text-3xl text-gray-900"></i>
+                  <div
+                    className="w-16 h-16 mx-auto rounded-full flex items-center justify-center"
+                    style={{
+                      background: PURPLE_GRADIENT,
+                    }}
+                  >
+                    <i className="ri-message-3-line text-3xl text-white"></i>
                   </div>
 
                   <p className="text-lg font-bold text-gray-900 mt-4">
@@ -510,22 +569,29 @@ const DriverSelected = (props) => {
                       <div
                         className={`max-w-[78%] rounded-2xl px-4 py-3 ${
                           isMine
-                            ? "bg-lime-300 text-gray-950 rounded-br-md"
+                            ? "text-white rounded-br-md"
                             : "bg-gray-100 text-gray-900 rounded-bl-md"
                         }`}
+                        style={
+                          isMine
+                            ? {
+                                background: PURPLE_GRADIENT,
+                              }
+                            : {}
+                        }
                       >
                         <p className="text-sm font-medium leading-5">
                           {msg.text}
                         </p>
 
                         {msg.pending && (
-                          <p className="text-[11px] text-gray-600 mt-1">
+                          <p className="text-[11px] text-white/75 mt-1">
                             Enviando...
                           </p>
                         )}
 
                         {msg.failed && (
-                          <p className="text-[11px] text-red-600 mt-1">
+                          <p className="text-[11px] text-red-100 mt-1">
                             No enviado
                           </p>
                         )}
@@ -538,7 +604,7 @@ const DriverSelected = (props) => {
               <div ref={messagesEndRef}></div>
             </div>
 
-            <div className="p-4 border-t border-gray-100 bg-white">
+            <div className="p-4 border-t border-purple-100 bg-white">
               <div className="flex items-center gap-2">
                 <input
                   value={messageText}
@@ -549,7 +615,7 @@ const DriverSelected = (props) => {
                       sendMessage();
                     }
                   }}
-                  className="flex-1 rounded-full bg-gray-100 px-4 py-3 text-base outline-none"
+                  className="flex-1 rounded-full bg-purple-50 border border-purple-100 px-4 py-3 text-base outline-none"
                   type="text"
                   placeholder="Escribe un mensaje..."
                 />
@@ -558,9 +624,12 @@ const DriverSelected = (props) => {
                   type="button"
                   disabled={sendingMessage}
                   onClick={() => sendMessage()}
-                  className="w-12 h-12 rounded-full bg-lime-300 flex items-center justify-center disabled:opacity-60"
+                  className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-60"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
                 >
-                  <i className="ri-send-plane-fill text-2xl text-gray-950"></i>
+                  <i className="ri-send-plane-fill text-2xl text-white"></i>
                 </button>
               </div>
             </div>

@@ -223,6 +223,50 @@ const CaptainRiding = () => {
     return labels[vehicleType] || "Vehículo";
   };
 
+  const getNavigationTargetAddress = () => {
+    if (driverArrived) {
+      return rideData?.destination || "";
+    }
+
+    return rideData?.pickup || "";
+  };
+
+  const getNavigationTargetLabel = () => {
+    return driverArrived ? "destino" : "punto de recogida";
+  };
+
+  const openWazeNavigation = () => {
+    const address = getNavigationTargetAddress();
+
+    if (!address) {
+      toast.error("No hay dirección disponible para navegar.");
+      return;
+    }
+
+    const encodedAddress = encodeURIComponent(address);
+
+    window.open(
+      `https://waze.com/ul?q=${encodedAddress}&navigate=yes`,
+      "_blank"
+    );
+  };
+
+  const openGoogleMapsNavigation = () => {
+    const address = getNavigationTargetAddress();
+
+    if (!address) {
+      toast.error("No hay dirección disponible para navegar.");
+      return;
+    }
+
+    const encodedAddress = encodeURIComponent(address);
+
+    window.open(
+      `https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}&travelmode=driving`,
+      "_blank"
+    );
+  };
+
   const sendMessage = async (textToSend = "") => {
     const cleanText = String(textToSend || messageText || "").trim();
 
@@ -479,7 +523,7 @@ const CaptainRiding = () => {
     : "En camino a recoger";
 
   const headerSubtext = driverArrived
-    ? "El usuario ya fue notificado."
+    ? "El usuario ya fue notificado. Ahora puedes navegar hacia el destino."
     : etaInfo?.etaText
     ? `Tiempo estimado: ${etaInfo.etaText}${
         etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
@@ -534,7 +578,7 @@ const CaptainRiding = () => {
       </button>
 
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
-        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[54vh] overflow-y-auto">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[56vh] overflow-y-auto">
           <div
             className="px-4 py-4 text-white"
             style={{
@@ -674,6 +718,54 @@ const CaptainRiding = () => {
 
               <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
             </button>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={openWazeNavigation}
+                className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-navigation-fill text-xl text-white"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-sm font-black text-purple-900">Waze</p>
+                  <p className="text-[11px] text-purple-600">
+                    Ir al {getNavigationTargetLabel()}
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={openGoogleMapsNavigation}
+                className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-map-2-fill text-xl text-white"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-sm font-black text-purple-900">
+                    Google Maps
+                  </p>
+                  <p className="text-[11px] text-purple-600">
+                    Ir al {getNavigationTargetLabel()}
+                  </p>
+                </div>
+              </button>
+            </div>
 
             <div className="rounded-3xl border border-gray-200 bg-white p-3">
               <div className="flex items-start gap-3">

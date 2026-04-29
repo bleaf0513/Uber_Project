@@ -165,12 +165,50 @@ const LiveTracking = ({
     );
   }, [safeNearbyDrivers, selectedCaptainId]);
 
+  /*
+    CLAVE:
+    - En el mapa del usuario, la ruta usa selectedDriver.
+    - En el mapa del conductor, normalmente no hay selectedDriver.
+      Entonces usamos currentPosition como origen.
+  */
+  const routeOrigin = useMemo(() => {
+    if (selectedDriver) {
+      return {
+        lat: selectedDriver.lat,
+        lng: selectedDriver.lng,
+        id: selectedDriver.id,
+        name: selectedDriver.name,
+        rotation: selectedDriver.rotation,
+        isDriver: true,
+      };
+    }
+
+    if (showRouteToPickup && currentPosition) {
+      return {
+        lat: currentPosition.lat,
+        lng: currentPosition.lng,
+        id: "current-driver-position",
+        name: "Mi ubicación",
+        rotation: 0,
+        isDriver: false,
+      };
+    }
+
+    return null;
+  }, [selectedDriver, currentPosition, showRouteToPickup]);
+
   const stableMapFocusKey = useMemo(() => {
     return JSON.stringify({
       pickup: pickupPosition
         ? {
             lat: roundCoord(pickupPosition.lat),
             lng: roundCoord(pickupPosition.lng),
+          }
+        : null,
+      routeOrigin: routeOrigin
+        ? {
+            lat: roundCoord(routeOrigin.lat),
+            lng: roundCoord(routeOrigin.lng),
           }
         : null,
       routeToPickup: Boolean(showRouteToPickup),
@@ -184,6 +222,7 @@ const LiveTracking = ({
     });
   }, [
     pickupPosition,
+    routeOrigin,
     selectedCaptainId,
     selectedDriver?.id,
     showRouteToPickup,
@@ -256,19 +295,23 @@ const LiveTracking = ({
       console.error("Geolocation error:", err);
     };
 
-    navigator.geolocation.getCurrentPosition(handlePositionUpdate, handleGeoError, {
-      enableHighAccuracy: false,
-      timeout: 30000,
-      maximumAge: 5000,
-    });
+    navigator.geolocation.getCurrentPosition(
+      handlePositionUpdate,
+      handleGeoError,
+      {
+        enableHighAccuracy: true,
+        timeout: 30000,
+        maximumAge: 3000,
+      }
+    );
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       handlePositionUpdate,
       handleGeoError,
       {
-        enableHighAccuracy: false,
+        enableHighAccuracy: true,
         timeout: 30000,
-        maximumAge: 5000,
+        maximumAge: 3000,
       }
     );
 
@@ -383,7 +426,7 @@ const LiveTracking = ({
       return;
     }
 
-    if (!pickupPosition || !selectedDriver) {
+    if (!pickupPosition || !routeOrigin) {
       setDirections(null);
       setEtaText("");
       setDistanceText("");
@@ -400,7 +443,7 @@ const LiveTracking = ({
 
     directionsService.route(
       {
-        origin: { lat: selectedDriver.lat, lng: selectedDriver.lng },
+        origin: { lat: routeOrigin.lat, lng: routeOrigin.lng },
         destination: pickupPosition,
         travelMode: window.google.maps.TravelMode.DRIVING,
       },
@@ -421,6 +464,8 @@ const LiveTracking = ({
             });
           }
         } else {
+          console.warn("[LiveTracking] Directions error:", status);
+
           setDirections(null);
           setEtaText("");
           setDistanceText("");
@@ -434,9 +479,8 @@ const LiveTracking = ({
   }, [
     mapsApiLoaded,
     pickupPosition,
-    selectedDriver?.id,
-    selectedDriver?.lat,
-    selectedDriver?.lng,
+    routeOrigin?.lat,
+    routeOrigin?.lng,
     showRouteToPickup,
     onEtaUpdate,
   ]);
@@ -451,8 +495,8 @@ const LiveTracking = ({
     const bounds = new window.google.maps.LatLngBounds();
     let hasPoints = false;
 
-    if (showRouteToPickup && selectedDriver && pickupPosition) {
-      bounds.extend({ lat: selectedDriver.lat, lng: selectedDriver.lng });
+    if (showRouteToPickup && routeOrigin && pickupPosition) {
+      bounds.extend({ lat: routeOrigin.lat, lng: routeOrigin.lng });
       bounds.extend(pickupPosition);
       hasPoints = true;
 
@@ -500,7 +544,7 @@ const LiveTracking = ({
     stableMapFocusKey,
     showRouteToPickup,
     showPickupRadar,
-    selectedDriver,
+    routeOrigin,
     pickupPosition,
     currentPosition,
     safeNearbyDrivers,
@@ -576,7 +620,8 @@ const LiveTracking = ({
   if (error && !currentPosition) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-100 text-sm text-gray-700 px-4 text-center">
-        Error: {error}. Verifica que el GPS del celular esté activado y que la app tenga permisos de ubicación.
+        Error: {error}. Verifica que el GPS del celular esté activado y que la
+        app tenga permisos de ubicación.
       </div>
     );
   }
@@ -606,8 +651,8 @@ const LiveTracking = ({
             preserveViewport: true,
             polylineOptions: {
               strokeColor: "#7c3aed",
-              strokeOpacity: 0.85,
-              strokeWeight: 6,
+              strokeOpacity: 0.9,
+              strokeWeight: 7,
             },
           }}
         />
@@ -714,7 +759,20 @@ const LiveTracking = ({
         ))}
 
       {showRouteToPickup &&
-        selectedDriver &&
+        routeOrigin &&
+        !selectedDriver &&
+        mapsApiLoaded &&
+        window.google?.maps && (
+          <Marker
+            position={{ lat: routeOrigin.lat, lng: routeOrigin.lng }}
+            icon={buildCarSvg(routeOrigin.rotation, true)}
+            zIndex={70}
+            title="Mi ubicación"
+          />
+        )}
+
+      {showRouteToPickup &&
+        routeOrigin &&
         pickupPosition &&
         (etaText || distanceText) && (
           <OverlayView
