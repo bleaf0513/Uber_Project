@@ -22,6 +22,8 @@ const CaptainHome = () => {
   const locationWatchIdRef = useRef(null);
   const locationIntervalRef = useRef(null);
   const lastLocationSentRef = useRef(0);
+  const availableRidesIntervalRef = useRef(null);
+  const ignoredRideIdsRef = useRef(new Set());
 
   const navigate = useNavigate();
 
@@ -254,6 +256,46 @@ const CaptainHome = () => {
     }
   }, [requestAndEmitCurrentLocation]);
 
+  const fetchAvailableRidesForCaptain = useCallback(async () => {
+    try {
+      if (!captain?._id) return;
+      if (processing) return;
+      if (ridePopup) return;
+
+      const token = localStorage.getItem("token");
+
+      if (!token) return;
+
+      const response = await axios.get(
+        `${getApiBaseUrl()}/rides/available-for-captain`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const rides = Array.isArray(response?.data?.rides)
+        ? response.data.rides
+        : [];
+
+      const nextRide = rides.find((item) => {
+        if (!item?._id) return false;
+        return !ignoredRideIdsRef.current.has(String(item._id));
+      });
+
+      if (!nextRide?._id) return;
+
+      setRide(nextRide);
+      setRidePopup(true);
+    } catch (error) {
+      console.warn(
+        "[captain-home] No se pudieron consultar viajes abiertos:",
+        error?.response?.data?.message || error?.message
+      );
+    }
+  }, [captain?._id, processing, ridePopup]);
+
   useEffect(() => {
     if (!socket) return;
 
@@ -272,6 +314,10 @@ const CaptainHome = () => {
 
     const onNewRide = (rideData) => {
       if (!rideData?._id) return;
+
+      if (ignoredRideIdsRef.current.has(String(rideData._id))) {
+        return;
+      }
 
       setRide(rideData);
       setRidePopup(true);
@@ -294,6 +340,12 @@ const CaptainHome = () => {
 
       if (rideId && currentRideId && rideId === currentRideId) {
         alert("El usuario rechazó tu oferta para este viaje.");
+        setRidePopup(false);
+        setRide(null);
+
+        setTimeout(() => {
+          fetchAvailableRidesForCaptain();
+        }, 1200);
       }
     };
 
@@ -337,7 +389,14 @@ const CaptainHome = () => {
       socket.off("ride-offer-rejected", onRideOfferRejected);
       socket.off("ride-offer-accepted", onRideOfferAccepted);
     };
-  }, [socket, emitCaptainJoin, requestAndEmitCurrentLocation, ride?._id, navigate]);
+  }, [
+    socket,
+    emitCaptainJoin,
+    requestAndEmitCurrentLocation,
+    ride?._id,
+    navigate,
+    fetchAvailableRidesForCaptain,
+  ]);
 
   useEffect(() => {
     if (!captain?._id || !socket || !geoSupported) return;
@@ -359,6 +418,23 @@ const CaptainHome = () => {
     startLocationTracking,
     stopLocationTracking,
   ]);
+
+  useEffect(() => {
+    if (!captain?._id) return;
+
+    fetchAvailableRidesForCaptain();
+
+    availableRidesIntervalRef.current = setInterval(() => {
+      fetchAvailableRidesForCaptain();
+    }, 4000);
+
+    return () => {
+      if (availableRidesIntervalRef.current) {
+        clearInterval(availableRidesIntervalRef.current);
+        availableRidesIntervalRef.current = null;
+      }
+    };
+  }, [captain?._id, fetchAvailableRidesForCaptain]);
 
   const sendRideOffer = async ({ price, message = "" }) => {
     try {
@@ -427,6 +503,10 @@ const CaptainHome = () => {
   };
 
   const ignoreRide = () => {
+    if (ride?._id) {
+      ignoredRideIdsRef.current.add(String(ride._id));
+    }
+
     setRidePopup(false);
     setRide(null);
   };

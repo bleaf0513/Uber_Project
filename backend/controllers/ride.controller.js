@@ -159,7 +159,9 @@ module.exports.createRide = async (req, res) => {
                     captainLtd,
                     captainLng
                 );
+
                 distanceKm = kmText(distanceMeters);
+
                 insideRadius = Number.isFinite(distanceMeters)
                     ? distanceMeters <= SEARCH_RADIUS_KM * 1000
                     : false;
@@ -186,7 +188,9 @@ module.exports.createRide = async (req, res) => {
             };
         });
 
-        const rideWithUser = await rideModel.findOne({ _id: ride._id }).populate("user");
+        const rideWithUser = await rideModel
+            .findOne({ _id: ride._id })
+            .populate("user");
 
         if (!rideWithUser) {
             return res.status(500).json({
@@ -339,9 +343,14 @@ module.exports.captainOfferRide = async (req, res) => {
         }
 
         const currentOffers = (ride.driverOffers || []).map(normalizeOffer);
-        const existingOfferIndex = currentOffers.findIndex(
-            (offer) => String(offer.captain) === captainId
-        );
+
+        const existingOfferIndex = currentOffers.findIndex((offer) => {
+            const offerCaptainId = String(
+                offer.captain?._id || offer.captain || ""
+            );
+
+            return offerCaptainId === captainId;
+        });
 
         const newExpiry = new Date(Date.now() + rideService.OFFER_TTL_MS);
 
@@ -457,7 +466,9 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
         );
 
         if (offerIndex < 0) {
-            return res.status(404).json({ message: "Oferta del conductor no encontrada." });
+            return res.status(404).json({
+                message: "Oferta del conductor no encontrada.",
+            });
         }
 
         const selectedOffer = currentOffers[offerIndex];
@@ -480,7 +491,15 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
             const rejectResult = await rideModel.updateOne(
                 { _id: rideId, user: req.user._id },
-                { $set: { driverOffers: currentOffers } }
+                {
+                    $set: {
+                        driverOffers: currentOffers,
+                        status: "pending",
+                        negotiationStatus: "open",
+                        captain: null,
+                        selectedOfferCaptain: null,
+                    },
+                }
             );
 
             if (!rejectResult.matchedCount) {
@@ -575,6 +594,7 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
         for (const offer of populatedRide.driverOffers || []) {
             const offerCaptainId = String(offer.captain?._id || offer.captain);
+
             if (offerCaptainId !== String(captainId)) {
                 emitToCaptain(offer.captain, {
                     event: "ride-no-longer-available",
@@ -632,8 +652,86 @@ module.exports.getMyActiveRide = async (req, res) => {
     }
 };
 
+module.exports.getAvailableForCaptain = async (req, res) => {
+    try {
+        const captainId = String(req.captain?._id || "");
+
+        if (!captainId) {
+            return res.status(401).json({
+                message: "Conductor no autenticado.",
+            });
+        }
+
+        const openRides = await rideModel
+            .find({
+                negotiationStatus: "open",
+                status: { $in: ["pending", "negotiating"] },
+                captain: null,
+                cancelledAt: null,
+            })
+            .sort({ createdAt: -1 })
+            .limit(20)
+            .populate("user", "fullname email socketId phone")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        const availableRides = [];
+
+        for (const ride of openRides) {
+            await rideService.expirePendingOffers(ride);
+
+            const freshRide = await rideModel
+                .findById(ride._id)
+                .populate("user", "fullname email socketId phone")
+                .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+            if (!freshRide) continue;
+
+            if (
+                freshRide.negotiationStatus !== "open" ||
+                !["pending", "negotiating"].includes(freshRide.status) ||
+                freshRide.captain ||
+                freshRide.cancelledAt
+            ) {
+                continue;
+            }
+
+            const captainHasPendingOffer = (freshRide.driverOffers || []).some(
+                (offer) => {
+                    const offerCaptainId = String(
+                        offer.captain?._id || offer.captain || ""
+                    );
+
+                    return (
+                        offerCaptainId === captainId &&
+                        offer.status === "pending" &&
+                        !rideService.isOfferExpired(offer)
+                    );
+                }
+            );
+
+            if (captainHasPendingOffer) {
+                continue;
+            }
+
+            availableRides.push(ridePayloadWithActiveOffers(freshRide));
+        }
+
+        return res.status(200).json({
+            rides: availableRides,
+            count: availableRides.length,
+        });
+    } catch (err) {
+        console.error("[getAvailableForCaptain] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error consultando viajes disponibles.",
+        });
+    }
+};
+
 module.exports.getRideOffers = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -682,6 +780,7 @@ module.exports.getRideOffers = async (req, res) => {
 
 module.exports.confirmRide = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -710,6 +809,7 @@ module.exports.confirmRide = async (req, res) => {
         });
 
         let notified = false;
+
         if (ride?.user?.socketId) {
             notified = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-confirmed",
@@ -730,6 +830,7 @@ module.exports.confirmRide = async (req, res) => {
 
 module.exports.arrived = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -767,6 +868,7 @@ module.exports.arrived = async (req, res) => {
         }
 
         let notified = false;
+
         if (updatedRide.user?.socketId) {
             notified = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "captain-arrived",
@@ -794,6 +896,7 @@ module.exports.arrived = async (req, res) => {
 
 module.exports.endRide = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -807,6 +910,7 @@ module.exports.endRide = async (req, res) => {
         });
 
         let notified = false;
+
         if (ride?.user?.socketId) {
             notified = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-ended",
@@ -827,6 +931,7 @@ module.exports.endRide = async (req, res) => {
 
 module.exports.cancelRide = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -852,6 +957,7 @@ module.exports.cancelRide = async (req, res) => {
 
 module.exports.cancelByCaptain = async (req, res) => {
     const errors = validationResult(req);
+
     if (!errors.isEmpty()) {
         return res.status(400).json({ errors: errors.array() });
     }
@@ -892,6 +998,7 @@ module.exports.cancelByCaptain = async (req, res) => {
         }
 
         let notified = false;
+
         if (updatedRide.user?.socketId) {
             notified = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "ride-cancelled-by-captain",

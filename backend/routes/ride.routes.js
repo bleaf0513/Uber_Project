@@ -112,6 +112,23 @@ router.get(
     rideController.getMyActiveRide
 );
 
+/*
+  VIAJES ABIERTOS PARA CONDUCTORES
+
+  Esta ruta permite que el conductor consulte automáticamente
+  servicios disponibles aunque no le haya llegado el socket "new-ride",
+  o cuando el usuario rechaza una oferta y el viaje sigue abierto.
+
+  IMPORTANTE:
+  Debe ir antes de '/:rideId/offers' para que Express no confunda
+  "available-for-captain" con un rideId.
+*/
+router.get(
+    '/available-for-captain',
+    authMiddleware.authCaptain,
+    rideController.getAvailableForCaptain
+);
+
 router.get(
     '/:rideId/offers',
     authMiddleware.authUser,
