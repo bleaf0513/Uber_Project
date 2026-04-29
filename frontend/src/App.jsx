@@ -37,13 +37,9 @@ import CaptainReceivedBids from "./pages/CaptainReceivedBids";
 import AvailableOffers from "./pages/AvailableOffers";
 import UserSentBids from "./pages/UserSentBids";
 
-import GlobalOfferNotifications from "./components/GlobalOfferNotifications";
-
 const App = () => {
   return (
     <div>
-      <GlobalOfferNotifications />
-
       <Routes>
         <Route path="/" element={<Start />} />
         <Route path="/login" element={<UserLogin />} />
@@ -65,18 +61,22 @@ const App = () => {
         <Route path="/enterprise-drivers" element={<EnterpriseDrivers />} />
         <Route path="/enterprise-logistics" element={<EnterpriseLogistics />} />
         <Route path="/enterprise-clients" element={<EnterpriseClients />} />
+
         <Route
           path="/enterprise-driver-login"
           element={<EnterpriseDriverLogin />}
         />
+
         <Route
           path="/enterprise-driver-panel"
           element={<EnterpriseDriverPanel />}
         />
+
         <Route
           path="/enterprise-delivery-stats"
           element={<EnterpriseDeliveryStats />}
         />
+
         <Route
           path="/enterprise-delivery-history"
           element={<EnterpriseDeliveryHistory />}
