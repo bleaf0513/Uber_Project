@@ -77,7 +77,6 @@ function Home() {
     return () => clearInterval(timer);
   }, []);
 
-  // FIX CLAVE: volver a hacer join cada vez que conecte o reconecte el socket
   useEffect(() => {
     if (!socket || !user?._id) return;
 
@@ -122,6 +121,8 @@ function Home() {
   }, [socket, user?._id]);
 
   useEffect(() => {
+    if (!socket) return;
+
     const onRideStarted = (rideData) => {
       setDriverSelected(false);
       setVehicleFound(false);
@@ -141,7 +142,14 @@ function Home() {
 
     const onRideOfferUpdated = (rideData) => {
       const nextRide = rideData || null;
-      setRide(nextRide);
+
+      setRide((prev) => ({
+        ...(prev || {}),
+        ...(nextRide || {}),
+        _id: nextRide?._id || prev?._id,
+        pickup: nextRide?.pickup || prev?.pickup || pickup,
+        destination: nextRide?.destination || prev?.destination || destination,
+      }));
 
       if (nextRide?._id) {
         setVehiclePanel(false);
@@ -230,7 +238,7 @@ function Home() {
       socket.off("captain-arrived", onCaptainArrived);
       socket.off("ride-cancelled-by-captain", onRideCancelledByCaptain);
     };
-  }, [socket, navigate]);
+  }, [socket, navigate, pickup, destination]);
 
   const normalizeSuggestionRows = (rows) =>
     (Array.isArray(rows) ? rows : [])
@@ -250,7 +258,10 @@ function Home() {
 
       if (mapsApiLoaded && window.google?.maps) {
         try {
-          const { AutocompleteSuggestion } = await google.maps.importLibrary("places");
+          const { AutocompleteSuggestion } = await google.maps.importLibrary(
+            "places"
+          );
+
           const { suggestions: raw } =
             await AutocompleteSuggestion.fetchAutocompleteSuggestions({
               input: query,
@@ -288,15 +299,19 @@ function Home() {
       }
 
       try {
-        const { data } = await axios.get(`${getApiBaseUrl()}/maps/get-suggestions`, {
-          params: { address: query },
-          timeout: 18000,
-        });
+        const { data } = await axios.get(
+          `${getApiBaseUrl()}/maps/get-suggestions`,
+          {
+            params: { address: query },
+            timeout: 18000,
+          }
+        );
 
         if (seq !== suggestionSeqRef.current) return;
         setSuggestions(normalizeSuggestionRows(data));
       } catch (error) {
         console.error("Error fetching suggestions:", error);
+
         if (seq === suggestionSeqRef.current) {
           setSuggestions([]);
         }
@@ -311,6 +326,7 @@ function Home() {
         clearTimeout(suggestionTimerRef.current);
         suggestionTimerRef.current = null;
       }
+
       setSuggestions([]);
       return;
     }
@@ -381,10 +397,12 @@ function Home() {
       } catch (error) {
         if (!cancelled) {
           const apiMsg = error?.response?.data?.message;
+
           const detail =
             typeof apiMsg === "string" && apiMsg.trim()
               ? apiMsg
-              : error?.message || "No se pudieron cargar los precios para esta ruta.";
+              : error?.message ||
+                "No se pudieron cargar los precios para esta ruta.";
 
           console.error("Error fetching fare or distance:", detail, error);
           setPrices(null);
@@ -402,10 +420,12 @@ function Home() {
   const logoutUser = async () => {
     try {
       const token = localStorage.getItem("token");
+
       await axios.get(`${getApiBaseUrl()}/users/logout`, {
         params: { origin: pickup, destination },
         headers: { Authorization: `Bearer ${token}` },
       });
+
       navigate("/login");
     } catch (error) {
       console.error("Error logging out:", error);
@@ -488,11 +508,13 @@ function Home() {
       return rideData;
     } catch (error) {
       console.error("Error creating ride:", error);
+
       alert(
         error?.response?.data?.message ||
           error?.message ||
           "No se pudo crear la solicitud."
       );
+
       setVehicleFound(false);
       setConfirmRidePanel(true);
       throw error;
@@ -528,8 +550,68 @@ function Home() {
         ...offer,
         remainingMs: Math.max(0, getOfferExpiresAtMs(offer) - offerNow),
       }))
-      .sort((a, b) => Number(a?.price || 0) - Number(a?.price || 0));
+      .sort((a, b) => Number(a?.price || 0) - Number(b?.price || 0));
   }, [ride, offerNow]);
+
+  useEffect(() => {
+    if (!vehicleFound) return;
+    if (driverSelected) return;
+    if (!ride?._id) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    let cancelled = false;
+
+    const fetchOffers = async () => {
+      try {
+        const response = await axios.get(
+          `${getApiBaseUrl()}/rides/${ride._id}/offers`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        if (cancelled) return;
+
+        const data = response?.data || {};
+
+        setRide((prev) => ({
+          ...(prev || {}),
+          _id: prev?._id || data?.rideId || ride._id,
+          pickup: prev?.pickup || pickup,
+          destination: prev?.destination || destination,
+          status: data?.status || prev?.status,
+          negotiationStatus: data?.negotiationStatus || prev?.negotiationStatus,
+          offeredFare: data?.offeredFare ?? prev?.offeredFare,
+          fare: data?.fare ?? prev?.fare,
+          activeDriverOffers: Array.isArray(data?.activeDriverOffers)
+            ? data.activeDriverOffers
+            : [],
+          driverOffers: Array.isArray(data?.driverOffers)
+            ? data.driverOffers
+            : prev?.driverOffers || [],
+          captain: data?.captain || prev?.captain || null,
+        }));
+      } catch (error) {
+        console.warn(
+          "No se pudieron actualizar las ofertas:",
+          error?.response?.data?.message || error?.message
+        );
+      }
+    };
+
+    fetchOffers();
+
+    const interval = setInterval(fetchOffers, 2000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [vehicleFound, driverSelected, ride?._id, pickup, destination]);
 
   const getCaptainPhoto = (captain) =>
     captain?.profileImage ||
@@ -546,9 +628,7 @@ function Home() {
     "";
 
   const getVehiclePlate = (captain) =>
-    captain?.vehicle?.plate ||
-    captain?.plate ||
-    "";
+    captain?.vehicle?.plate || captain?.plate || "";
 
   const getVehicleName = (captain) =>
     captain?.vehicle?.vehicleType ||
@@ -580,6 +660,7 @@ function Home() {
       setCaptainArrived(false);
     } catch (error) {
       console.error("Error aceptando oferta:", error);
+
       alert(
         error?.response?.data?.message ||
           error?.message ||
@@ -608,6 +689,7 @@ function Home() {
       setRide(response?.data || ride);
     } catch (error) {
       console.error("Error rechazando oferta:", error);
+
       alert(
         error?.response?.data?.message ||
           error?.message ||
@@ -651,6 +733,7 @@ function Home() {
   useGSAP(() => {
     if (panelOpen) {
       gsap.to(titleRef.current, { display: "none", duration: 0.3 });
+
       gsap.to(panelRef.current, {
         height: "68%",
         display: "flex",
@@ -658,6 +741,7 @@ function Home() {
         delay: 0.2,
         opacity: 1,
       });
+
       gsap.to(arrowRef.current, {
         display: "block",
         duration: 0.5,
@@ -665,6 +749,7 @@ function Home() {
       });
     } else {
       gsap.to(arrowRef.current, { display: "none", duration: 0.3 });
+
       gsap.to(panelRef.current, {
         height: "0%",
         display: "none",
@@ -672,6 +757,7 @@ function Home() {
         delay: 0.2,
         opacity: 0,
       });
+
       gsap.to(titleRef.current, {
         display: "block",
         duration: 0.5,
@@ -681,7 +767,7 @@ function Home() {
   }, [panelOpen]);
 
   useEffect(() => {
-    if (!user?._id || !navigator.geolocation) return;
+    if (!user?._id || !navigator.geolocation || !socket) return;
 
     const watchId = navigator.geolocation.watchPosition(
       (position) => {
@@ -734,13 +820,13 @@ function Home() {
         }}
       >
         <LiveTracking
-  pickup={driverSelected ? ride?.pickup || pickup : pickup}
-  nearbyDrivers={nearbyDrivers}
-  showPickupRadar={vehicleFound && !driverSelected}
-  selectedCaptainId={ride?.captain?._id || null}
-  showRouteToPickup={driverSelected}
-  onEtaUpdate={setEtaInfo}
-/>
+          pickup={driverSelected ? ride?.pickup || pickup : pickup}
+          nearbyDrivers={nearbyDrivers}
+          showPickupRadar={vehicleFound && !driverSelected}
+          selectedCaptainId={ride?.captain?._id || null}
+          showRouteToPickup={driverSelected}
+          onEtaUpdate={setEtaInfo}
+        />
       </div>
 
       {vehicleFound && liveOffers.length > 0 && (
@@ -749,6 +835,7 @@ function Home() {
             {liveOffers.map((offer, index) => {
               const captain = offer?.captain || {};
               const captainId = captain?._id || offer?.captain;
+
               const captainName = `${
                 captain?.fullname?.firstname || "Conductor"
               } ${captain?.fullname?.lastname || ""}`.trim();
@@ -757,6 +844,7 @@ function Home() {
               const plate = getVehiclePlate(captain);
               const color = getVehicleColor(captain);
               const vehicleName = getVehicleName(captain);
+
               const secondsLeft = Math.max(
                 0,
                 Math.ceil((offer?.remainingMs || 0) / 1000)
@@ -784,11 +872,13 @@ function Home() {
                       <p className="text-sm font-bold text-gray-900 truncate">
                         {captainName}
                       </p>
+
                       <p className="text-xs text-gray-600 truncate">
                         {vehicleName}
                         {color ? ` · ${color}` : ""}
                         {plate ? ` · ${plate}` : ""}
                       </p>
+
                       <p className="text-xs text-orange-600 font-semibold mt-1">
                         Expira en {secondsLeft}s
                       </p>
@@ -838,22 +928,26 @@ function Home() {
         </div>
       )}
 
-      {driverSelected && (etaInfo?.etaText || etaInfo?.distanceText || captainArrived) && (
-        <div className="absolute top-24 left-3 right-3 z-40">
-          <div className="rounded-3xl bg-white/95 backdrop-blur border border-gray-200 shadow-2xl px-4 py-3">
-            <p className="text-sm font-bold text-gray-900">
-              {captainArrived ? "Tu conductor ya llegó" : "Tu conductor va en camino"}
-            </p>
-            <p className="text-xs text-gray-600 mt-1">
-              {captainArrived
-                ? "Ya puedes encontrarte con el conductor en el punto de recogida."
-                : `${etaInfo?.etaText ? `Llega en ${etaInfo.etaText}` : ""}${
-                    etaInfo?.etaText && etaInfo?.distanceText ? " · " : ""
-                  }${etaInfo?.distanceText || ""}`}
-            </p>
+      {driverSelected &&
+        (etaInfo?.etaText || etaInfo?.distanceText || captainArrived) && (
+          <div className="absolute top-24 left-3 right-3 z-40">
+            <div className="rounded-3xl bg-white/95 backdrop-blur border border-gray-200 shadow-2xl px-4 py-3">
+              <p className="text-sm font-bold text-gray-900">
+                {captainArrived
+                  ? "Tu conductor ya llegó"
+                  : "Tu conductor va en camino"}
+              </p>
+
+              <p className="text-xs text-gray-600 mt-1">
+                {captainArrived
+                  ? "Ya puedes encontrarte con el conductor en el punto de recogida."
+                  : `${etaInfo?.etaText ? `Llega en ${etaInfo.etaText}` : ""}${
+                      etaInfo?.etaText && etaInfo?.distanceText ? " · " : ""
+                    }${etaInfo?.distanceText || ""}`}
+              </p>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       <div
         ref={searchRef}
@@ -999,19 +1093,19 @@ function Home() {
       </div>
 
       <div
-  ref={driverSelectedRef}
-  className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto max-h-[72%] shadow-2xl"
->
-       <DriverSelected
-  ride={ride}
-  captainArrived={captainArrived}
-  etaInfo={etaInfo}
-  socket={socket}
-  user={user}
-/>
+        ref={driverSelectedRef}
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto max-h-[72%] shadow-2xl"
+      >
+        <DriverSelected
+          ride={ride}
+          captainArrived={captainArrived}
+          etaInfo={etaInfo}
+          socket={socket}
+          user={user}
+        />
       </div>
     </div>
   );
 }
 
-export default Home;Home.jsx
+export default Home;
