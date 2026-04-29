@@ -233,7 +233,6 @@ module.exports.createRide = async (req, res) => {
             });
         }
 
-        // No bloquear la creación del ride solo porque la notificación realtime falló
         if ((captainsInRadius || []).length > 0 && emittedCount === 0) {
             return res.status(201).json({
                 ...rideWithUser.toObject(),
@@ -915,6 +914,124 @@ module.exports.cancelByCaptain = async (req, res) => {
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+module.exports.sendRideChatMessage = async (req, res) => {
+    const { rideId, message, senderType } = req.body;
+
+    try {
+        const cleanMessage = String(message || "").trim();
+
+        if (!rideId) {
+            return res.status(400).json({
+                message: "Falta rideId.",
+            });
+        }
+
+        if (!cleanMessage) {
+            return res.status(400).json({
+                message: "El mensaje no puede estar vacío.",
+            });
+        }
+
+        if (!["user", "captain"].includes(senderType)) {
+            return res.status(400).json({
+                message: "senderType inválido.",
+            });
+        }
+
+        const ride = await rideModel
+            .findById(rideId)
+            .populate("user", "fullname email socketId")
+            .populate("captain", "fullname email socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message: "Ride not found.",
+            });
+        }
+
+        if (senderType === "user") {
+            if (!req.user?._id) {
+                return res.status(401).json({
+                    message: "Usuario no autenticado.",
+                });
+            }
+
+            if (String(ride.user?._id) !== String(req.user._id)) {
+                return res.status(403).json({
+                    message: "No autorizado para enviar mensajes en este servicio.",
+                });
+            }
+        }
+
+        if (senderType === "captain") {
+            if (!req.captain?._id) {
+                return res.status(401).json({
+                    message: "Conductor no autenticado.",
+                });
+            }
+
+            if (String(ride.captain?._id) !== String(req.captain._id)) {
+                return res.status(403).json({
+                    message: "Este servicio no está asignado a este conductor.",
+                });
+            }
+        }
+
+        const chatPayload = {
+            _id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
+            rideId: String(ride._id),
+            senderType,
+            from: senderType,
+            message: cleanMessage,
+            text: cleanMessage,
+            createdAt: new Date().toISOString(),
+            userId: ride.user?._id || null,
+            captainId: ride.captain?._id || null,
+        };
+
+        let delivered = false;
+
+        if (senderType === "user") {
+            delivered = emitToCaptain(ride.captain, {
+                event: "ride-message",
+                data: chatPayload,
+            });
+
+            emitToCaptain(ride.captain, {
+                event: "ride-chat-message",
+                data: chatPayload,
+            });
+        }
+
+        if (senderType === "captain") {
+            delivered = emitToUser(ride.user, {
+                event: "ride-message",
+                data: chatPayload,
+            });
+
+            emitToUser(ride.user, {
+                event: "ride-chat-message",
+                data: chatPayload,
+            });
+        }
+
+        return res.status(200).json({
+            ok: true,
+            delivered,
+            message: delivered
+                ? "Mensaje enviado correctamente."
+                : "Mensaje enviado, pero el destinatario no está conectado.",
+            data: chatPayload,
+        });
+    } catch (err) {
+        console.error("[sendRideChatMessage] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error interno enviando mensaje.",
         });
     }
 };

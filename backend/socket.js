@@ -83,15 +83,6 @@ function describeCoordinateIssue(lat, lng) {
     return '';
 }
 
-function normalizeId(value) {
-    if (!value) return '';
-    return String(value).trim();
-}
-
-function normalizeMessageText(value) {
-    return String(value || '').trim().slice(0, 1000);
-}
-
 async function clearCaptainSocketIfMatches(userId, socketId) {
     if (!userId || !socketId) return;
 
@@ -134,127 +125,6 @@ async function setCaptainSocket(userId, socketId) {
     );
 }
 
-async function getUserSocketId(userId) {
-    const id = normalizeId(userId);
-    if (!id) return null;
-
-    const user = await userModel.findById(id).select('socketId').lean();
-    return user?.socketId || null;
-}
-
-async function getCaptainSocketId(captainId) {
-    const id = normalizeId(captainId);
-    if (!id) return null;
-
-    const captain = await captainModel.findById(id).select('socketId').lean();
-    return captain?.socketId || null;
-}
-
-function getSocketById(socketId) {
-    if (!io || !socketId) return null;
-
-    try {
-        return io.sockets.sockets.get(String(socketId)) || null;
-    } catch {
-        return null;
-    }
-}
-
-function emitToSocketId(socketId, event, data) {
-    if (!io || !socketId || !event) return false;
-
-    const targetSocket = getSocketById(socketId);
-
-    if (!targetSocket) {
-        console.warn('[socket] emitToSocketId skipped: target not connected', {
-            socketId,
-            event,
-        });
-        return false;
-    }
-
-    targetSocket.emit(event, data);
-    return true;
-}
-
-async function handleRideChatMessage(socket, payload = {}) {
-    try {
-        const rideId = normalizeId(payload?.rideId);
-        const senderType = normalizeId(payload?.senderType || payload?.from);
-        const message = normalizeMessageText(payload?.message || payload?.text);
-
-        const userId = normalizeId(payload?.userId);
-        const captainId = normalizeId(payload?.captainId);
-
-        if (!rideId || !senderType || !message) {
-            console.warn('[socket] ride-message rejected: missing data', {
-                rideId,
-                senderType,
-                hasMessage: Boolean(message),
-            });
-
-            return socket.emit('ride-message-status', {
-                ok: false,
-                message: 'Missing rideId, senderType or message',
-            });
-        }
-
-        if (!['user', 'captain'].includes(senderType)) {
-            return socket.emit('ride-message-status', {
-                ok: false,
-                message: 'Invalid senderType',
-            });
-        }
-
-        const messagePayload = {
-            _id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
-            rideId,
-            senderType,
-            from: senderType,
-            userId: userId || null,
-            captainId: captainId || null,
-            message,
-            text: message,
-            createdAt: payload?.createdAt || new Date().toISOString(),
-        };
-
-        let targetSocketId = null;
-
-        if (senderType === 'user') {
-            targetSocketId = await getCaptainSocketId(captainId);
-        }
-
-        if (senderType === 'captain') {
-            targetSocketId = await getUserSocketId(userId);
-        }
-
-        if (targetSocketId) {
-            emitToSocketId(targetSocketId, 'ride-message', messagePayload);
-            emitToSocketId(targetSocketId, 'ride-chat-message', messagePayload);
-        } else {
-            console.warn('[socket] ride-message target offline or missing socketId', {
-                rideId,
-                senderType,
-                userId,
-                captainId,
-            });
-        }
-
-        socket.emit('ride-message-status', {
-            ok: true,
-            delivered: Boolean(targetSocketId),
-            data: messagePayload,
-        });
-    } catch (err) {
-        console.error('[socket] ride-message error:', err);
-
-        socket.emit('ride-message-status', {
-            ok: false,
-            message: 'Ride message failed',
-        });
-    }
-}
-
 function initializeSocket(server) {
     io = socketIo(server, {
         cors: {
@@ -262,7 +132,6 @@ function initializeSocket(server) {
                 if (origin && !isOriginAllowed(origin)) {
                     console.warn('[socket] Connect from non-listed Origin (still allowed):', origin);
                 }
-
                 callback(null, true);
             },
             methods: ['GET', 'POST'],
@@ -283,7 +152,6 @@ function initializeSocket(server) {
 
                 if (!userId || !userType) {
                     console.warn('[socket] join rejected: missing userId or userType', data);
-
                     return socket.emit('socket-joined', {
                         ok: false,
                         message: 'Missing userId or userType',
@@ -298,7 +166,6 @@ function initializeSocket(server) {
 
                     if (!updatedUser) {
                         console.warn('[socket] join user not found:', userId);
-
                         return socket.emit('socket-joined', {
                             ok: false,
                             message: 'User not found',
@@ -314,7 +181,6 @@ function initializeSocket(server) {
 
                     if (!updatedCaptain) {
                         console.warn('[socket] join captain not found:', userId);
-
                         return socket.emit('socket-joined', {
                             ok: false,
                             message: 'Captain not found',
@@ -327,7 +193,6 @@ function initializeSocket(server) {
                     });
                 } else {
                     console.warn('[socket] join rejected: invalid userType', userType);
-
                     return socket.emit('socket-joined', {
                         ok: false,
                         message: 'Invalid userType',
@@ -342,20 +207,11 @@ function initializeSocket(server) {
                 });
             } catch (err) {
                 console.error('[socket] join error:', err);
-
                 socket.emit('socket-joined', {
                     ok: false,
                     message: 'Join failed',
                 });
             }
-        });
-
-        socket.on('ride-message', async (payload = {}) => {
-            await handleRideChatMessage(socket, payload);
-        });
-
-        socket.on('ride-chat-message', async (payload = {}) => {
-            await handleRideChatMessage(socket, payload);
         });
 
         socket.on('update-location-captain', async (data = {}) => {
@@ -366,7 +222,6 @@ function initializeSocket(server) {
 
                 if (!userId) {
                     console.warn('[socket] update-location-captain missing userId');
-
                     return socket.emit('location-updated', {
                         ok: false,
                         message: 'Missing userId',
@@ -374,7 +229,6 @@ function initializeSocket(server) {
                 }
 
                 const issue = describeCoordinateIssue(ltd, lng);
-
                 if (issue) {
                     console.warn('[socket] rejected captain location:', {
                         captainId: String(userId),
@@ -405,7 +259,6 @@ function initializeSocket(server) {
 
                 if (!updatedCaptain) {
                     console.warn('[socket] update-location-captain captain not found:', userId);
-
                     return socket.emit('location-updated', {
                         ok: false,
                         message: 'Captain not found',
@@ -426,7 +279,6 @@ function initializeSocket(server) {
                 });
             } catch (err) {
                 console.error('[socket] update-location-captain error:', err);
-
                 socket.emit('location-updated', {
                     ok: false,
                     message: 'Location update failed',
@@ -453,6 +305,16 @@ function initializeSocket(server) {
     });
 }
 
+function getSocketById(socketId) {
+    if (!io || !socketId) return null;
+
+    try {
+        return io.sockets.sockets.get(String(socketId)) || null;
+    } catch {
+        return null;
+    }
+}
+
 const sendMessageToSocketId = (socketId, messageObject) => {
     if (!socketId) {
         console.warn('[socket] sendMessageToSocketId skipped: empty socketId');
@@ -476,7 +338,6 @@ const sendMessageToSocketId = (socketId, messageObject) => {
             socketId,
             event: messageObject.event,
         });
-
         return false;
     }
 

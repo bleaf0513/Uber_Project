@@ -1,8 +1,20 @@
 const express = require('express');
 const router = express.Router();
+
 const rideController = require('../controllers/ride.controller');
 const { body, query, param } = require('express-validator');
 const authMiddleware = require('../middlewares/auth.middleware');
+
+const VALID_VEHICLE_TYPES = [
+    'motorcycle',
+    'car',
+    'light_cargo',
+    'van',
+    'truck',
+    'motocarro',
+    'pickup',
+    'moving',
+];
 
 router.post(
     '/create',
@@ -20,7 +32,7 @@ router.post(
     body('vehicle')
         .isString()
         .notEmpty()
-        .isIn(['motorcycle', 'car', 'light_cargo', 'van', 'truck'])
+        .isIn(VALID_VEHICLE_TYPES)
         .withMessage('Invalid Vehicle Type'),
     body('offeredFare')
         .optional()
@@ -109,19 +121,6 @@ router.get(
     rideController.getRideOffers
 );
 
-/*
-  Si ya no vas a usar código de seguridad, esta ruta puede quedarse
-  temporalmente o eliminarse después. La dejo comentada para que no choque.
-*/
-// router.get(
-//     '/start-ride',
-//     authMiddleware.authCaptain,
-//     query('rideId')
-//         .isMongoId()
-//         .withMessage('Invalid ride id'),
-//     rideController.startRide
-// );
-
 router.post(
     '/arrived',
     authMiddleware.authCaptain,
@@ -155,6 +154,60 @@ router.post(
         .isMongoId()
         .withMessage('Invalid ride id'),
     rideController.endRide
+);
+
+/*
+  CHAT USUARIO -> CONDUCTOR
+  Esta ruta la usa el usuario desde DriverSelected.jsx.
+*/
+router.post(
+    '/chat-message',
+    authMiddleware.authUser,
+    body('rideId')
+        .isMongoId()
+        .withMessage('Invalid ride id'),
+    body('message')
+        .isString()
+        .trim()
+        .notEmpty()
+        .isLength({ max: 1000 })
+        .withMessage('Invalid message'),
+    body('senderType')
+        .optional()
+        .isIn(['user'])
+        .withMessage('Invalid sender type'),
+    (req, res, next) => {
+        req.body.senderType = 'user';
+        next();
+    },
+    rideController.sendRideChatMessage
+);
+
+/*
+  CHAT CONDUCTOR -> USUARIO
+  Esta ruta la usa el conductor desde CaptainRiding.jsx.
+*/
+router.post(
+    '/captain-chat-message',
+    authMiddleware.authCaptain,
+    body('rideId')
+        .isMongoId()
+        .withMessage('Invalid ride id'),
+    body('message')
+        .isString()
+        .trim()
+        .notEmpty()
+        .isLength({ max: 1000 })
+        .withMessage('Invalid message'),
+    body('senderType')
+        .optional()
+        .isIn(['captain'])
+        .withMessage('Invalid sender type'),
+    (req, res, next) => {
+        req.body.senderType = 'captain';
+        next();
+    },
+    rideController.sendRideChatMessage
 );
 
 module.exports = router;

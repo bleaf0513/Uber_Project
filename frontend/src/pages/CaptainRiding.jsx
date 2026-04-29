@@ -38,6 +38,7 @@ const CaptainRiding = () => {
   const [messageText, setMessageText] = useState("");
   const [hasUnreadMessage, setHasUnreadMessage] = useState(false);
   const [messages, setMessages] = useState([]);
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   const cancelModalRef = useRef(null);
   const messagesEndRef = useRef(null);
@@ -128,13 +129,19 @@ const CaptainRiding = () => {
         id: payload?._id || `${Date.now()}-${Math.random()}`,
         rideId: payload.rideId,
         senderType: payload.senderType || payload.from || "user",
+        from: payload.from || payload.senderType || "user",
         text: payload.message || payload.text || "",
+        message: payload.message || payload.text || "",
         createdAt: payload.createdAt || new Date().toISOString(),
       };
 
       if (!nextMessage.text) return;
 
-      setMessages((prev) => [...prev, nextMessage]);
+      setMessages((prev) => {
+        const exists = prev.some((msg) => String(msg.id) === String(nextMessage.id));
+        if (exists) return prev;
+        return [...prev, nextMessage];
+      });
 
       if (!chatOpen && nextMessage.senderType !== "captain") {
         setHasUnreadMessage(true);
@@ -210,54 +217,96 @@ const CaptainRiding = () => {
     return labels[vehicleType] || "Vehículo";
   };
 
-  const sendMessage = (textToSend = "") => {
+  const sendMessage = async (textToSend = "") => {
     const cleanText = String(textToSend || messageText || "").trim();
 
-    if (!cleanText || !rideData?._id) return;
+    if (!cleanText || !rideData?._id || sendingMessage) return;
 
-    const userId = rideData?.user?._id || rideData?.user || rideData?.userId || null;
-    const captainId =
-      captain?._id ||
-      rideData?.captain?._id ||
-      rideData?.captain ||
-      rideData?.captainId ||
-      null;
+    const token = localStorage.getItem("token");
 
-    const newMessage = {
-      id: `${Date.now()}-${Math.random()}`,
+    if (!token) {
+      toast.error("No hay sesión activa.");
+      return;
+    }
+
+    const tempMessage = {
+      id: `local-${Date.now()}-${Math.random()}`,
       rideId: rideData._id,
       senderType: "captain",
+      from: "captain",
       text: cleanText,
+      message: cleanText,
       createdAt: new Date().toISOString(),
+      pending: true,
     };
 
-    setMessages((prev) => [...prev, newMessage]);
+    setMessages((prev) => [...prev, tempMessage]);
     setMessageText("");
 
-    if (socket) {
-      socket.emit("ride-message", {
-        rideId: rideData._id,
-        senderType: "captain",
-        from: "captain",
-        userId,
-        captainId,
-        to: userId,
-        message: cleanText,
-        text: cleanText,
-        createdAt: newMessage.createdAt,
-      });
+    try {
+      setSendingMessage(true);
 
-      socket.emit("ride-chat-message", {
-        rideId: rideData._id,
-        senderType: "captain",
-        from: "captain",
-        userId,
-        captainId,
-        to: userId,
-        message: cleanText,
-        text: cleanText,
-        createdAt: newMessage.createdAt,
-      });
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/captain-chat-message`,
+        {
+          rideId: rideData._id,
+          message: cleanText,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const serverMessage = response?.data?.data;
+
+      if (serverMessage?._id) {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempMessage.id
+              ? {
+                  id: serverMessage._id,
+                  rideId: serverMessage.rideId,
+                  senderType: serverMessage.senderType || "captain",
+                  from: serverMessage.from || "captain",
+                  text: serverMessage.text || serverMessage.message || cleanText,
+                  message: serverMessage.message || serverMessage.text || cleanText,
+                  createdAt: serverMessage.createdAt || tempMessage.createdAt,
+                  pending: false,
+                }
+              : msg
+          )
+        );
+      } else {
+        setMessages((prev) =>
+          prev.map((msg) =>
+            msg.id === tempMessage.id ? { ...msg, pending: false } : msg
+          )
+        );
+      }
+    } catch (error) {
+      console.error("Error enviando mensaje al usuario:", error);
+
+      setMessages((prev) =>
+        prev.map((msg) =>
+          msg.id === tempMessage.id
+            ? {
+                ...msg,
+                pending: false,
+                failed: true,
+              }
+            : msg
+        )
+      );
+
+      toast.error(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo enviar el mensaje."
+      );
+    } finally {
+      setSendingMessage(false);
     }
   };
 
@@ -690,8 +739,9 @@ const CaptainRiding = () => {
                 <button
                   key={text}
                   type="button"
+                  disabled={sendingMessage}
                   onClick={() => sendMessage(text)}
-                  className="shrink-0 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700"
+                  className="shrink-0 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-60"
                 >
                   {text}
                 </button>
@@ -735,6 +785,18 @@ const CaptainRiding = () => {
                         <p className="text-sm font-medium leading-5">
                           {msg.text}
                         </p>
+
+                        {msg.pending && (
+                          <p className="text-[11px] text-gray-600 mt-1">
+                            Enviando...
+                          </p>
+                        )}
+
+                        {msg.failed && (
+                          <p className="text-[11px] text-red-600 mt-1">
+                            No enviado
+                          </p>
+                        )}
                       </div>
                     </div>
                   );
@@ -762,8 +824,9 @@ const CaptainRiding = () => {
 
                 <button
                   type="button"
+                  disabled={sendingMessage}
                   onClick={() => sendMessage()}
-                  className="w-12 h-12 rounded-full bg-lime-300 flex items-center justify-center"
+                  className="w-12 h-12 rounded-full bg-lime-300 flex items-center justify-center disabled:opacity-60"
                 >
                   <i className="ri-send-plane-fill text-2xl text-gray-950"></i>
                 </button>
