@@ -21,6 +21,9 @@ const CANCEL_REASONS = [
   "Otro motivo",
 ];
 
+const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+
 const CaptainRiding = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [selectedReason, setSelectedReason] = useState("");
@@ -87,6 +90,11 @@ const CaptainRiding = () => {
         userId: captain._id,
         userType: "captain",
       });
+
+      console.log("[CAPTAIN CHAT] join emitido:", {
+        captainId: captain._id,
+        socketId: socket.id,
+      });
     };
 
     if (socket.connected) {
@@ -122,6 +130,8 @@ const CaptainRiding = () => {
     if (!socket || !rideData?._id) return;
 
     const handleRideMessage = (payload) => {
+      console.log("[CAPTAIN CHAT] Mensaje recibido:", payload);
+
       if (!payload?.rideId) return;
       if (String(payload.rideId) !== String(rideData._id)) return;
 
@@ -138,8 +148,12 @@ const CaptainRiding = () => {
       if (!nextMessage.text) return;
 
       setMessages((prev) => {
-        const exists = prev.some((msg) => String(msg.id) === String(nextMessage.id));
+        const exists = prev.some(
+          (msg) => String(msg.id) === String(nextMessage.id)
+        );
+
         if (exists) return prev;
+
         return [...prev, nextMessage];
       });
 
@@ -185,14 +199,6 @@ const CaptainRiding = () => {
       secondPart: safeAddress.substring(firstCommaIndex + 1).trim(),
     };
   };
-
-  const getDriverPhoto = () =>
-    rideData?.captain?.profileImage ||
-    rideData?.captain?.photo ||
-    rideData?.captain?.avatar ||
-    rideData?.captain?.image ||
-    rideData?.captain?.profilePic ||
-    "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
 
   const getUserPhoto = () =>
     rideData?.user?.profileImage ||
@@ -246,11 +252,17 @@ const CaptainRiding = () => {
     try {
       setSendingMessage(true);
 
+      console.log("[CAPTAIN CHAT] Enviando mensaje:", {
+        rideId: rideData._id,
+        message: cleanText,
+      });
+
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/captain-chat-message`,
         {
           rideId: rideData._id,
           message: cleanText,
+          senderType: "captain",
         },
         {
           headers: {
@@ -271,7 +283,8 @@ const CaptainRiding = () => {
                   senderType: serverMessage.senderType || "captain",
                   from: serverMessage.from || "captain",
                   text: serverMessage.text || serverMessage.message || cleanText,
-                  message: serverMessage.message || serverMessage.text || cleanText,
+                  message:
+                    serverMessage.message || serverMessage.text || cleanText,
                   createdAt: serverMessage.createdAt || tempMessage.createdAt,
                   pending: false,
                 }
@@ -370,8 +383,7 @@ const CaptainRiding = () => {
     } catch (error) {
       console.error("Error cancelando solicitud:", error);
       toast.error(
-        error?.response?.data?.message ||
-          "No se pudo cancelar la solicitud."
+        error?.response?.data?.message || "No se pudo cancelar la solicitud."
       );
     } finally {
       setSendingCancel(false);
@@ -399,12 +411,15 @@ const CaptainRiding = () => {
     } catch (error) {
       console.error("Error finalizando recorrido:", error);
       toast.error(
-        error?.response?.data?.message ||
-          "No se pudo finalizar el recorrido."
+        error?.response?.data?.message || "No se pudo finalizar el recorrido."
       );
     } finally {
       setFinishingRide(false);
     }
+  };
+
+  const handleSecurity = () => {
+    toast.info("Centro de seguridad próximamente disponible.");
   };
 
   if (!rideData) {
@@ -450,9 +465,7 @@ const CaptainRiding = () => {
   const vehicleLabel = getVehicleLabel(vehicleType);
 
   const plate =
-    rideData?.captain?.vehicle?.plate ||
-    rideData?.captain?.plate ||
-    "Sin placa";
+    rideData?.captain?.vehicle?.plate || rideData?.captain?.plate || "Sin placa";
 
   const color =
     rideData?.captain?.vehicle?.color ||
@@ -477,13 +490,13 @@ const CaptainRiding = () => {
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
       <div className="absolute inset-0 z-10">
         <LiveTracking
-  pickup={rideData?.pickup || ""}
-  selectedCaptainId={rideData?.captain?._id || null}
-  showRouteToPickup={true}
-  showPickupRadar={false}
-  autoFetchNearbyDrivers={false}
-  onEtaUpdate={setEtaInfo}
-/>
+          pickup={rideData?.pickup || ""}
+          selectedCaptainId={rideData?.captain?._id || null}
+          showRouteToPickup={true}
+          showPickupRadar={false}
+          autoFetchNearbyDrivers={false}
+          onEtaUpdate={setEtaInfo}
+        />
       </div>
 
       <div className="absolute top-3 left-3 z-40">
@@ -508,18 +521,26 @@ const CaptainRiding = () => {
           setChatOpen(true);
           setHasUnreadMessage(false);
         }}
-        className="absolute top-[72px] right-3 z-40 w-14 h-14 rounded-full bg-lime-300 shadow-xl flex items-center justify-center"
+        className="absolute top-[72px] right-3 z-40 w-14 h-14 rounded-full shadow-xl flex items-center justify-center"
+        style={{
+          background: PURPLE_GRADIENT,
+        }}
       >
         {hasUnreadMessage && (
           <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
         )}
 
-        <i className="ri-message-3-line text-3xl text-black"></i>
+        <i className="ri-message-3-line text-3xl text-white"></i>
       </button>
 
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
         <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[54vh] overflow-y-auto">
-          <div className="bg-gradient-to-r from-emerald-500 to-emerald-300 px-4 py-4 text-white">
+          <div
+            className="px-4 py-4 text-white"
+            style={{
+              background: PURPLE_GRADIENT,
+            }}
+          >
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-[11px] uppercase tracking-wide text-white/85">
@@ -544,7 +565,7 @@ const CaptainRiding = () => {
           </div>
 
           <div className="p-4 space-y-3">
-            <div className="flex items-center gap-3 rounded-3xl border border-gray-200 bg-gray-50 p-3">
+            <div className="flex items-center gap-3 rounded-3xl border border-purple-100 bg-purple-50 p-3">
               <img
                 src={getUserPhoto()}
                 alt={userFullName}
@@ -571,17 +592,41 @@ const CaptainRiding = () => {
                   setChatOpen(true);
                   setHasUnreadMessage(false);
                 }}
-                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center"
+                className="rounded-3xl border border-purple-200 bg-white p-3 flex flex-col items-center shadow-sm"
               >
-                <div className="relative w-14 h-14 rounded-full bg-lime-300 flex items-center justify-center">
+                <div
+                  className="relative w-14 h-14 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
                   {hasUnreadMessage && (
                     <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-red-500 border-2 border-white"></span>
                   )}
-                  <i className="ri-message-3-line text-2xl text-black"></i>
+                  <i className="ri-message-3-line text-2xl text-white"></i>
                 </div>
 
-                <p className="text-xs font-bold text-gray-800 mt-2">
-                  Chat usuario
+                <p className="text-xs font-bold text-purple-800 mt-2">
+                  Contactar
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleSecurity}
+                className="rounded-3xl border border-purple-200 bg-white p-3 flex flex-col items-center shadow-sm"
+              >
+                <div
+                  className="w-14 h-14 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-shield-check-line text-2xl text-white"></i>
+                </div>
+
+                <p className="text-xs font-bold text-purple-800 mt-2">
+                  Seguridad
                 </p>
               </button>
 
@@ -589,28 +634,21 @@ const CaptainRiding = () => {
                 type="button"
                 onClick={handleArrived}
                 disabled={sendingArrived || driverArrived}
-                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center disabled:opacity-60"
+                className="rounded-3xl border border-purple-200 bg-white p-3 flex flex-col items-center disabled:opacity-60 shadow-sm"
               >
-                <div className="w-14 h-14 rounded-full bg-emerald-100 flex items-center justify-center">
-                  <i className="ri-map-pin-user-fill text-2xl text-emerald-700"></i>
+                <div
+                  className="w-14 h-14 rounded-full flex items-center justify-center"
+                  style={{
+                    background: driverArrived
+                      ? "linear-gradient(135deg, #16A34A, #4ADE80)"
+                      : PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-map-pin-user-fill text-2xl text-white"></i>
                 </div>
 
-                <p className="text-xs font-bold text-gray-800 mt-2">
+                <p className="text-xs font-bold text-purple-800 mt-2">
                   {driverArrived ? "Notificado" : "Llegué"}
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setShowCancelModal(true)}
-                className="rounded-3xl border border-gray-200 bg-white p-3 flex flex-col items-center"
-              >
-                <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center">
-                  <i className="ri-close-circle-line text-2xl text-red-700"></i>
-                </div>
-
-                <p className="text-xs font-bold text-gray-800 mt-2">
-                  Cancelar
                 </p>
               </button>
             </div>
@@ -621,23 +659,26 @@ const CaptainRiding = () => {
                 setChatOpen(true);
                 setHasUnreadMessage(false);
               }}
-              className="w-full rounded-xl bg-gray-100 px-4 py-4 flex items-center justify-between"
+              className="w-full rounded-xl px-4 py-4 flex items-center justify-between border border-purple-100"
+              style={{
+                background: PURPLE_SOFT,
+              }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <i className="ri-message-3-line text-2xl text-gray-800"></i>
+                <i className="ri-message-3-line text-2xl text-purple-700"></i>
 
-                <span className="text-base font-semibold text-gray-500 truncate">
+                <span className="text-base font-semibold text-purple-700 truncate">
                   ¿Enviar mensaje u observación al usuario?
                 </span>
               </div>
 
-              <i className="ri-arrow-right-s-line text-2xl text-gray-900"></i>
+              <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
             </button>
 
             <div className="rounded-3xl border border-gray-200 bg-white p-3">
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
-                  <i className="ri-map-pin-range-fill text-lg"></i>
+                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+                  <i className="ri-map-pin-range-fill text-lg text-purple-700"></i>
                 </div>
 
                 <div className="min-w-0">
@@ -654,8 +695,8 @@ const CaptainRiding = () => {
               <div className="h-5 w-px bg-gray-200 ml-5 my-2"></div>
 
               <div className="flex items-start gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
-                  <i className="ri-square-fill text-lg"></i>
+                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+                  <i className="ri-square-fill text-lg text-purple-700"></i>
                 </div>
 
                 <div className="min-w-0">
@@ -671,12 +712,12 @@ const CaptainRiding = () => {
             </div>
 
             {(etaInfo?.etaText || etaInfo?.distanceText) && (
-              <div className="rounded-3xl border border-violet-200 bg-violet-50 px-4 py-3">
-                <p className="text-sm font-bold text-violet-900">
+              <div className="rounded-3xl border border-purple-200 bg-purple-50 px-4 py-3">
+                <p className="text-sm font-bold text-purple-900">
                   Seguimiento en tiempo real
                 </p>
 
-                <p className="text-sm text-violet-800 mt-1">
+                <p className="text-sm text-purple-800 mt-1">
                   {etaInfo?.etaText ? `Llegas en ${etaInfo.etaText}` : ""}
                   {etaInfo?.etaText && etaInfo?.distanceText ? " · " : ""}
                   {etaInfo?.distanceText || ""}
@@ -684,17 +725,30 @@ const CaptainRiding = () => {
               </div>
             )}
 
-            <button
-              type="button"
-              onClick={handleFinishRide}
-              disabled={finishingRide}
-              className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-60"
-              style={{
-                background: "linear-gradient(to right, #f2994a, #f2c94c)",
-              }}
-            >
-              {finishingRide ? "Finalizando..." : "Finalizar recorrido"}
-            </button>
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(true)}
+                className="w-full rounded-2xl py-3.5 text-white font-bold"
+                style={{
+                  background: "linear-gradient(135deg, #7C3AED, #9333EA)",
+                }}
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleFinishRide}
+                disabled={finishingRide}
+                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-60"
+                style={{
+                  background: PURPLE_GRADIENT,
+                }}
+              >
+                {finishingRide ? "Finalizando..." : "Finalizar"}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -706,20 +760,25 @@ const CaptainRiding = () => {
               <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
             </div>
 
-            <div className="px-5 py-4 border-b border-gray-100 flex items-center justify-between">
+            <div
+              className="px-5 py-4 border-b border-purple-100 flex items-center justify-between text-white"
+              style={{
+                background: PURPLE_GRADIENT,
+              }}
+            >
               <div className="flex items-center gap-3 min-w-0">
                 <img
                   src={getUserPhoto()}
                   alt={userFullName}
-                  className="w-12 h-12 rounded-full object-cover bg-gray-200"
+                  className="w-12 h-12 rounded-full object-cover bg-gray-200 border-2 border-white"
                 />
 
                 <div className="min-w-0">
-                  <p className="text-lg font-extrabold text-gray-900 truncate">
+                  <p className="text-lg font-extrabold truncate">
                     {userFullName}
                   </p>
 
-                  <p className="text-sm text-gray-500 truncate">
+                  <p className="text-sm text-white/80 truncate">
                     Usuario del servicio
                   </p>
                 </div>
@@ -728,20 +787,20 @@ const CaptainRiding = () => {
               <button
                 type="button"
                 onClick={() => setChatOpen(false)}
-                className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
+                className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center"
               >
-                <i className="ri-close-line text-2xl"></i>
+                <i className="ri-close-line text-2xl text-white"></i>
               </button>
             </div>
 
-            <div className="px-4 py-3 bg-gray-50 flex gap-2 overflow-x-auto">
+            <div className="px-4 py-3 bg-purple-50 flex gap-2 overflow-x-auto">
               {quickMessages.map((text) => (
                 <button
                   key={text}
                   type="button"
                   disabled={sendingMessage}
                   onClick={() => sendMessage(text)}
-                  className="shrink-0 rounded-full bg-white border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 disabled:opacity-60"
+                  className="shrink-0 rounded-full bg-white border border-purple-200 px-4 py-2 text-sm font-semibold text-purple-700 disabled:opacity-60"
                 >
                   {text}
                 </button>
@@ -751,8 +810,13 @@ const CaptainRiding = () => {
             <div className="flex-1 overflow-y-auto px-4 py-4 bg-white space-y-3">
               {messages.length === 0 ? (
                 <div className="text-center py-8">
-                  <div className="w-16 h-16 mx-auto rounded-full bg-lime-200 flex items-center justify-center">
-                    <i className="ri-message-3-line text-3xl text-gray-900"></i>
+                  <div
+                    className="w-16 h-16 mx-auto rounded-full flex items-center justify-center"
+                    style={{
+                      background: PURPLE_GRADIENT,
+                    }}
+                  >
+                    <i className="ri-message-3-line text-3xl text-white"></i>
                   </div>
 
                   <p className="text-lg font-bold text-gray-900 mt-4">
@@ -778,22 +842,29 @@ const CaptainRiding = () => {
                       <div
                         className={`max-w-[78%] rounded-2xl px-4 py-3 ${
                           isMine
-                            ? "bg-lime-300 text-gray-950 rounded-br-md"
+                            ? "text-white rounded-br-md"
                             : "bg-gray-100 text-gray-900 rounded-bl-md"
                         }`}
+                        style={
+                          isMine
+                            ? {
+                                background: PURPLE_GRADIENT,
+                              }
+                            : {}
+                        }
                       >
                         <p className="text-sm font-medium leading-5">
                           {msg.text}
                         </p>
 
                         {msg.pending && (
-                          <p className="text-[11px] text-gray-600 mt-1">
+                          <p className="text-[11px] text-white/75 mt-1">
                             Enviando...
                           </p>
                         )}
 
                         {msg.failed && (
-                          <p className="text-[11px] text-red-600 mt-1">
+                          <p className="text-[11px] text-red-100 mt-1">
                             No enviado
                           </p>
                         )}
@@ -806,7 +877,7 @@ const CaptainRiding = () => {
               <div ref={messagesEndRef}></div>
             </div>
 
-            <div className="p-4 border-t border-gray-100 bg-white">
+            <div className="p-4 border-t border-purple-100 bg-white">
               <div className="flex items-center gap-2">
                 <input
                   value={messageText}
@@ -817,7 +888,7 @@ const CaptainRiding = () => {
                       sendMessage();
                     }
                   }}
-                  className="flex-1 rounded-full bg-gray-100 px-4 py-3 text-base outline-none"
+                  className="flex-1 rounded-full bg-purple-50 border border-purple-100 px-4 py-3 text-base outline-none"
                   type="text"
                   placeholder="Escribe un mensaje..."
                 />
@@ -826,9 +897,12 @@ const CaptainRiding = () => {
                   type="button"
                   disabled={sendingMessage}
                   onClick={() => sendMessage()}
-                  className="w-12 h-12 rounded-full bg-lime-300 flex items-center justify-center disabled:opacity-60"
+                  className="w-12 h-12 rounded-full flex items-center justify-center disabled:opacity-60"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
                 >
-                  <i className="ri-send-plane-fill text-2xl text-gray-950"></i>
+                  <i className="ri-send-plane-fill text-2xl text-white"></i>
                 </button>
               </div>
             </div>
@@ -865,7 +939,7 @@ const CaptainRiding = () => {
                     onClick={() => setSelectedReason(reason)}
                     className={`w-full text-left rounded-2xl border px-4 py-4 transition ${
                       selected
-                        ? "border-emerald-500 bg-emerald-50 text-emerald-900"
+                        ? "border-purple-500 bg-purple-50 text-purple-900"
                         : "border-gray-200 bg-white text-gray-800"
                     }`}
                   >
@@ -908,7 +982,7 @@ const CaptainRiding = () => {
                 disabled={sendingCancel}
                 className="w-full rounded-2xl py-3.5 font-bold text-white disabled:opacity-60"
                 style={{
-                  background: "linear-gradient(to right, #cb2d3e, #ef473a)",
+                  background: PURPLE_GRADIENT,
                 }}
               >
                 {sendingCancel ? "Cancelando..." : "Confirmar cancelación"}
