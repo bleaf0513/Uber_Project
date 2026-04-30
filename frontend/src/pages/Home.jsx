@@ -123,13 +123,28 @@ function Home() {
   useEffect(() => {
     if (!socket) return;
 
-    const onRideStarted = (rideData) => {
-      setDriverSelected(false);
-      setVehicleFound(false);
-      setConfirmRidePanel(false);
-      setVehiclePanel(false);
-      navigate("/riding", { state: { ride: rideData } });
-    };
+    const onRideStarted = (payload) => {
+  const nextRide = payload?.ride || payload || ride;
+
+  if (!nextRide?._id) {
+    console.error("[user socket] ride-started sin ride válido:", payload);
+    alert("El viaje inició, pero no se pudo cargar la información completa.");
+    return;
+  }
+
+  setRide(nextRide);
+  setCaptainArrived(false);
+  setDriverSelected(false);
+  setVehicleFound(false);
+  setConfirmRidePanel(false);
+  setVehiclePanel(false);
+
+  navigate("/riding", {
+    state: {
+      ride: nextRide,
+    },
+  });
+};
 
     const onRideConfirmed = (rideData) => {
       setCaptainArrived(false);
