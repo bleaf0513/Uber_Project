@@ -1807,6 +1807,13 @@ const EnterpriseLogistics = () => {
   };
 
   const handleOptimizeSmartRoutes = async () => {
+    const cleanRouteName = String(smartRouteName || "").trim();
+
+    if (!cleanRouteName) {
+      alert("Debes escribir un nombre para la ruta inteligente antes de optimizar.");
+      return;
+    }
+
     const pendingRoutes = deliveries.filter((delivery) => {
       const assignedDriverId = getDeliveryAssignedId(delivery);
       return (
@@ -1837,29 +1844,33 @@ const EnterpriseLogistics = () => {
       }
     }
 
-    const hasManualOrSelectedBase =
+    const hasValidSelectedBase =
       Number.isFinite(Number(baseLat)) && Number.isFinite(Number(baseLng));
 
-    const baseLocation = hasManualOrSelectedBase
-      ? {
-          address: baseAddress || "Punto de carga de la empresa",
-          formattedAddress: baseAddress || "Punto de carga de la empresa",
-          placeId: basePlaceId,
-          lat: Number(baseLat),
-          lng: Number(baseLng),
-        }
-      : undefined;
-
-    if (!baseLocation) {
-      const confirmed = window.confirm(
-        "No seleccionaste un punto de salida con coordenadas. ¿Quieres intentar optimizar usando el punto base guardado de la empresa?"
+    if (!hasValidSelectedBase) {
+      setSmartBaseValidationError(
+        "Debes seleccionar un punto de salida/bodega desde Google Maps antes de optimizar."
       );
 
-      if (!confirmed) {
-        alert("Selecciona una sugerencia de Google Maps o configura el punto base de la empresa.");
-        return;
-      }
+      alert(
+        "Debes seleccionar el punto de salida o bodega antes de optimizar. La ruta inteligente necesita saber desde dónde inicia."
+      );
+      return;
     }
+
+    const baseLocation = {
+      address: baseAddress || "Punto de salida",
+      formattedAddress: baseAddress || "Punto de salida",
+      placeId: basePlaceId,
+      lat: Number(baseLat),
+      lng: Number(baseLng),
+    };
+
+    const confirmed = window.confirm(
+      `¿Optimizar ${pendingRoutes.length} pedidos desde "${baseLocation.formattedAddress}"?`
+    );
+
+    if (!confirmed) return;
 
     try {
       setSmartRoutesOptimizing(true);
@@ -1871,9 +1882,7 @@ const EnterpriseLogistics = () => {
         },
         credentials: "include",
         body: JSON.stringify({
-          routeName:
-            smartRouteName ||
-            `Ruta inteligente ${new Date().toLocaleDateString("es-CO")}`,
+          routeName: cleanRouteName,
           baseLocation,
           deliveryIds: pendingRoutes.map((delivery) => delivery?._id || delivery?.id),
         }),
@@ -1900,7 +1909,6 @@ const EnterpriseLogistics = () => {
       setSmartRoutesOptimizing(false);
     }
   };
-
   const getCurrentSmartRouteGroupId = () => {
     return selectedSmartRouteGroupId || currentSmartRoute?.routeGroupId || "";
   };
@@ -2897,14 +2905,19 @@ const EnterpriseLogistics = () => {
                       {Number.isFinite(Number(smartBaseLat)) &&
                       Number.isFinite(Number(smartBaseLng))
                         ? "Validado"
-                        : "Base"}
+                        : "Requerido"}
                     </p>
                   </div>
 
                   <div className="text-center">
                     <p className="text-xs text-gray-500">Estado</p>
                     <p className="text-sm font-extrabold text-gray-900">
-                      {pendingSmartRouteDeliveries.length > 0 ? "Listo" : "Sin pedidos"}
+                      {pendingSmartRouteDeliveries.length > 0 &&
+                      String(smartRouteName || "").trim() &&
+                      Number.isFinite(Number(smartBaseLat)) &&
+                      Number.isFinite(Number(smartBaseLng))
+                        ? "Listo"
+                        : "Incompleto"}
                     </p>
                   </div>
                 </div>
@@ -2912,15 +2925,30 @@ const EnterpriseLogistics = () => {
                 <button
                   type="button"
                   onClick={handleOptimizeSmartRoutes}
-                  disabled={smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0}
+                  disabled={
+                    smartRoutesOptimizing ||
+                    pendingSmartRouteDeliveries.length === 0 ||
+                    !String(smartRouteName || "").trim() ||
+                    !(Number.isFinite(Number(smartBaseLat)) && Number.isFinite(Number(smartBaseLng)))
+                  }
                   className={`w-full rounded-2xl px-4 py-4 font-extrabold text-white shadow ${
-                    smartRoutesOptimizing || pendingSmartRouteDeliveries.length === 0
+                    smartRoutesOptimizing ||
+                    pendingSmartRouteDeliveries.length === 0 ||
+                    !String(smartRouteName || "").trim() ||
+                    !(Number.isFinite(Number(smartBaseLat)) && Number.isFinite(Number(smartBaseLng)))
                       ? "bg-gray-300 cursor-not-allowed"
                       : "bg-blue-700 hover:bg-blue-800"
                   }`}
                 >
                   {smartRoutesOptimizing ? "Optimizando ruta..." : "Optimizar pedidos pendientes"}
                 </button>
+
+                {(!String(smartRouteName || "").trim() ||
+                  !(Number.isFinite(Number(smartBaseLat)) && Number.isFinite(Number(smartBaseLng)))) ? (
+                  <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs font-bold text-amber-800">
+                    Para optimizar debes escribir el nombre de la ruta y seleccionar el punto de salida/bodega desde Google Maps.
+                  </div>
+                ) : null}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <button
