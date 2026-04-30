@@ -54,6 +54,27 @@ function kmText(meters) {
     return `${(meters / 1000).toFixed(2)} km`;
 }
 
+function normalizeDistanceToKm(value) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number) || number <= 0) {
+        return null;
+    }
+
+    /*
+      IMPORTANTE:
+      Si distance viene como 2517, eso normalmente son metros.
+      2517 metros = 2.52 km.
+
+      Si viene como 2.5, asumimos que ya viene en kilómetros.
+    */
+    if (number > 300) {
+        return Number((number / 1000).toFixed(2));
+    }
+
+    return Number(number.toFixed(2));
+}
+
 function emitToUser(userLike, payload) {
     const socketId = userLike?.socketId || null;
     if (!socketId) return false;
@@ -783,8 +804,8 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                     }
 
                     if (Number.isFinite(Number(freshRide.distance))) {
-                        pickupToDestinationKm = Number(
-                            Number(freshRide.distance).toFixed(2)
+                        pickupToDestinationKm = normalizeDistanceToKm(
+                            freshRide.distance
                         );
                     } else {
                         const destinationCoordinates =
