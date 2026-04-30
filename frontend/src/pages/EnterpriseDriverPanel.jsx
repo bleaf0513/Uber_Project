@@ -76,6 +76,62 @@ const getDriverAuthHeaders = () => {
   return headers;
 };
 
+const getDeliveryAddressText = (delivery) => {
+  return String(delivery?.address || "").trim();
+};
+
+const buildGoogleMapsDeliveryUrl = (delivery, selectedDriver) => {
+  const destination = getDeliveryAddressText(delivery);
+
+  if (!destination) return "";
+
+  const driverLat = selectedDriver?.currentLocation?.lat;
+  const driverLng = selectedDriver?.currentLocation?.lng;
+
+  const origin =
+    driverLat && driverLng
+      ? `${driverLat},${driverLng}`
+      : "";
+
+  const params = new URLSearchParams();
+  params.set("api", "1");
+
+  if (origin) {
+    params.set("origin", origin);
+  }
+
+  params.set("destination", destination);
+  params.set("travelmode", "driving");
+
+  return `https://www.google.com/maps/dir/?${params.toString()}`;
+};
+
+const buildWazeDeliveryUrl = (delivery) => {
+  const destination = getDeliveryAddressText(delivery);
+
+  if (!destination) return "";
+
+  const params = new URLSearchParams();
+  params.set("q", destination);
+  params.set("navigate", "yes");
+
+  return `https://waze.com/ul?${params.toString()}`;
+};
+
+const openNavigationForDelivery = (delivery, selectedDriver, app) => {
+  const url =
+    app === "waze"
+      ? buildWazeDeliveryUrl(delivery)
+      : buildGoogleMapsDeliveryUrl(delivery, selectedDriver);
+
+  if (!url) {
+    alert("Este pedido no tiene una dirección válida para navegar.");
+    return;
+  }
+
+  window.open(url, "_blank", "noopener,noreferrer");
+};
+
 const EnterpriseDriverMap = ({
   selectedDriver,
   assignedDeliveries,
@@ -509,7 +565,6 @@ const EnterpriseDriverMap = ({
         };
 
         const orderedStops = [...geocodedStops];
-
         const directionsService = new window.google.maps.DirectionsService();
 
         const destination =
@@ -625,7 +680,7 @@ const EnterpriseDriverMap = ({
       destination
     )}&travelmode=driving${waypoints ? `&waypoints=${waypoints}` : ""}`;
 
-    window.open(url, "_blank");
+    window.open(url, "_blank", "noopener,noreferrer");
   };
 
   const canNavigate =
@@ -738,13 +793,49 @@ const EnterpriseDriverMap = ({
 
           {activeDelivery ? (
             <div className="rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-4">
-              <p className="text-sm font-extrabold text-blue-900">
-                Entrega activa
-              </p>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <p className="text-sm font-extrabold text-blue-900">
+                    Entrega activa
+                  </p>
 
-              <p className="mt-1 text-sm font-semibold text-blue-800">
-                {activeDelivery.clientName} — {activeDelivery.address}
-              </p>
+                  <p className="mt-1 text-sm font-semibold text-blue-800">
+                    {activeDelivery.clientName} — {activeDelivery.address}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openNavigationForDelivery(
+                        activeDelivery,
+                        selectedDriver,
+                        "waze"
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-indigo-600/20 transition hover:scale-[1.02]"
+                  >
+                    <span>🚙</span>
+                    <span>Waze</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      openNavigationForDelivery(
+                        activeDelivery,
+                        selectedDriver,
+                        "google"
+                      )
+                    }
+                    className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-600/20 transition hover:scale-[1.02]"
+                  >
+                    <span>📍</span>
+                    <span>Maps</span>
+                  </button>
+                </div>
+              </div>
             </div>
           ) : null}
 
@@ -759,7 +850,7 @@ const EnterpriseDriverMap = ({
                   : "cursor-not-allowed bg-gray-300 text-gray-500"
               }`}
             >
-              Abrir ruta en Google Maps
+              Abrir ruta completa en Google Maps
             </button>
           </div>
 
@@ -807,7 +898,7 @@ const EnterpriseDriverMap = ({
                           {index + 1}
                         </div>
 
-                        <div>
+                        <div className="min-w-0 flex-1">
                           <p className="text-sm font-extrabold text-slate-900">
                             {stop.clientName || "Cliente"}
                           </p>
@@ -816,11 +907,33 @@ const EnterpriseDriverMap = ({
                             {stop.address}
                           </p>
 
-                          {isCurrentStop ? (
-                            <span className="mt-2 inline-flex rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
-                              Parada activa
-                            </span>
-                          ) : null}
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openNavigationForDelivery(stop, selectedDriver, "waze")
+                              }
+                              className="rounded-xl bg-indigo-600 px-3 py-2 text-xs font-extrabold text-white transition hover:scale-[1.02]"
+                            >
+                              🚙 Waze
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openNavigationForDelivery(stop, selectedDriver, "google")
+                              }
+                              className="rounded-xl bg-emerald-600 px-3 py-2 text-xs font-extrabold text-white transition hover:scale-[1.02]"
+                            >
+                              📍 Maps
+                            </button>
+
+                            {isCurrentStop ? (
+                              <span className="inline-flex rounded-xl bg-blue-600 px-3 py-2 text-xs font-bold text-white">
+                                Parada activa
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -1036,6 +1149,12 @@ const EnterpriseDriverPanel = () => {
           });
 
           setActiveDeliveryId(inProgress?._id || inProgress?.id || "");
+
+          if (inProgress) {
+            setListScopeFilter("En curso");
+            setListStatusFilter("En curso");
+            setListDateFilter("");
+          }
         }
       } catch (error) {
         console.error("Error cargando panel del conductor:", error);
@@ -1248,27 +1367,35 @@ const EnterpriseDriverPanel = () => {
   const handleStartDelivery = async (deliveryId) => {
     if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
 
-    setStartingDeliveryId(String(deliveryId));
+    const normalizedDeliveryId = String(deliveryId);
+    setStartingDeliveryId(normalizedDeliveryId);
 
     try {
       const driverId = selectedDriver._id || selectedDriver.id;
 
       await startNativeTrackingNow({ silent: true });
 
-      const optimisticDeliveries = deliveries.map((delivery) => {
-        const currentId = delivery._id || delivery.id;
+      const nowIso = new Date().toISOString();
 
-        return String(currentId) === String(deliveryId)
-          ? {
-              ...delivery,
-              status: "En curso",
-              startedAt: new Date().toISOString(),
-            }
-          : delivery;
+      const optimisticDeliveries = deliveries.map((delivery) => {
+        const currentId = String(delivery._id || delivery.id || "");
+
+        if (currentId !== normalizedDeliveryId) return delivery;
+
+        return {
+          ...delivery,
+          status: "En curso",
+          startedAt: delivery.startedAt || nowIso,
+          updatedAt: nowIso,
+        };
       });
 
       updateDeliveriesStorage(optimisticDeliveries);
-      setActiveDeliveryId(String(deliveryId));
+      setActiveDeliveryId(normalizedDeliveryId);
+
+      setListScopeFilter("En curso");
+      setListStatusFilter("En curso");
+      setListDateFilter("");
 
       const optimisticDriver = {
         ...selectedDriver,
@@ -1282,26 +1409,44 @@ const EnterpriseDriverPanel = () => {
         JSON.stringify(optimisticDriver)
       );
 
-      const persistedDelivery = await persistDeliveryStatus(deliveryId, "En curso");
+      const persistedDelivery = await persistDeliveryStatus(
+        normalizedDeliveryId,
+        "En curso"
+      );
 
-      const normalizedPersistedDeliveryId =
-        persistedDelivery?._id || persistedDelivery?.id || deliveryId;
+      const persistedDeliveryId = String(
+        persistedDelivery?._id || persistedDelivery?.id || normalizedDeliveryId
+      );
 
-      const updatedDeliveries = optimisticDeliveries.map((delivery) => {
-        const currentId = delivery._id || delivery.id;
+      const finalDeliveries = optimisticDeliveries.map((delivery) => {
+        const currentId = String(delivery._id || delivery.id || "");
 
-        if (String(currentId) === String(normalizedPersistedDeliveryId)) {
-          return {
-            ...delivery,
-            ...persistedDelivery,
-          };
-        }
+        if (currentId !== persistedDeliveryId) return delivery;
 
-        return delivery;
+        return {
+          ...delivery,
+          ...(persistedDelivery || {}),
+          status: "En curso",
+          startedAt:
+            persistedDelivery?.startedAt || delivery.startedAt || nowIso,
+          updatedAt:
+            persistedDelivery?.updatedAt || new Date().toISOString(),
+        };
       });
 
-      updateDeliveriesStorage(updatedDeliveries);
-      setActiveDeliveryId(String(normalizedPersistedDeliveryId));
+      updateDeliveriesStorage(finalDeliveries);
+      setActiveDeliveryId(persistedDeliveryId);
+
+      const startedDelivery = finalDeliveries.find(
+        (delivery) =>
+          String(delivery._id || delivery.id || "") === persistedDeliveryId
+      );
+
+      if (startedDelivery?.address) {
+        setTimeout(() => {
+          openNavigationForDelivery(startedDelivery, optimisticDriver, "google");
+        }, 350);
+      }
 
       try {
         const persistedDriver = await persistDriverStatus(driverId, "En ruta");
@@ -1328,30 +1473,56 @@ const EnterpriseDriverPanel = () => {
   const handleFinishDelivery = async (deliveryId) => {
     if (!selectedDriver || startingDeliveryId || finishingDeliveryId) return;
 
-    setFinishingDeliveryId(String(deliveryId));
+    const normalizedDeliveryId = String(deliveryId);
+    setFinishingDeliveryId(normalizedDeliveryId);
 
     try {
       const driverId = selectedDriver._id || selectedDriver.id;
+      const nowIso = new Date().toISOString();
 
-      const persistedDelivery = await persistDeliveryStatus(deliveryId, "Finalizada");
+      const optimisticDeliveries = deliveries.map((delivery) => {
+        const currentId = String(delivery._id || delivery.id || "");
 
-      const normalizedPersistedDeliveryId =
-        persistedDelivery?._id || persistedDelivery?.id || deliveryId;
+        if (currentId !== normalizedDeliveryId) return delivery;
 
-      const updatedDeliveries = deliveries.map((delivery) => {
-        const currentId = delivery._id || delivery.id;
-
-        return String(currentId) === String(normalizedPersistedDeliveryId)
-          ? {
-              ...delivery,
-              ...persistedDelivery,
-            }
-          : delivery;
+        return {
+          ...delivery,
+          status: "Finalizada",
+          finishedAt: delivery.finishedAt || nowIso,
+          updatedAt: nowIso,
+        };
       });
 
-      updateDeliveriesStorage(updatedDeliveries);
+      updateDeliveriesStorage(optimisticDeliveries);
 
-      const remaining = updatedDeliveries.filter((delivery) => {
+      const persistedDelivery = await persistDeliveryStatus(
+        normalizedDeliveryId,
+        "Finalizada"
+      );
+
+      const persistedDeliveryId = String(
+        persistedDelivery?._id || persistedDelivery?.id || normalizedDeliveryId
+      );
+
+      const finalDeliveries = optimisticDeliveries.map((delivery) => {
+        const currentId = String(delivery._id || delivery.id || "");
+
+        if (currentId !== persistedDeliveryId) return delivery;
+
+        return {
+          ...delivery,
+          ...(persistedDelivery || {}),
+          status: "Finalizada",
+          finishedAt:
+            persistedDelivery?.finishedAt || delivery.finishedAt || nowIso,
+          updatedAt:
+            persistedDelivery?.updatedAt || new Date().toISOString(),
+        };
+      });
+
+      updateDeliveriesStorage(finalDeliveries);
+
+      const remaining = finalDeliveries.filter((delivery) => {
         const assignedId =
           delivery.assignedDriverId?._id ||
           delivery.assignedDriverId ||
@@ -1365,8 +1536,25 @@ const EnterpriseDriverPanel = () => {
         );
       });
 
-      const nextActive = remaining.find((delivery) => delivery.status === "En curso");
+      const nextActive = remaining.find(
+        (delivery) => delivery.status === "En curso"
+      );
+
       setActiveDeliveryId(nextActive?._id || nextActive?.id || "");
+
+      if (nextActive) {
+        setListScopeFilter("En curso");
+        setListStatusFilter("En curso");
+        setListDateFilter("");
+      } else if (remaining.some((delivery) => delivery.status === "Pendiente")) {
+        setListScopeFilter("Pendientes");
+        setListStatusFilter("Pendiente");
+        setListDateFilter("");
+      } else {
+        setListScopeFilter("Finalizados");
+        setListStatusFilter("Finalizada");
+        setListDateFilter("");
+      }
 
       const nextDriverStatus = remaining.length ? "En ruta" : "Disponible";
 
@@ -1383,7 +1571,10 @@ const EnterpriseDriverPanel = () => {
       );
 
       try {
-        const persistedDriver = await persistDriverStatus(driverId, nextDriverStatus);
+        const persistedDriver = await persistDriverStatus(
+          driverId,
+          nextDriverStatus
+        );
 
         if (persistedDriver) {
           setSelectedDriver(persistedDriver);
@@ -1581,98 +1772,82 @@ const EnterpriseDriverPanel = () => {
       </div>
 
       <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
-        <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
-          <div className="xl:col-span-4">
-            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.10)]">
-              <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-green-50 px-6 py-5">
-                <h2 className="text-xl font-extrabold text-slate-900">Tus datos</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Información general del conductor.
+        <div className="mb-6 overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_14px_42px_rgba(15,23,42,0.08)]">
+          <div className="flex flex-col gap-4 p-5 lg:flex-row lg:items-center lg:justify-between">
+            <div className="flex items-center gap-4">
+              <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-emerald-500 to-green-700 text-2xl text-white shadow-lg shadow-emerald-600/20">
+                🚚
+              </div>
+
+              <div>
+                <p className="text-xs font-extrabold uppercase tracking-wide text-slate-400">
+                  Conductor activo
+                </p>
+                <h2 className="text-lg font-extrabold text-slate-900">
+                  {selectedDriver.name}
+                </h2>
+                <p className="text-sm font-semibold text-slate-500">
+                  {selectedDriver.vehicle || "Vehículo"} ·{" "}
+                  {selectedDriver.plate || "Sin placa"}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase text-slate-400">Cédula</p>
+                <p className="mt-1 text-sm font-extrabold text-slate-900">
+                  {selectedDriver.cedula || "—"}
                 </p>
               </div>
 
-              <div className="p-6">
-                <div className="rounded-3xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white p-5">
-                  <p className="text-lg font-extrabold text-slate-900">
-                    {selectedDriver.name}
-                  </p>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase text-slate-400">Estado</p>
+                <p
+                  className={`mt-1 text-sm font-extrabold ${
+                    selectedDriver.status === "En ruta"
+                      ? "text-blue-700"
+                      : "text-emerald-700"
+                  }`}
+                >
+                  {selectedDriver.status || "Disponible"}
+                </p>
+              </div>
 
-                  <div className="mt-4 grid grid-cols-1 gap-3">
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Cédula
-                      </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {selectedDriver.cedula}
-                      </p>
-                    </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase text-slate-400">
+                  Ubicación
+                </p>
+                <p className="mt-1 text-sm font-extrabold text-slate-900">
+                  {selectedDriver.currentLocation?.lat &&
+                  selectedDriver.currentLocation?.lng
+                    ? "Activa"
+                    : "Sin GPS"}
+                </p>
+              </div>
 
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Estado
-                      </p>
-
-                      <div className="mt-2">
-                        <span
-                          className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${
-                            selectedDriver.status === "En ruta"
-                              ? "border border-blue-200 bg-blue-100 text-blue-700"
-                              : "border border-emerald-200 bg-emerald-100 text-emerald-700"
-                          }`}
-                        >
-                          {selectedDriver.status || "Disponible"}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Vehículo
-                      </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {selectedDriver.vehicle} · {selectedDriver.plate}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Ubicación
-                      </p>
-                      <p className="mt-1 break-all text-sm font-bold text-slate-900">
-                        {selectedDriver.currentLocation?.lat &&
-                        selectedDriver.currentLocation?.lng
-                          ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
-                          : "Aún no reportada"}
-                      </p>
-                    </div>
-
-                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                        Última actualización
-                      </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {selectedDriver.currentLocation?.updatedAt
-                          ? new Date(
-                              selectedDriver.currentLocation.updatedAt
-                            ).toLocaleString()
-                          : "Sin actualización"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                <p className="text-xs font-bold uppercase text-slate-400">
+                  Última act.
+                </p>
+                <p className="mt-1 text-xs font-extrabold text-slate-900">
+                  {selectedDriver.currentLocation?.updatedAt
+                    ? new Date(
+                        selectedDriver.currentLocation.updatedAt
+                      ).toLocaleTimeString()
+                    : "—"}
+                </p>
               </div>
             </div>
           </div>
-
-          <div className="xl:col-span-8">
-            <EnterpriseDriverMap
-              selectedDriver={selectedDriver}
-              assignedDeliveries={assignedDeliveries}
-              activeDelivery={activeDelivery}
-              setSelectedDriver={setSelectedDriver}
-            />
-          </div>
         </div>
+
+        <EnterpriseDriverMap
+          selectedDriver={selectedDriver}
+          assignedDeliveries={assignedDeliveries}
+          activeDelivery={activeDelivery}
+          setSelectedDriver={setSelectedDriver}
+        />
 
         {selectedDriver ? (
           <div className="mt-6">
@@ -1700,8 +1875,7 @@ const EnterpriseDriverPanel = () => {
                 </h2>
 
                 <p className="mt-1 max-w-2xl text-sm text-emerald-100">
-                  Aquí ves las entregas en orden. Inicia una entrega, navega al
-                  cliente y finalízala cuando termines.
+                  Inicia una entrega, abre Waze o Maps y finalízala cuando termines.
                 </p>
               </div>
 
@@ -1852,12 +2026,6 @@ const EnterpriseDriverPanel = () => {
                     String(activeDeliveryId || "") === deliveryId ||
                     delivery.status === "En curso";
 
-                  const mapsUrl = delivery.address
-                    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
-                        delivery.address
-                      )}`
-                    : "";
-
                   return (
                     <div
                       key={delivery._id || delivery.id}
@@ -1923,16 +2091,27 @@ const EnterpriseDriverPanel = () => {
                         </div>
 
                         <div className="flex flex-wrap gap-2">
-                          {mapsUrl ? (
-                            <a
-                              href={mapsUrl}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
-                            >
-                              Ver dirección
-                            </a>
-                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openNavigationForDelivery(delivery, selectedDriver, "waze")
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-indigo-600/20 transition hover:scale-[1.02]"
+                          >
+                            <span>🚙</span>
+                            <span>Waze</span>
+                          </button>
+
+                          <button
+                            type="button"
+                            onClick={() =>
+                              openNavigationForDelivery(delivery, selectedDriver, "google")
+                            }
+                            className="inline-flex items-center justify-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-extrabold text-white shadow-lg shadow-emerald-600/20 transition hover:scale-[1.02]"
+                          >
+                            <span>📍</span>
+                            <span>Maps</span>
+                          </button>
 
                           {delivery.status === "Pendiente" ? (
                             <button
