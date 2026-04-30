@@ -4,6 +4,11 @@ import { getApiBaseUrl } from "../apiBase";
 
 const API_BASE = getApiBaseUrl();
 
+const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #9333EA, #D946EF)";
+const DARK_PURPLE_GRADIENT =
+  "linear-gradient(135deg, #1E103B, #3B0764, #6D28D9)";
+const SOFT_PURPLE = "linear-gradient(135deg, #F5F3FF, #FAE8FF)";
+
 const EnterpriseDashboard = () => {
   const [driversCount, setDriversCount] = useState(0);
   const [deliveriesInProgress, setDeliveriesInProgress] = useState(0);
@@ -131,25 +136,22 @@ const EnterpriseDashboard = () => {
       title: "Conductores activos",
       value: loading ? "..." : driversCount,
       icon: "🚚",
-      tone:
-        "from-blue-600 to-cyan-500 text-white shadow-blue-200 border-blue-400/20",
       subtitle: "Equipo disponible en la operación",
+      accent: "from-violet-600 via-purple-600 to-fuchsia-500",
     },
     {
       title: "Entregas en curso",
       value: loading ? "..." : deliveriesInProgress,
       icon: "📍",
-      tone:
-        "from-amber-500 to-orange-500 text-white shadow-orange-200 border-orange-400/20",
       subtitle: "Operaciones activas en tiempo real",
+      accent: "from-purple-700 via-violet-600 to-indigo-500",
     },
     {
       title: "Finalizadas hoy",
       value: loading ? "..." : deliveriesFinishedToday,
       icon: "✅",
-      tone:
-        "from-emerald-500 to-green-500 text-white shadow-emerald-200 border-emerald-400/20",
       subtitle: "Entregas cerradas durante el día",
+      accent: "from-fuchsia-600 via-purple-600 to-violet-500",
     },
   ];
 
@@ -161,7 +163,7 @@ const EnterpriseDashboard = () => {
         "Registra, consulta y administra los conductores de tu empresa.",
       icon: "👨‍✈️",
       badge: "Gestión",
-      accent: "from-blue-500 to-cyan-500",
+      accent: "from-violet-600 to-purple-600",
     },
     {
       to: "/enterprise-logistics",
@@ -170,18 +172,25 @@ const EnterpriseDashboard = () => {
         "Crea entregas, asigna conductores y organiza la operación.",
       icon: "📦",
       badge: "Operación",
-      accent: "from-violet-500 to-indigo-500",
+      accent: "from-purple-600 to-fuchsia-600",
     },
     {
       to: "/enterprise-logistics#rutas-inteligentes",
       title: "Rutas inteligentes",
       description:
         pendingSmartRoutes > 0
-          ? `Tienes ${pendingSmartRoutes} pedido${pendingSmartRoutes === 1 ? "" : "s"} pendiente${pendingSmartRoutes === 1 ? "" : "s"} para organizar por cercanía.`
+          ? `Tienes ${pendingSmartRoutes} pedido${
+              pendingSmartRoutes === 1 ? "" : "s"
+            } pendiente${
+              pendingSmartRoutes === 1 ? "" : "s"
+            } para organizar por cercanía.`
           : "Organiza pedidos pendientes por cercanía, optimiza recorridos y asigna rutas completas a conductores.",
       icon: "🧠",
-      badge: pendingSmartRoutes > 0 ? `${pendingSmartRoutes} pendientes` : "Inteligencia",
-      accent: "from-sky-500 to-blue-600",
+      badge:
+        pendingSmartRoutes > 0
+          ? `${pendingSmartRoutes} pendientes`
+          : "Inteligencia",
+      accent: "from-indigo-600 to-purple-600",
     },
     {
       to: "/enterprise-clients",
@@ -190,7 +199,7 @@ const EnterpriseDashboard = () => {
         "Crea, edita y consulta clientes en línea desde cualquier dispositivo. Selecciona un cliente y autollena las nuevas entregas.",
       icon: "👥",
       badge: "Clientes",
-      accent: "from-fuchsia-500 to-pink-500",
+      accent: "from-fuchsia-600 to-pink-500",
     },
     {
       to: "/enterprise-delivery-stats",
@@ -199,38 +208,41 @@ const EnterpriseDashboard = () => {
         "Consulta el rendimiento por día o por mes y analiza el desempeño general.",
       icon: "📊",
       badge: "Analítica",
-      accent: "from-emerald-500 to-green-500",
+      accent: "from-purple-700 to-violet-500",
     },
     {
       to: "/enterprise-delivery-history",
       title: "Historial de entregas",
-      description:
-        "Busca entregas por factura, cliente, conductor o fecha.",
+      description: "Busca entregas por factura, cliente, conductor o fecha.",
       icon: "🗂️",
       badge: "Historial",
-      accent: "from-amber-500 to-orange-500",
+      accent: "from-violet-700 to-fuchsia-500",
     },
   ];
 
   const enterpriseName = "Tu Empresa";
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-slate-950 via-blue-900 to-blue-700 text-white">
-        <div className="absolute inset-0 opacity-25">
-          <div className="absolute -top-16 -left-10 h-48 w-48 rounded-full bg-cyan-400 blur-3xl" />
-          <div className="absolute top-8 right-0 h-56 w-56 rounded-full bg-indigo-400 blur-3xl" />
+    <div className="min-h-screen bg-[#F8F5FF]">
+      <div
+        className="relative overflow-hidden border-b border-purple-200 text-white"
+        style={{ background: DARK_PURPLE_GRADIENT }}
+      >
+        <div className="absolute inset-0 opacity-40">
+          <div className="absolute -top-16 -left-10 h-52 w-52 rounded-full bg-fuchsia-400 blur-3xl" />
+          <div className="absolute top-10 right-0 h-64 w-64 rounded-full bg-violet-400 blur-3xl" />
+          <div className="absolute bottom-0 left-1/2 h-48 w-48 rounded-full bg-purple-500 blur-3xl" />
         </div>
 
         <div className="relative mx-auto max-w-7xl px-5 py-8 lg:px-8">
           <div className="flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
             <div>
-              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold text-blue-100 backdrop-blur">
+              <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-3 py-1 text-xs font-semibold text-purple-100 backdrop-blur">
                 <span>🏢</span>
                 <span>Central Go Empresas</span>
               </div>
 
-              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-blue-200">
+              <p className="text-sm font-semibold uppercase tracking-[0.18em] text-purple-200">
                 Bienvenido
               </p>
 
@@ -238,17 +250,17 @@ const EnterpriseDashboard = () => {
                 {enterpriseName}
               </h1>
 
-              <p className="mt-3 max-w-2xl text-sm text-blue-100 md:text-base">
+              <p className="mt-3 max-w-2xl text-sm text-purple-100 md:text-base">
                 Administra conductores, supervisa entregas, controla clientes y
-                gestiona toda la operación logística desde un entorno profesional,
-                claro y moderno.
+                gestiona toda la operación logística desde un entorno moderno,
+                claro y profesional.
               </p>
             </div>
 
             <div className="flex flex-wrap gap-3">
               <Link
                 to="/"
-                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-blue-800 shadow-lg transition duration-200 hover:scale-[1.03] hover:shadow-2xl"
+                className="inline-flex items-center justify-center rounded-2xl border border-white/20 bg-white px-5 py-3 font-semibold text-purple-800 shadow-lg transition duration-200 hover:scale-[1.03] hover:shadow-2xl"
               >
                 Salir
               </Link>
@@ -259,15 +271,19 @@ const EnterpriseDashboard = () => {
             {statCards.map((card) => (
               <div
                 key={card.title}
-                className={`rounded-3xl border bg-gradient-to-br p-5 shadow-[0_12px_30px_rgba(0,0,0,0.18)] backdrop-blur ${card.tone}`}
+                className={`rounded-3xl border border-white/20 bg-gradient-to-br ${card.accent} p-5 text-white shadow-[0_18px_45px_rgba(88,28,135,0.28)] backdrop-blur`}
               >
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="text-sm font-medium text-white/90">
                       {card.title}
                     </p>
-                    <p className="mt-3 text-4xl font-extrabold">{card.value}</p>
-                    <p className="mt-2 text-sm text-white/80">{card.subtitle}</p>
+                    <p className="mt-3 text-4xl font-extrabold">
+                      {card.value}
+                    </p>
+                    <p className="mt-2 text-sm text-white/80">
+                      {card.subtitle}
+                    </p>
                   </div>
 
                   <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-white/15 text-2xl shadow-inner">
@@ -284,30 +300,36 @@ const EnterpriseDashboard = () => {
         {pendingSmartRoutes > 0 ? (
           <Link
             to="/enterprise-logistics#rutas-inteligentes"
-            className="mb-6 block rounded-[28px] border border-blue-200 bg-gradient-to-r from-blue-50 to-sky-50 p-5 shadow-[0_12px_35px_rgba(37,99,235,0.12)] transition hover:-translate-y-1 hover:shadow-[0_18px_45px_rgba(37,99,235,0.18)]"
+            className="mb-6 block rounded-[28px] border border-purple-200 bg-white p-5 shadow-[0_14px_40px_rgba(126,34,206,0.14)] transition hover:-translate-y-1 hover:shadow-[0_20px_50px_rgba(126,34,206,0.2)]"
           >
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
-                <p className="text-sm font-bold text-blue-700">
+                <p className="text-sm font-bold text-purple-700">
                   🧠 Rutas inteligentes pendientes
                 </p>
                 <h2 className="mt-1 text-xl font-extrabold text-slate-900">
                   Tienes {pendingSmartRoutes} pedido
-                  {pendingSmartRoutes === 1 ? "" : "s"} esperando organización de ruta
+                  {pendingSmartRoutes === 1
+                    ? ""
+                    : "s"} esperando organización de ruta
                 </h2>
                 <p className="mt-1 text-sm text-slate-600">
-                  Entra al panel de logística para optimizar por cercanía y asignar la ruta completa a un conductor.
+                  Entra al panel de logística para optimizar por cercanía y
+                  asignar la ruta completa a un conductor.
                 </p>
               </div>
 
-              <div className="inline-flex items-center justify-center rounded-2xl bg-blue-600 px-5 py-3 text-sm font-bold text-white">
+              <div
+                className="inline-flex items-center justify-center rounded-2xl px-5 py-3 text-sm font-bold text-white shadow-lg"
+                style={{ background: PURPLE_GRADIENT }}
+              >
                 Abrir rutas inteligentes →
               </div>
             </div>
           </Link>
         ) : null}
 
-        <div className="mb-6 rounded-[28px] border border-slate-200 bg-white p-6 shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+        <div className="mb-6 rounded-[28px] border border-purple-100 bg-white p-6 shadow-[0_12px_40px_rgba(88,28,135,0.08)]">
           <div>
             <h2 className="text-xl font-extrabold text-slate-900">
               Centro de control
@@ -323,26 +345,28 @@ const EnterpriseDashboard = () => {
             <Link
               key={module.to}
               to={module.to}
-              className="group relative overflow-hidden rounded-[30px] border border-slate-200 bg-white p-6 shadow-[0_10px_30px_rgba(15,23,42,0.06)] transition duration-300 hover:-translate-y-1.5 hover:shadow-[0_20px_45px_rgba(15,23,42,0.12)]"
+              className="group relative overflow-hidden rounded-[30px] border border-purple-100 bg-white p-6 shadow-[0_10px_30px_rgba(88,28,135,0.08)] transition duration-300 hover:-translate-y-1.5 hover:shadow-[0_20px_45px_rgba(88,28,135,0.15)]"
             >
               <div
                 className={`absolute inset-x-0 top-0 h-1.5 bg-gradient-to-r ${module.accent}`}
               />
 
-              <div className="flex items-start justify-between gap-4">
+              <div className="absolute -right-10 -top-10 h-28 w-28 rounded-full bg-purple-100 opacity-70 transition group-hover:scale-125" />
+
+              <div className="relative flex items-start justify-between gap-4">
                 <div
                   className={`flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br ${module.accent} text-3xl text-white shadow-lg transition duration-300 group-hover:scale-110`}
                 >
                   {module.icon}
                 </div>
 
-                <div className="rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600 transition group-hover:bg-slate-900 group-hover:text-white">
+                <div className="rounded-full border border-purple-100 bg-purple-50 px-3 py-1 text-xs font-semibold text-purple-700 transition group-hover:bg-purple-700 group-hover:text-white">
                   {module.badge}
                 </div>
               </div>
 
-              <div className="mt-5">
-                <h3 className="text-xl font-extrabold text-slate-900 transition group-hover:text-blue-700">
+              <div className="relative mt-5">
+                <h3 className="text-xl font-extrabold text-slate-900 transition group-hover:text-purple-700">
                   {module.title}
                 </h3>
                 <p className="mt-2 text-sm leading-6 text-slate-600">
@@ -350,15 +374,15 @@ const EnterpriseDashboard = () => {
                 </p>
               </div>
 
-              <div className="mt-6 flex items-center justify-between">
-                <div className="inline-flex items-center gap-2 rounded-2xl bg-slate-100 px-4 py-2 text-sm font-semibold text-slate-700 transition group-hover:bg-blue-50 group-hover:text-blue-700">
+              <div className="relative mt-6 flex items-center justify-between">
+                <div className="inline-flex items-center gap-2 rounded-2xl bg-purple-50 px-4 py-2 text-sm font-semibold text-purple-700 transition group-hover:bg-purple-700 group-hover:text-white">
                   Abrir módulo
                   <span className="transition duration-300 group-hover:translate-x-1">
                     →
                   </span>
                 </div>
 
-                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-100 text-slate-500 transition duration-300 group-hover:bg-slate-900 group-hover:text-white">
+                <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-purple-50 text-purple-600 transition duration-300 group-hover:bg-slate-900 group-hover:text-white">
                   ↗
                 </div>
               </div>
