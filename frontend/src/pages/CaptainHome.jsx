@@ -17,8 +17,8 @@ import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import LiveTracking from "../../components/LiveTracking";
 
-const GREEN_GRADIENT = "linear-gradient(135deg, #B7F600, #7FE000)";
-const GREEN_DARK = "#111827";
+const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
 
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
@@ -178,9 +178,17 @@ const CaptainHome = () => {
   const getGeolocationErrorMessage = (error) => {
     const code = error?.code;
 
-    if (code === 1) return "Debes permitir el acceso a la ubicación para continuar.";
-    if (code === 2) return "No se pudo detectar tu ubicación. Activa el GPS del dispositivo.";
-    if (code === 3) return "La ubicación tardó demasiado. Intenta nuevamente.";
+    if (code === 1) {
+      return "Debes permitir el acceso a la ubicación para continuar.";
+    }
+
+    if (code === 2) {
+      return "No se pudo detectar tu ubicación. Activa el GPS del dispositivo.";
+    }
+
+    if (code === 3) {
+      return "La ubicación tardó demasiado. Intenta nuevamente.";
+    }
 
     return error?.message || "No se pudo obtener la ubicación.";
   };
@@ -689,12 +697,12 @@ const CaptainHome = () => {
       </div>
 
       {availableRides.length > 0 && (
-        <div className="absolute top-[92px] left-0 right-0 z-40 px-3">
-          <div className="flex items-center justify-between px-2 mb-2">
+        <div className="absolute top-[92px] left-0 right-0 bottom-[43%] z-40 px-3 pointer-events-none">
+          <div className="flex items-center justify-between px-1 mb-2 pointer-events-auto">
             <div
-              className="rounded-full px-4 py-2 shadow-lg text-black text-xs font-black"
+              className="rounded-full px-4 py-2 shadow-lg text-white text-xs font-black"
               style={{
-                background: GREEN_GRADIENT,
+                background: PURPLE_GRADIENT,
               }}
             >
               {availableRides.length} solicitudes disponibles
@@ -703,13 +711,13 @@ const CaptainHome = () => {
             <button
               type="button"
               onClick={fetchAvailableRidesForCaptain}
-              className="w-10 h-10 rounded-full bg-white shadow-lg border border-lime-200 flex items-center justify-center"
+              className="w-10 h-10 rounded-full bg-white shadow-lg border border-purple-100 flex items-center justify-center"
             >
-              <i className="ri-refresh-line text-xl text-lime-600"></i>
+              <i className="ri-refresh-line text-xl text-purple-700"></i>
             </button>
           </div>
 
-          <div className="max-h-[46vh] overflow-y-auto space-y-3 pr-1 pb-3">
+          <div className="h-full overflow-y-auto space-y-2 pr-1 pb-3 pointer-events-auto">
             {availableRides.map((item) => {
               const rideId = String(item?._id || "");
               const isThisProcessing = processing && processingRideId === rideId;
@@ -727,38 +735,43 @@ const CaptainHome = () => {
               return (
                 <div
                   key={rideId}
-                  className="w-full rounded-[22px] bg-white shadow-2xl border border-lime-200 overflow-hidden"
+                  className="w-full rounded-[22px] bg-white shadow-2xl border border-purple-100 overflow-hidden"
                 >
-                  <div className="h-1.5" style={{ background: GREEN_GRADIENT }} />
+                  <div
+                    className="h-1.5"
+                    style={{
+                      background: PURPLE_GRADIENT,
+                    }}
+                  />
 
-                  <div className="p-4">
+                  <div className="p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0 flex-1">
-                        <div className="inline-flex rounded-xl bg-gray-100 px-3 py-1 text-xs font-black text-gray-800 mb-2">
-                          Pasajero
+                        <div className="inline-flex rounded-xl bg-purple-50 px-3 py-1 text-[11px] font-black text-purple-800 mb-1">
+                          Nueva solicitud
                         </div>
 
-                        <h4 className="text-xl font-black text-gray-950 leading-6 truncate">
+                        <h4 className="text-lg font-black text-gray-950 leading-5 truncate">
                           {getUserName(item)}
                         </h4>
 
-                        <div className="flex items-center gap-2 mt-2">
-                          <i className="ri-star-fill text-black text-lg"></i>
-                          <span className="text-sm font-black text-gray-900">
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <i className="ri-star-fill text-yellow-500 text-base"></i>
+                          <span className="text-xs font-black text-gray-900">
                             5.0
                           </span>
-                          <span className="text-sm text-gray-500">
+                          <span className="text-xs text-gray-500">
                             Central Go
                           </span>
                         </div>
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className="text-[11px] font-black text-gray-500 uppercase">
+                        <p className="text-[10px] font-black text-gray-500 uppercase">
                           Oferta
                         </p>
 
-                        <p className="text-3xl font-black text-gray-950 leading-8">
+                        <p className="text-2xl font-black text-purple-900 leading-7">
                           {formatCOP(
                             item?.offeredFare ??
                               item?.fare ??
@@ -767,39 +780,50 @@ const CaptainHome = () => {
                           )}
                         </p>
 
-                        <p className="text-sm font-bold text-gray-600 mt-1">
+                        <p className="text-[11px] font-bold text-gray-500 mt-0.5">
                           {formatKm(driverToPickupKm)} hasta cliente
                         </p>
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-2 mt-4">
-                      <div className="rounded-2xl bg-lime-50 border border-lime-200 p-3">
-                        <p className="text-[10px] font-black text-lime-700 uppercase">
+                    <div className="grid grid-cols-2 gap-2 mt-3">
+                      <div
+                        className="rounded-2xl border border-purple-100 p-2.5"
+                        style={{
+                          background: PURPLE_SOFT,
+                        }}
+                      >
+                        <p className="text-[9px] font-black text-purple-700 uppercase">
                           Tú al cliente
                         </p>
-                        <p className="text-xl font-black text-gray-950 mt-1">
+                        <p className="text-lg font-black text-gray-950 mt-0.5">
                           {formatKm(driverToPickupKm)}
                         </p>
                       </div>
 
-                      <div className="rounded-2xl bg-lime-50 border border-lime-200 p-3">
-                        <p className="text-[10px] font-black text-lime-700 uppercase">
+                      <div
+                        className="rounded-2xl border border-purple-100 p-2.5"
+                        style={{
+                          background: PURPLE_SOFT,
+                        }}
+                      >
+                        <p className="text-[9px] font-black text-purple-700 uppercase">
                           Recorrido
                         </p>
-                        <p className="text-xl font-black text-gray-950 mt-1">
+                        <p className="text-lg font-black text-gray-950 mt-0.5">
                           {formatKm(pickupToDestinationKm)}
                         </p>
                       </div>
                     </div>
 
-                    <div className="mt-4 space-y-2">
+                    <div className="mt-3 space-y-1.5">
                       <div className="flex items-start gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-lime-100 flex items-center justify-center shrink-0">
-                          <i className="ri-map-pin-range-fill text-lime-700 text-base"></i>
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                          <i className="ri-map-pin-range-fill text-purple-700 text-base"></i>
                         </div>
+
                         <div className="min-w-0">
-                          <p className="text-[10px] font-black text-gray-500 uppercase">
+                          <p className="text-[9px] font-black text-gray-500 uppercase">
                             Recoger
                           </p>
                           <p className="text-xs font-bold text-gray-950 truncate">
@@ -809,11 +833,12 @@ const CaptainHome = () => {
                       </div>
 
                       <div className="flex items-start gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-lime-100 flex items-center justify-center shrink-0">
-                          <i className="ri-flag-fill text-lime-700 text-base"></i>
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                          <i className="ri-flag-fill text-purple-700 text-base"></i>
                         </div>
+
                         <div className="min-w-0">
-                          <p className="text-[10px] font-black text-gray-500 uppercase">
+                          <p className="text-[9px] font-black text-gray-500 uppercase">
                             Llevar
                           </p>
                           <p className="text-xs font-bold text-gray-950 truncate">
@@ -823,12 +848,12 @@ const CaptainHome = () => {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 mt-4">
+                    <div className="grid grid-cols-3 gap-2 mt-3">
                       <button
                         type="button"
                         disabled={processing}
                         onClick={() => ignoreRide(item)}
-                        className="rounded-2xl py-3 bg-gray-100 text-gray-900 text-xs font-black disabled:opacity-60"
+                        className="rounded-2xl py-2.5 bg-gray-100 text-gray-900 text-xs font-black disabled:opacity-60"
                       >
                         Ocultar
                       </button>
@@ -837,7 +862,7 @@ const CaptainHome = () => {
                         type="button"
                         disabled={processing}
                         onClick={() => openCounterOffer(item)}
-                        className="rounded-2xl py-3 bg-gray-100 text-gray-900 text-xs font-black disabled:opacity-60"
+                        className="rounded-2xl py-2.5 bg-purple-100 text-purple-800 text-xs font-black disabled:opacity-60"
                       >
                         Ofertar
                       </button>
@@ -846,7 +871,10 @@ const CaptainHome = () => {
                         type="button"
                         disabled={isThisProcessing}
                         onClick={() => confirmRide(item)}
-                        className="rounded-2xl py-3 bg-lime-400 text-black text-xs font-black disabled:opacity-60"
+                        className="rounded-2xl py-2.5 text-white text-xs font-black disabled:opacity-60"
+                        style={{
+                          background: PURPLE_GRADIENT,
+                        }}
                       >
                         {isThisProcessing ? "..." : "Aceptar"}
                       </button>
@@ -931,15 +959,15 @@ const CaptainHome = () => {
 
           <div className="px-5 pb-2 flex items-center justify-between gap-3">
             <p
-              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-black text-black"
+              className="inline-flex items-center rounded-full px-4 py-2 text-sm font-black text-white"
               style={{
-                background: GREEN_GRADIENT,
+                background: PURPLE_GRADIENT,
               }}
             >
               Panel del transportador
             </p>
 
-            <div className="inline-flex items-center rounded-full bg-lime-50 text-lime-700 px-3 py-2 text-xs font-black">
+            <div className="inline-flex items-center rounded-full bg-purple-50 text-purple-700 px-3 py-2 text-xs font-black">
               {availableRides.length} solicitudes
             </div>
           </div>
@@ -982,6 +1010,7 @@ const CaptainHome = () => {
                     Publica mercancía, espacio libre o cupos disponibles.
                   </p>
                 </div>
+
                 <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center">
                   <i className="ri-road-map-line text-2xl text-violet-700"></i>
                 </div>
