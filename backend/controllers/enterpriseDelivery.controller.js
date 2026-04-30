@@ -38,16 +38,32 @@ const hasValidLocation = (location) => {
         return false;
     }
 
-    /**
-     * 0,0 no es una ubicación útil para Colombia.
-     * Ese punto queda en el océano y hacía que la ruta saliera en 0.00 km.
-     */
     if (lat === 0 && lng === 0) {
         return false;
     }
 
     return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
+
+const buildEmptyRouteMeta = () => ({
+    estimatedDistanceKm: 0,
+    estimatedDurationMin: 0,
+    totalStopsInRoute: 0,
+    origin: {
+        lat: null,
+        lng: null,
+        address: '',
+        formattedAddress: '',
+        placeId: '',
+    },
+    modifiedAfterOptimization: false,
+    needsRecalculation: false,
+    lastAddedDeliveryId: '',
+    lastModifiedAt: null,
+    recalculatedAt: null,
+    recalculationWarning: '',
+    version: 1,
+});
 
 const normalizeGoogleCoordinates = (coordinates) => {
     if (!coordinates) return null;
@@ -90,10 +106,6 @@ const callMapServiceCoordinates = async (address) => {
         return null;
     }
 
-    /**
-     * Soporte flexible por si tu servicio tiene otro nombre de función.
-     * Esto evita romper el backend si maps.service está escrito distinto.
-     */
     const possibleMethods = [
         'getAddressCoordinates',
         'getCoordinates',
@@ -259,14 +271,109 @@ const optimizeNearestNeighbor = (origin, deliveries) => {
     };
 };
 
+const resolveRouteOrigin = async ({ req, baseLocation, routeDeliveries = [] }) => {
+    const enterprise = await Enterprise.findOne({
+        _id: req.enterprise._id,
+    });
+
+    if (!enterprise) {
+        return {
+            enterprise: null,
+            origin: null,
+        };
+    }
+
+    const bodyOrigin = {
+        lat: normalizeCoordinate(baseLocation?.lat),
+        lng: normalizeCoordinate(baseLocation?.lng),
+        formattedAddress: normalizeString(
+            baseLocation?.formattedAddress || baseLocation?.address
+        ),
+        placeId: normalizeString(baseLocation?.placeId || ''),
+    };
+
+    let origin = hasValidLocation(bodyOrigin)
+        ? {
+              lat: bodyOrigin.lat,
+              lng: bodyOrigin.lng,
+              address:
+                  normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
+                  normalizeString(enterprise.companyName),
+              placeId: bodyOrigin.placeId,
+          }
+        : null;
+
+    const savedRouteOrigin =
+        routeDeliveries[0]?.routeMeta?.origin ||
+        routeDeliveries.find((delivery) => delivery?.routeMeta?.origin)?.routeMeta?.origin ||
+        null;
+
+    if (!origin && hasValidLocation(savedRouteOrigin)) {
+        origin = {
+            lat: Number(savedRouteOrigin.lat),
+            lng: Number(savedRouteOrigin.lng),
+            address:
+                normalizeString(
+                    savedRouteOrigin.formattedAddress ||
+                        savedRouteOrigin.address
+                ) || 'Punto de salida',
+            placeId: normalizeString(savedRouteOrigin.placeId || ''),
+        };
+    }
+
+    if (!origin && hasValidLocation(enterprise.baseLocation)) {
+        origin = {
+            lat: Number(enterprise.baseLocation.lat),
+            lng: Number(enterprise.baseLocation.lng),
+            address:
+                normalizeString(enterprise.baseLocation.formattedAddress) ||
+                normalizeString(enterprise.baseLocation.address) ||
+                normalizeString(enterprise.companyName),
+            placeId: normalizeString(enterprise.baseLocation.placeId || ''),
+        };
+    }
+
+    if (!origin) {
+        const originAddress =
+            normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
+            normalizeString(savedRouteOrigin?.formattedAddress || savedRouteOrigin?.address) ||
+            normalizeString(enterprise.baseLocation?.formattedAddress) ||
+            normalizeString(enterprise.baseLocation?.address);
+
+        const resolvedOrigin = await resolveDeliveryLocation({
+            currentLocation: null,
+            address: originAddress,
+            formattedAddress: originAddress,
+        });
+
+        if (resolvedOrigin) {
+            origin = {
+                lat: resolvedOrigin.lat,
+                lng: resolvedOrigin.lng,
+                address: resolvedOrigin.formattedAddress,
+                placeId: normalizeString(baseLocation?.placeId || savedRouteOrigin?.placeId || ''),
+            };
+        }
+    }
+
+    return {
+        enterprise,
+        origin,
+    };
+};
+
+const populateDeliveryQuery = (query) =>
+    query
+        .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
+        .populate('clientId', 'name phone address neighborhood reference placeId isActive');
+
 module.exports.getEnterpriseDeliveries = async (req, res) => {
     try {
-        const deliveries = await EnterpriseDelivery.find({
-            enterprise: req.enterprise._id,
-        })
-            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
-            .populate('clientId', 'name phone address neighborhood reference placeId isActive')
-            .sort({ createdAt: -1 });
+        const deliveries = await populateDeliveryQuery(
+            EnterpriseDelivery.find({
+                enterprise: req.enterprise._id,
+            })
+        ).sort({ createdAt: -1 });
 
         return res.status(200).json({ deliveries });
     } catch (error) {
@@ -287,12 +394,11 @@ module.exports.getMyEnterpriseDeliveries = async (req, res) => {
             });
         }
 
-        const deliveries = await EnterpriseDelivery.find({
-            assignedDriverId: driverId,
-        })
-            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
-            .populate('clientId', 'name phone address neighborhood reference placeId isActive')
-            .sort({ routeGroupId: 1, routeOrder: 1, createdAt: -1 });
+        const deliveries = await populateDeliveryQuery(
+            EnterpriseDelivery.find({
+                assignedDriverId: driverId,
+            })
+        ).sort({ routeGroupId: 1, routeOrder: 1, createdAt: -1 });
 
         return res.status(200).json({ deliveries });
     } catch (error) {
@@ -444,11 +550,7 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
             routeGroupId: '',
             routeName: '',
             routeOrder: null,
-            routeMeta: {
-                estimatedDistanceKm: 0,
-                estimatedDurationMin: 0,
-                totalStopsInRoute: 0,
-            },
+            routeMeta: buildEmptyRouteMeta(),
             optimizedAt: null,
             assignedAt: isPendingRoute ? null : new Date(),
         };
@@ -459,9 +561,9 @@ module.exports.createEnterpriseDelivery = async (req, res) => {
 
         const delivery = await EnterpriseDelivery.create(deliveryPayload);
 
-        const populatedDelivery = await EnterpriseDelivery.findById(delivery._id)
-            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
-            .populate('clientId', 'name phone address neighborhood reference placeId isActive');
+        const populatedDelivery = await populateDeliveryQuery(
+            EnterpriseDelivery.findById(delivery._id)
+        );
 
         return res.status(201).json({
             message: isPendingRoute
@@ -523,65 +625,16 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
     try {
         const { routeName, baseLocation, deliveryIds } = req.body;
 
-        const enterprise = await Enterprise.findOne({
-            _id: req.enterprise._id,
+        const { enterprise, origin } = await resolveRouteOrigin({
+            req,
+            baseLocation,
+            routeDeliveries: [],
         });
 
         if (!enterprise) {
             return res.status(404).json({
                 message: 'Empresa no encontrada.',
             });
-        }
-
-        const bodyOrigin = {
-            lat: normalizeCoordinate(baseLocation?.lat),
-            lng: normalizeCoordinate(baseLocation?.lng),
-            formattedAddress: normalizeString(
-                baseLocation?.formattedAddress || baseLocation?.address
-            ),
-        };
-
-        let origin = hasValidLocation(bodyOrigin)
-            ? {
-                  lat: bodyOrigin.lat,
-                  lng: bodyOrigin.lng,
-                  address:
-                      normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
-                      normalizeString(enterprise.companyName),
-              }
-            : null;
-
-        if (!origin && hasValidLocation(enterprise.baseLocation)) {
-            origin = {
-                lat: Number(enterprise.baseLocation.lat),
-                lng: Number(enterprise.baseLocation.lng),
-                address:
-                    normalizeString(enterprise.baseLocation.formattedAddress) ||
-                    normalizeString(enterprise.baseLocation.address) ||
-                    normalizeString(enterprise.companyName),
-            };
-        }
-
-        if (!origin) {
-            const resolvedOrigin = await resolveDeliveryLocation({
-                currentLocation: null,
-                address:
-                    normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
-                    normalizeString(enterprise.baseLocation?.formattedAddress) ||
-                    normalizeString(enterprise.baseLocation?.address),
-                formattedAddress:
-                    normalizeString(baseLocation?.formattedAddress || baseLocation?.address) ||
-                    normalizeString(enterprise.baseLocation?.formattedAddress) ||
-                    normalizeString(enterprise.baseLocation?.address),
-            });
-
-            if (resolvedOrigin) {
-                origin = {
-                    lat: resolvedOrigin.lat,
-                    lng: resolvedOrigin.lng,
-                    address: resolvedOrigin.formattedAddress,
-                };
-            }
         }
 
         if (!hasValidLocation(origin)) {
@@ -664,6 +717,7 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
             `Ruta inteligente ${new Date().toLocaleDateString('es-CO')}`;
 
         const optimized = optimizeNearestNeighbor(origin, deliveriesWithLocation);
+        const optimizedAt = new Date();
 
         const bulkOps = optimized.ordered.map((item, index) => ({
             updateOne: {
@@ -682,8 +736,22 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
                             estimatedDistanceKm: optimized.totalDistanceKm,
                             estimatedDurationMin: optimized.estimatedDurationMin,
                             totalStopsInRoute: optimized.ordered.length,
+                            origin: {
+                                lat: origin.lat,
+                                lng: origin.lng,
+                                address: origin.address || '',
+                                formattedAddress: origin.address || '',
+                                placeId: origin.placeId || '',
+                            },
+                            modifiedAfterOptimization: false,
+                            needsRecalculation: false,
+                            lastAddedDeliveryId: '',
+                            lastModifiedAt: null,
+                            recalculatedAt: null,
+                            recalculationWarning: '',
+                            version: 1,
                         },
-                        optimizedAt: new Date(),
+                        optimizedAt,
                     },
                 },
             },
@@ -709,6 +777,8 @@ module.exports.optimizeEnterpriseRoutes = async (req, res) => {
                 totalStops: routeDeliveries.length,
                 estimatedDistanceKm: optimized.totalDistanceKm,
                 estimatedDurationMin: optimized.estimatedDurationMin,
+                needsRecalculation: false,
+                version: 1,
                 deliveries: routeDeliveries,
                 withoutLocation: deliveriesWithoutLocation.map((delivery) => ({
                     _id: delivery._id,
@@ -770,6 +840,20 @@ module.exports.assignOptimizedRoute = async (req, res) => {
             });
         }
 
+        const needsRecalculation = deliveries.some((delivery) => {
+            return (
+                delivery?.routeMeta?.needsRecalculation ||
+                delivery?.routeMeta?.modifiedAfterOptimization
+            );
+        });
+
+        if (needsRecalculation) {
+            return res.status(400).json({
+                message:
+                    'Esta ruta fue modificada después de optimizar. Debes recalcularla antes de asignarla.',
+            });
+        }
+
         await EnterpriseDelivery.updateMany(
             {
                 enterprise: req.enterprise._id,
@@ -787,13 +871,12 @@ module.exports.assignOptimizedRoute = async (req, res) => {
             }
         );
 
-        const assignedDeliveries = await EnterpriseDelivery.find({
-            enterprise: req.enterprise._id,
-            routeGroupId,
-        })
-            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
-            .populate('clientId', 'name phone address neighborhood reference placeId isActive')
-            .sort({ routeOrder: 1 });
+        const assignedDeliveries = await populateDeliveryQuery(
+            EnterpriseDelivery.find({
+                enterprise: req.enterprise._id,
+                routeGroupId,
+            })
+        ).sort({ routeOrder: 1 });
 
         return res.status(200).json({
             message: `Ruta asignada correctamente a ${driver.name}.`,
@@ -815,6 +898,387 @@ module.exports.assignOptimizedRoute = async (req, res) => {
         console.error('Error asignando ruta optimizada:', error);
         return res.status(500).json({
             message: 'Error asignando ruta optimizada.',
+        });
+    }
+};
+
+module.exports.addDeliveryToOptimizedRoute = async (req, res) => {
+    try {
+        const { routeGroupId, deliveryId } = req.body;
+
+        if (!routeGroupId) {
+            return res.status(400).json({
+                message: 'routeGroupId es obligatorio.',
+            });
+        }
+
+        if (!deliveryId || !mongoose.Types.ObjectId.isValid(String(deliveryId))) {
+            return res.status(400).json({
+                message: 'deliveryId inválido.',
+            });
+        }
+
+        const routeDeliveries = await EnterpriseDelivery.find({
+            enterprise: req.enterprise._id,
+            routeGroupId,
+            status: 'Pendiente',
+        }).sort({ routeOrder: 1 });
+
+        if (!routeDeliveries.length) {
+            return res.status(404).json({
+                message: 'No se encontró una ruta inteligente pendiente con ese routeGroupId.',
+            });
+        }
+
+        const routeAlreadyAssigned = routeDeliveries.some((delivery) =>
+            Boolean(delivery.assignedDriverId)
+        );
+
+        if (routeAlreadyAssigned) {
+            return res.status(400).json({
+                message:
+                    'Esta ruta ya fue asignada a un conductor. Para agregar una parada urgente, crea una nueva ruta o usa un flujo de reasignación.',
+            });
+        }
+
+        const deliveryToAdd = await EnterpriseDelivery.findOne({
+            _id: deliveryId,
+            enterprise: req.enterprise._id,
+            status: 'Pendiente',
+        });
+
+        if (!deliveryToAdd) {
+            return res.status(404).json({
+                message: 'No se encontró la entrega que deseas agregar.',
+            });
+        }
+
+        if (deliveryToAdd.assignedDriverId) {
+            return res.status(400).json({
+                message: 'Esta entrega ya está asignada a un conductor.',
+            });
+        }
+
+        if (
+            deliveryToAdd.optimizationStatus === 'optimized' &&
+            deliveryToAdd.routeGroupId &&
+            String(deliveryToAdd.routeGroupId) !== String(routeGroupId)
+        ) {
+            return res.status(400).json({
+                message: 'Esta entrega ya pertenece a otra ruta optimizada.',
+            });
+        }
+
+        let resolvedLocation = null;
+
+        if (hasValidLocation(deliveryToAdd.deliveryLocation)) {
+            resolvedLocation = {
+                lat: Number(deliveryToAdd.deliveryLocation.lat),
+                lng: Number(deliveryToAdd.deliveryLocation.lng),
+                formattedAddress:
+                    deliveryToAdd.deliveryLocation.formattedAddress ||
+                    deliveryToAdd.address,
+            };
+        } else {
+            resolvedLocation = await resolveDeliveryLocation({
+                currentLocation: deliveryToAdd.deliveryLocation,
+                address: deliveryToAdd.address,
+                formattedAddress:
+                    deliveryToAdd.deliveryLocation?.formattedAddress ||
+                    deliveryToAdd.address,
+            });
+        }
+
+        if (!resolvedLocation) {
+            return res.status(400).json({
+                message:
+                    'La entrega no tiene coordenadas válidas. Revisa la dirección antes de agregarla a la ruta.',
+                delivery: {
+                    _id: deliveryToAdd._id,
+                    invoiceNumber: deliveryToAdd.invoiceNumber,
+                    clientName: deliveryToAdd.clientName,
+                    address: deliveryToAdd.address,
+                },
+            });
+        }
+
+        const maxRouteOrder = routeDeliveries.reduce((max, delivery) => {
+            const currentOrder = Number(delivery.routeOrder || 0);
+            return currentOrder > max ? currentOrder : max;
+        }, 0);
+
+        const currentRouteMeta = routeDeliveries[0]?.routeMeta || buildEmptyRouteMeta();
+        const now = new Date();
+
+        deliveryToAdd.deliveryLocation = resolvedLocation;
+        deliveryToAdd.optimizationStatus = 'optimized';
+        deliveryToAdd.routeGroupId = routeGroupId;
+        deliveryToAdd.routeName = routeDeliveries[0]?.routeName || 'Ruta inteligente';
+        deliveryToAdd.routeOrder = maxRouteOrder + 1;
+        deliveryToAdd.optimizedAt = now;
+        deliveryToAdd.assignedDriverId = null;
+        deliveryToAdd.assignedDriverName = PENDING_ROUTE_NAME;
+        deliveryToAdd.routeMeta = {
+            ...currentRouteMeta,
+            totalStopsInRoute: routeDeliveries.length + 1,
+            modifiedAfterOptimization: true,
+            needsRecalculation: true,
+            lastAddedDeliveryId: String(deliveryToAdd._id),
+            lastModifiedAt: now,
+            recalculationWarning: '',
+            version: Number(currentRouteMeta.version || 1),
+        };
+
+        await deliveryToAdd.save();
+
+        await EnterpriseDelivery.updateMany(
+            {
+                enterprise: req.enterprise._id,
+                routeGroupId,
+                status: 'Pendiente',
+            },
+            {
+                $set: {
+                    'routeMeta.modifiedAfterOptimization': true,
+                    'routeMeta.needsRecalculation': true,
+                    'routeMeta.lastAddedDeliveryId': String(deliveryToAdd._id),
+                    'routeMeta.lastModifiedAt': now,
+                    'routeMeta.totalStopsInRoute': routeDeliveries.length + 1,
+                },
+            }
+        );
+
+        const updatedRouteDeliveries = await EnterpriseDelivery.find({
+            enterprise: req.enterprise._id,
+            routeGroupId,
+        })
+            .populate('clientId', 'name phone address neighborhood reference placeId isActive')
+            .sort({ routeOrder: 1 });
+
+        return res.status(200).json({
+            message:
+                'Parada agregada correctamente. Recalcula la ruta antes de asignarla al conductor.',
+            route: {
+                routeGroupId,
+                routeName: routeDeliveries[0]?.routeName || 'Ruta inteligente',
+                totalStops: updatedRouteDeliveries.length,
+                needsRecalculation: true,
+                deliveries: updatedRouteDeliveries,
+            },
+        });
+    } catch (error) {
+        console.error('Error agregando entrega a ruta optimizada:', error);
+        return res.status(500).json({
+            message: error.message || 'Error agregando entrega a ruta optimizada.',
+            error: error.name || 'Error',
+            details: error.errors || null,
+        });
+    }
+};
+
+module.exports.recalculateOptimizedRoute = async (req, res) => {
+    try {
+        const { routeGroupId, baseLocation } = req.body;
+
+        if (!routeGroupId) {
+            return res.status(400).json({
+                message: 'routeGroupId es obligatorio.',
+            });
+        }
+
+        const routeDeliveries = await EnterpriseDelivery.find({
+            enterprise: req.enterprise._id,
+            routeGroupId,
+            status: 'Pendiente',
+        }).sort({ routeOrder: 1 });
+
+        if (!routeDeliveries.length) {
+            return res.status(404).json({
+                message: 'No se encontraron entregas pendientes para recalcular esta ruta.',
+            });
+        }
+
+        const routeAlreadyAssigned = routeDeliveries.some((delivery) =>
+            Boolean(delivery.assignedDriverId)
+        );
+
+        if (routeAlreadyAssigned) {
+            return res.status(400).json({
+                message:
+                    'Esta ruta ya fue asignada. No se puede recalcular desde logística sin crear una nueva versión o reasignación.',
+            });
+        }
+
+        const { enterprise, origin } = await resolveRouteOrigin({
+            req,
+            baseLocation,
+            routeDeliveries,
+        });
+
+        if (!enterprise) {
+            return res.status(404).json({
+                message: 'Empresa no encontrada.',
+            });
+        }
+
+        if (!hasValidLocation(origin)) {
+            return res.status(400).json({
+                message:
+                    'No se pudo recalcular la ruta porque no hay un punto de salida válido.',
+            });
+        }
+
+        const deliveriesReadyForOptimization = [];
+
+        for (const delivery of routeDeliveries) {
+            if (hasValidLocation(delivery.deliveryLocation)) {
+                deliveriesReadyForOptimization.push(delivery);
+                continue;
+            }
+
+            const resolvedLocation = await resolveDeliveryLocation({
+                currentLocation: delivery.deliveryLocation,
+                address: delivery.address,
+                formattedAddress:
+                    delivery.deliveryLocation?.formattedAddress || delivery.address,
+            });
+
+            if (resolvedLocation) {
+                delivery.deliveryLocation = resolvedLocation;
+                await delivery.save();
+            }
+
+            deliveriesReadyForOptimization.push(delivery);
+        }
+
+        const deliveriesWithLocation = deliveriesReadyForOptimization.filter((delivery) =>
+            hasValidLocation(delivery.deliveryLocation)
+        );
+
+        const deliveriesWithoutLocation = deliveriesReadyForOptimization.filter(
+            (delivery) => !hasValidLocation(delivery.deliveryLocation)
+        );
+
+        if (!deliveriesWithLocation.length) {
+            return res.status(400).json({
+                message:
+                    'No hay entregas con coordenadas válidas para recalcular esta ruta.',
+                withoutLocation: deliveriesWithoutLocation.map((delivery) => ({
+                    _id: delivery._id,
+                    invoiceNumber: delivery.invoiceNumber,
+                    clientName: delivery.clientName,
+                    address: delivery.address,
+                })),
+            });
+        }
+
+        const optimized = optimizeNearestNeighbor(origin, deliveriesWithLocation);
+        const recalculatedAt = new Date();
+
+        const routeName =
+            normalizeString(routeDeliveries[0]?.routeName) ||
+            `Ruta inteligente ${new Date().toLocaleDateString('es-CO')}`;
+
+        const currentVersion = Number(routeDeliveries[0]?.routeMeta?.version || 1);
+        const nextVersion = currentVersion + 1;
+
+        const bulkOps = optimized.ordered.map((item, index) => ({
+            updateOne: {
+                filter: {
+                    _id: item.delivery._id,
+                    enterprise: req.enterprise._id,
+                    routeGroupId,
+                    status: 'Pendiente',
+                },
+                update: {
+                    $set: {
+                        optimizationStatus: 'optimized',
+                        routeGroupId,
+                        routeName,
+                        routeOrder: index + 1,
+                        routeMeta: {
+                            estimatedDistanceKm: optimized.totalDistanceKm,
+                            estimatedDurationMin: optimized.estimatedDurationMin,
+                            totalStopsInRoute: optimized.ordered.length,
+                            origin: {
+                                lat: origin.lat,
+                                lng: origin.lng,
+                                address: origin.address || '',
+                                formattedAddress: origin.address || '',
+                                placeId: origin.placeId || '',
+                            },
+                            modifiedAfterOptimization: false,
+                            needsRecalculation: false,
+                            lastAddedDeliveryId: '',
+                            lastModifiedAt: null,
+                            recalculatedAt,
+                            recalculationWarning: '',
+                            version: nextVersion,
+                        },
+                        optimizedAt: recalculatedAt,
+                    },
+                },
+            },
+        }));
+
+        if (bulkOps.length > 0) {
+            await EnterpriseDelivery.bulkWrite(bulkOps);
+        }
+
+        if (deliveriesWithoutLocation.length > 0) {
+            await EnterpriseDelivery.updateMany(
+                {
+                    enterprise: req.enterprise._id,
+                    routeGroupId,
+                    _id: {
+                        $in: deliveriesWithoutLocation.map((delivery) => delivery._id),
+                    },
+                },
+                {
+                    $set: {
+                        'routeMeta.needsRecalculation': true,
+                        'routeMeta.modifiedAfterOptimization': true,
+                        'routeMeta.recalculationWarning':
+                            'Esta entrega no tiene coordenadas válidas.',
+                    },
+                }
+            );
+        }
+
+        const updatedRouteDeliveries = await EnterpriseDelivery.find({
+            enterprise: req.enterprise._id,
+            routeGroupId,
+        })
+            .populate('clientId', 'name phone address neighborhood reference placeId isActive')
+            .sort({ routeOrder: 1 });
+
+        return res.status(200).json({
+            message: 'Ruta recalculada correctamente.',
+            route: {
+                routeGroupId,
+                routeName,
+                origin,
+                totalStops: updatedRouteDeliveries.length,
+                estimatedDistanceKm: optimized.totalDistanceKm,
+                estimatedDurationMin: optimized.estimatedDurationMin,
+                needsRecalculation: deliveriesWithoutLocation.length > 0,
+                version: nextVersion,
+                deliveries: updatedRouteDeliveries,
+                withoutLocation: deliveriesWithoutLocation.map((delivery) => ({
+                    _id: delivery._id,
+                    invoiceNumber: delivery.invoiceNumber,
+                    clientName: delivery.clientName,
+                    address: delivery.address,
+                    reason: 'Sin coordenadas válidas',
+                })),
+            },
+        });
+    } catch (error) {
+        console.error('Error recalculando ruta optimizada:', error);
+        return res.status(500).json({
+            message: error.message || 'Error recalculando ruta optimizada.',
+            error: error.name || 'Error',
+            details: error.errors || null,
         });
     }
 };
@@ -869,9 +1333,9 @@ module.exports.updateEnterpriseDeliveryStatusByDriver = async (req, res) => {
 
         await delivery.save();
 
-        const populatedDelivery = await EnterpriseDelivery.findById(delivery._id)
-            .populate('assignedDriverId', 'name cedula phone email vehicle plate status')
-            .populate('clientId', 'name phone address neighborhood reference placeId isActive');
+        const populatedDelivery = await populateDeliveryQuery(
+            EnterpriseDelivery.findById(delivery._id)
+        );
 
         return res.status(200).json({
             message: 'Estado actualizado correctamente.',
