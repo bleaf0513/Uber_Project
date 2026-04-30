@@ -11,13 +11,30 @@ const DriverSelected = (props) => {
   const captainArrived = props?.captainArrived || false;
   const etaInfo = props?.etaInfo || {};
 
+  const [currentRide, setCurrentRide] = useState(ride);
+
   const [chatOpen, setChatOpen] = useState(false);
   const [messageText, setMessageText] = useState("");
   const [hasUnreadMessage, setHasUnreadMessage] = useState(false);
   const [messages, setMessages] = useState([]);
   const [sendingMessage, setSendingMessage] = useState(false);
 
+  const [localCaptainArrived, setLocalCaptainArrived] = useState(false);
+  const [arrivalCountdown, setArrivalCountdown] = useState(30);
+  const [canConfirmPickup, setCanConfirmPickup] = useState(false);
+  const [confirmingPickup, setConfirmingPickup] = useState(false);
+  const [userConfirmedPickup, setUserConfirmedPickup] = useState(false);
+
+  const [rideStarted, setRideStarted] = useState(false);
+  const [rideEnded, setRideEnded] = useState(false);
+
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [sendingRating, setSendingRating] = useState(false);
+
   const messagesEndRef = useRef(null);
+  const countdownIntervalRef = useRef(null);
 
   const quickMessages = useMemo(
     () => [
@@ -28,6 +45,73 @@ const DriverSelected = (props) => {
     ],
     []
   );
+
+  useEffect(() => {
+    setCurrentRide(ride || null);
+  }, [ride]);
+
+  useEffect(() => {
+    const arrived =
+      Boolean(currentRide?.arrivedAtPickup) ||
+      currentRide?.status === "arrived" ||
+      Boolean(captainArrived);
+
+    const confirmed = Boolean(currentRide?.userConfirmedAtPickup);
+    const started = currentRide?.status === "ongoing";
+    const completed = currentRide?.status === "completed";
+
+    setLocalCaptainArrived(arrived);
+    setUserConfirmedPickup(confirmed);
+    setRideStarted(started);
+    setRideEnded(completed);
+
+    if (completed && !currentRide?.userRatingToCaptain?.rating) {
+      setShowRatingModal(true);
+    }
+  }, [currentRide, captainArrived]);
+
+  useEffect(() => {
+    if (!localCaptainArrived || userConfirmedPickup || rideStarted || rideEnded) {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+      return;
+    }
+
+    const arrivedAtValue = currentRide?.arrivedAtPickupAt;
+    const arrivedAtTime = arrivedAtValue ? new Date(arrivedAtValue).getTime() : Date.now();
+
+    const updateCountdown = () => {
+      const secondsPassed = Math.floor((Date.now() - arrivedAtTime) / 1000);
+      const remaining = Math.max(30 - secondsPassed, 0);
+
+      setArrivalCountdown(remaining);
+      setCanConfirmPickup(remaining <= 0);
+
+      if (remaining <= 0 && countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+
+    updateCountdown();
+
+    countdownIntervalRef.current = setInterval(updateCountdown, 1000);
+
+    return () => {
+      if (countdownIntervalRef.current) {
+        clearInterval(countdownIntervalRef.current);
+        countdownIntervalRef.current = null;
+      }
+    };
+  }, [
+    localCaptainArrived,
+    currentRide?.arrivedAtPickupAt,
+    userConfirmedPickup,
+    rideStarted,
+    rideEnded,
+  ]);
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
@@ -92,21 +176,21 @@ const DriverSelected = (props) => {
   }, [chatOpen, messages]);
 
   useEffect(() => {
-    if (!ride?._id) {
+    if (!currentRide?._id) {
       setMessages([]);
       setChatOpen(false);
       setHasUnreadMessage(false);
     }
-  }, [ride?._id]);
+  }, [currentRide?._id]);
 
   useEffect(() => {
-    if (!socket || !ride?._id) return;
+    if (!socket || !currentRide?._id) return;
 
     const handleRideMessage = (payload) => {
       console.log("[USER CHAT] Mensaje recibido:", payload);
 
       if (!payload?.rideId) return;
-      if (String(payload.rideId) !== String(ride._id)) return;
+      if (String(payload.rideId) !== String(currentRide._id)) return;
 
       const nextMessage = {
         id: payload?._id || `${Date.now()}-${Math.random()}`,
@@ -135,19 +219,69 @@ const DriverSelected = (props) => {
       }
     };
 
+    const handleCaptainArrived = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+
+      if (rideId !== String(currentRide._id)) return;
+
+      if (payload?.ride) {
+        setCurrentRide(payload.ride);
+      }
+
+      setLocalCaptainArrived(true);
+      setUserConfirmedPickup(false);
+      setArrivalCountdown(Number(payload?.waitSeconds || 30));
+      setCanConfirmPickup(false);
+
+      alert("Tu conductor ya llegó al punto de recogida.");
+    };
+
+    const handleRideStarted = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+
+      if (rideId !== String(currentRide._id)) return;
+
+      if (payload?.ride) {
+        setCurrentRide(payload.ride);
+      }
+
+      setRideStarted(true);
+      setLocalCaptainArrived(true);
+      setUserConfirmedPickup(true);
+    };
+
+    const handleRideEnded = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+
+      if (rideId !== String(currentRide._id)) return;
+
+      if (payload?.ride) {
+        setCurrentRide(payload.ride);
+      }
+
+      setRideEnded(true);
+      setShowRatingModal(true);
+    };
+
     socket.on("ride-message", handleRideMessage);
     socket.on("ride-chat-message", handleRideMessage);
+    socket.on("captain-arrived", handleCaptainArrived);
+    socket.on("ride-started", handleRideStarted);
+    socket.on("ride-ended", handleRideEnded);
 
     return () => {
       socket.off("ride-message", handleRideMessage);
       socket.off("ride-chat-message", handleRideMessage);
+      socket.off("captain-arrived", handleCaptainArrived);
+      socket.off("ride-started", handleRideStarted);
+      socket.off("ride-ended", handleRideEnded);
     };
-  }, [socket, ride?._id, chatOpen]);
+  }, [socket, currentRide?._id, chatOpen]);
 
   const sendMessage = async (textToSend = "") => {
     const cleanText = String(textToSend || messageText || "").trim();
 
-    if (!cleanText || !ride?._id || sendingMessage) return;
+    if (!cleanText || !currentRide?._id || sendingMessage) return;
 
     const token = localStorage.getItem("token");
 
@@ -158,7 +292,7 @@ const DriverSelected = (props) => {
 
     const tempMessage = {
       id: `local-${Date.now()}-${Math.random()}`,
-      rideId: ride._id,
+      rideId: currentRide._id,
       senderType: "user",
       from: "user",
       text: cleanText,
@@ -174,14 +308,14 @@ const DriverSelected = (props) => {
       setSendingMessage(true);
 
       console.log("[USER CHAT] Enviando mensaje:", {
-        rideId: ride._id,
+        rideId: currentRide._id,
         message: cleanText,
       });
 
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/chat-message`,
         {
-          rideId: ride._id,
+          rideId: currentRide._id,
           message: cleanText,
           senderType: "user",
         },
@@ -244,11 +378,111 @@ const DriverSelected = (props) => {
     }
   };
 
+  const handleUserAtPickup = async () => {
+    if (!currentRide?._id || confirmingPickup) return;
+
+    if (!canConfirmPickup) {
+      alert(`Espera ${arrivalCountdown} segundos para confirmar.`);
+      return;
+    }
+
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      alert("No hay sesión activa.");
+      return;
+    }
+
+    try {
+      setConfirmingPickup(true);
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/user-at-pickup`,
+        {
+          rideId: currentRide._id,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response?.data?.ride) {
+        setCurrentRide(response.data.ride);
+      }
+
+      setUserConfirmedPickup(true);
+      alert("Listo. Le avisamos al conductor que ya estás en el punto.");
+    } catch (error) {
+      console.error("Error confirmando recogida:", error);
+
+      const secondsRemaining = Number(error?.response?.data?.secondsRemaining);
+
+      if (Number.isFinite(secondsRemaining) && secondsRemaining > 0) {
+        setArrivalCountdown(secondsRemaining);
+        setCanConfirmPickup(false);
+      }
+
+      alert(
+        error?.response?.data?.message ||
+          "No se pudo confirmar que ya estás en el punto."
+      );
+    } finally {
+      setConfirmingPickup(false);
+    }
+  };
+
+  const handleRateCaptain = async () => {
+    if (!currentRide?._id || sendingRating) return;
+
+    const token = localStorage.getItem("token");
+
+    if (!token) {
+      alert("No hay sesión activa.");
+      return;
+    }
+
+    try {
+      setSendingRating(true);
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/rate-captain`,
+        {
+          rideId: currentRide._id,
+          rating: ratingValue,
+          comment: ratingComment,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response?.data?.ride) {
+        setCurrentRide(response.data.ride);
+      }
+
+      alert("Gracias por calificar al conductor.");
+      setShowRatingModal(false);
+    } catch (error) {
+      console.error("Error calificando conductor:", error);
+
+      alert(
+        error?.response?.data?.message ||
+          "No se pudo enviar la calificación."
+      );
+    } finally {
+      setSendingRating(false);
+    }
+  };
+
   const handleSecurity = () => {
     alert("Centro de seguridad próximamente disponible.");
   };
 
-  if (!ride) {
+  if (!currentRide) {
     return (
       <div className="bg-white rounded-t-[24px] p-6">
         <div className="flex items-center justify-center">
@@ -260,10 +494,10 @@ const DriverSelected = (props) => {
     );
   }
 
-  const pickupAddress = formatAddress(ride?.pickup);
-  const destinationAddress = formatAddress(ride?.destination);
+  const pickupAddress = formatAddress(currentRide?.pickup);
+  const destinationAddress = formatAddress(currentRide?.destination);
 
-  const captain = ride?.captain || {};
+  const captain = currentRide?.captain || {};
   const fullName = captain?.fullname || {};
   const vehicle = captain?.vehicle || {};
 
@@ -278,19 +512,37 @@ const DriverSelected = (props) => {
   const vehicleType =
     vehicle?.vehicleType ||
     captain?.vehicleType ||
-    ride?.vehicleType ||
-    ride?.vehicle ||
+    currentRide?.vehicleType ||
+    currentRide?.vehicle ||
     "car";
 
   const vehicleLabel = getVehicleTypeLabel(vehicleType);
   const driverPhoto = getDriverPhoto(captain);
-  const finalFare = ride?.fare ?? ride?.offeredFare ?? 0;
+  const finalFare = currentRide?.fare ?? currentRide?.offeredFare ?? 0;
 
-  const etaText = captainArrived
+  const etaText = rideEnded
+    ? "Tu viaje finalizó"
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Tu viaje está en curso"
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "Esperando que el conductor inicie"
+    : localCaptainArrived
     ? "Tu conductor ya llegó"
     : etaInfo?.etaText
     ? `El conductor llegará en ${etaInfo.etaText}`
     : "El conductor llegará pronto";
+
+  const etaSubText = rideEnded
+    ? "Califica al conductor para cerrar tu experiencia."
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Vas camino a tu destino."
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "Ya avisamos al conductor que estás en el punto."
+    : localCaptainArrived
+    ? canConfirmPickup
+      ? "Confirma cuando ya estés en el punto de recogida."
+      : `Puedes confirmar en ${arrivalCountdown} segundos.`
+    : `${color} ${vehicleLabel}`;
 
   return (
     <div className="bg-white rounded-t-[24px] pb-6 relative overflow-hidden">
@@ -301,7 +553,9 @@ const DriverSelected = (props) => {
       <div
         className="mx-4 mt-2 rounded-[28px] px-5 py-5 text-white shadow-xl"
         style={{
-          background: PURPLE_GRADIENT,
+          background: rideEnded
+            ? "linear-gradient(135deg, #111827, #374151)"
+            : PURPLE_GRADIENT,
         }}
       >
         <div className="flex items-start justify-between gap-3">
@@ -314,9 +568,7 @@ const DriverSelected = (props) => {
               {etaText}
             </h2>
 
-            <p className="text-sm text-white/90 mt-2">
-              {color} {vehicleLabel}
-            </p>
+            <p className="text-sm text-white/90 mt-2">{etaSubText}</p>
 
             <div className="inline-flex mt-3 px-4 py-2 rounded-xl bg-white/20 border border-white/20">
               <span className="text-xl font-extrabold tracking-wide text-white">
@@ -330,6 +582,102 @@ const DriverSelected = (props) => {
           </div>
         </div>
       </div>
+
+      {localCaptainArrived &&
+        !userConfirmedPickup &&
+        !currentRide?.userConfirmedAtPickup &&
+        !rideStarted &&
+        !rideEnded && (
+          <div className="px-5 mt-4">
+            <div
+              className="rounded-[24px] border border-purple-100 p-4"
+              style={{
+                background: PURPLE_SOFT,
+              }}
+            >
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                  <i className="ri-map-pin-user-fill text-2xl text-purple-700"></i>
+                </div>
+
+                <div className="flex-1">
+                  <p className="text-base font-black text-purple-950">
+                    Tu conductor llegó
+                  </p>
+
+                  <p className="text-sm text-purple-700 mt-1 leading-5">
+                    Para evitar confusiones, espera el contador y confirma
+                    cuando ya estés en el punto.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleUserAtPickup}
+                    disabled={!canConfirmPickup || confirmingPickup}
+                    className="w-full mt-4 rounded-2xl py-3.5 text-white font-black disabled:opacity-50"
+                    style={{
+                      background: canConfirmPickup
+                        ? PURPLE_GRADIENT
+                        : "linear-gradient(135deg, #9CA3AF, #6B7280)",
+                    }}
+                  >
+                    {confirmingPickup
+                      ? "Confirmando..."
+                      : canConfirmPickup
+                      ? "Ya estoy acá"
+                      : `Disponible en ${arrivalCountdown}s`}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {(userConfirmedPickup || currentRide?.userConfirmedAtPickup) &&
+        !rideStarted &&
+        !rideEnded && (
+          <div className="px-5 mt-4">
+            <div className="rounded-[24px] border border-emerald-200 bg-emerald-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                  <i className="ri-checkbox-circle-fill text-2xl text-emerald-600"></i>
+                </div>
+
+                <div>
+                  <p className="text-base font-black text-emerald-900">
+                    Confirmación enviada
+                  </p>
+
+                  <p className="text-sm text-emerald-700 mt-1 leading-5">
+                    El conductor ya puede iniciar el viaje.
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+      {rideStarted && !rideEnded && (
+        <div className="px-5 mt-4">
+          <div className="rounded-[24px] border border-purple-100 bg-purple-50 p-4">
+            <div className="flex items-start gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-white flex items-center justify-center shrink-0 shadow-sm">
+                <i className="ri-road-map-fill text-2xl text-purple-700"></i>
+              </div>
+
+              <div>
+                <p className="text-base font-black text-purple-950">
+                  Viaje iniciado
+                </p>
+
+                <p className="text-sm text-purple-700 mt-1 leading-5">
+                  Estás camino a tu destino. Mantente atento al recorrido.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="px-5 mt-5">
         <div className="grid grid-cols-3 items-start gap-3 text-center">
@@ -632,6 +980,88 @@ const DriverSelected = (props) => {
                   <i className="ri-send-plane-fill text-2xl text-white"></i>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRatingModal && (
+        <div className="fixed inset-0 z-[1000] bg-black/50 flex items-end">
+          <div className="w-full rounded-t-[28px] bg-white p-5 shadow-2xl max-h-[85vh] overflow-y-auto">
+            <div className="flex justify-center mb-3">
+              <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+            </div>
+
+            <div className="text-center">
+              <div
+                className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
+                style={{ background: PURPLE_GRADIENT }}
+              >
+                <i className="ri-star-smile-line text-4xl text-white"></i>
+              </div>
+
+              <h3 className="text-2xl font-extrabold text-gray-900 mt-4">
+                Califica a tu conductor
+              </h3>
+
+              <p className="text-sm text-gray-600 mt-2">
+                Tu opinión ayuda a mejorar la experiencia de Central Go.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mt-6">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRatingValue(star)}
+                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                >
+                  <i
+                    className={`${
+                      star <= ratingValue ? "ri-star-fill" : "ri-star-line"
+                    } text-4xl ${
+                      star <= ratingValue ? "text-yellow-500" : "text-gray-300"
+                    }`}
+                  ></i>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Comentario opcional
+              </label>
+
+              <textarea
+                rows={4}
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+                placeholder="Ejemplo: conductor amable, llegó rápido, buen servicio..."
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => setShowRatingModal(false)}
+                className="w-full rounded-2xl border border-gray-300 bg-white py-3.5 font-bold text-gray-700"
+              >
+                Omitir
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRateCaptain}
+                disabled={sendingRating}
+                className="w-full rounded-2xl py-3.5 font-bold text-white disabled:opacity-60"
+                style={{
+                  background: PURPLE_GRADIENT,
+                }}
+              >
+                {sendingRating ? "Enviando..." : "Enviar calificación"}
+              </button>
             </div>
           </div>
         </div>

@@ -28,10 +28,22 @@ const CaptainRiding = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [selectedReason, setSelectedReason] = useState("");
   const [cancelNotes, setCancelNotes] = useState("");
+
   const [sendingArrived, setSendingArrived] = useState(false);
   const [sendingCancel, setSendingCancel] = useState(false);
+  const [startingRide, setStartingRide] = useState(false);
   const [finishingRide, setFinishingRide] = useState(false);
+
   const [driverArrived, setDriverArrived] = useState(false);
+  const [userConfirmedPickup, setUserConfirmedPickup] = useState(false);
+  const [rideStarted, setRideStarted] = useState(false);
+  const [rideFinished, setRideFinished] = useState(false);
+
+  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [ratingValue, setRatingValue] = useState(5);
+  const [ratingComment, setRatingComment] = useState("");
+  const [sendingRating, setSendingRating] = useState(false);
+
   const [etaInfo, setEtaInfo] = useState({
     etaText: "",
     distanceText: "",
@@ -44,11 +56,14 @@ const CaptainRiding = () => {
   const [sendingMessage, setSendingMessage] = useState(false);
 
   const cancelModalRef = useRef(null);
+  const ratingModalRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const location = useLocation();
   const navigate = useNavigate();
-  const rideData = location.state?.ride || null;
+  const initialRideData = location.state?.ride || null;
+
+  const [currentRide, setCurrentRide] = useState(initialRideData);
 
   const { socket } = useContext(SocketContext);
   const { captain } = useContext(CaptainDataContext);
@@ -63,6 +78,18 @@ const CaptainRiding = () => {
     ],
     []
   );
+
+  useEffect(() => {
+    if (!currentRide) return;
+
+    setDriverArrived(
+      Boolean(currentRide?.arrivedAtPickup) || currentRide?.status === "arrived"
+    );
+
+    setUserConfirmedPickup(Boolean(currentRide?.userConfirmedAtPickup));
+    setRideStarted(currentRide?.status === "ongoing");
+    setRideFinished(currentRide?.status === "completed");
+  }, [currentRide]);
 
   useGSAP(() => {
     if (showCancelModal) {
@@ -82,6 +109,24 @@ const CaptainRiding = () => {
     }
   }, [showCancelModal]);
 
+  useGSAP(() => {
+    if (showRatingModal) {
+      gsap.to(ratingModalRef.current, {
+        y: "0%",
+        opacity: 1,
+        duration: 0.25,
+        ease: "power2.out",
+      });
+    } else {
+      gsap.to(ratingModalRef.current, {
+        y: "100%",
+        opacity: 0,
+        duration: 0.2,
+        ease: "power2.inOut",
+      });
+    }
+  }, [showRatingModal]);
+
   useEffect(() => {
     if (!socket || !captain?._id) return;
 
@@ -91,7 +136,7 @@ const CaptainRiding = () => {
         userType: "captain",
       });
 
-      console.log("[CAPTAIN CHAT] join emitido:", {
+      console.log("[CAPTAIN] join emitido:", {
         captainId: captain._id,
         socketId: socket.id,
       });
@@ -109,12 +154,12 @@ const CaptainRiding = () => {
   }, [socket, captain?._id]);
 
   useEffect(() => {
-    if (!rideData?._id) {
+    if (!currentRide?._id) {
       setMessages([]);
       setChatOpen(false);
       setHasUnreadMessage(false);
     }
-  }, [rideData?._id]);
+  }, [currentRide?._id]);
 
   useEffect(() => {
     if (!chatOpen) return;
@@ -127,13 +172,13 @@ const CaptainRiding = () => {
   }, [chatOpen, messages]);
 
   useEffect(() => {
-    if (!socket || !rideData?._id) return;
+    if (!socket || !currentRide?._id) return;
 
     const handleRideMessage = (payload) => {
       console.log("[CAPTAIN CHAT] Mensaje recibido:", payload);
 
       if (!payload?.rideId) return;
-      if (String(payload.rideId) !== String(rideData._id)) return;
+      if (String(payload.rideId) !== String(currentRide._id)) return;
 
       const nextMessage = {
         id: payload?._id || `${Date.now()}-${Math.random()}`,
@@ -162,14 +207,58 @@ const CaptainRiding = () => {
       }
     };
 
+    const handleUserConfirmedPickup = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+      if (rideId !== String(currentRide._id)) return;
+
+      const nextRide = payload?.ride || null;
+
+      if (nextRide) {
+        setCurrentRide(nextRide);
+      }
+
+      setUserConfirmedPickup(true);
+      toast.success("El usuario confirmó que ya está en el punto.");
+    };
+
+    const handleRideStarted = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+      if (rideId !== String(currentRide._id)) return;
+
+      if (payload?.ride) {
+        setCurrentRide(payload.ride);
+      }
+
+      setRideStarted(true);
+      toast.success("Viaje iniciado.");
+    };
+
+    const handleRideEnded = (payload) => {
+      const rideId = String(payload?.rideId || payload?.ride?._id || "");
+      if (rideId !== String(currentRide._id)) return;
+
+      if (payload?.ride) {
+        setCurrentRide(payload.ride);
+      }
+
+      setRideFinished(true);
+      setShowRatingModal(true);
+    };
+
     socket.on("ride-message", handleRideMessage);
     socket.on("ride-chat-message", handleRideMessage);
+    socket.on("user-confirmed-at-pickup", handleUserConfirmedPickup);
+    socket.on("ride-started", handleRideStarted);
+    socket.on("ride-ended", handleRideEnded);
 
     return () => {
       socket.off("ride-message", handleRideMessage);
       socket.off("ride-chat-message", handleRideMessage);
+      socket.off("user-confirmed-at-pickup", handleUserConfirmedPickup);
+      socket.off("ride-started", handleRideStarted);
+      socket.off("ride-ended", handleRideEnded);
     };
-  }, [socket, rideData?._id, chatOpen]);
+  }, [socket, currentRide?._id, chatOpen]);
 
   const formatCOP = (value) => {
     const number = Number(value) || 0;
@@ -201,11 +290,11 @@ const CaptainRiding = () => {
   };
 
   const getUserPhoto = () =>
-    rideData?.user?.profileImage ||
-    rideData?.user?.photo ||
-    rideData?.user?.avatar ||
-    rideData?.user?.image ||
-    rideData?.user?.profilePic ||
+    currentRide?.user?.profileImage ||
+    currentRide?.user?.photo ||
+    currentRide?.user?.avatar ||
+    currentRide?.user?.image ||
+    currentRide?.user?.profilePic ||
     "https://cdn-icons-png.flaticon.com/512/149/149071.png";
 
   const getVehicleLabel = (vehicleType) => {
@@ -223,16 +312,18 @@ const CaptainRiding = () => {
     return labels[vehicleType] || "Vehículo";
   };
 
+  const shouldNavigateToDestination = rideStarted || currentRide?.status === "ongoing";
+
   const getNavigationTargetAddress = () => {
-    if (driverArrived) {
-      return rideData?.destination || "";
+    if (shouldNavigateToDestination) {
+      return currentRide?.destination || "";
     }
 
-    return rideData?.pickup || "";
+    return currentRide?.pickup || "";
   };
 
   const getNavigationTargetLabel = () => {
-    return driverArrived ? "destino" : "punto de recogida";
+    return shouldNavigateToDestination ? "destino" : "punto de recogida";
   };
 
   const openWazeNavigation = () => {
@@ -270,7 +361,7 @@ const CaptainRiding = () => {
   const sendMessage = async (textToSend = "") => {
     const cleanText = String(textToSend || messageText || "").trim();
 
-    if (!cleanText || !rideData?._id || sendingMessage) return;
+    if (!cleanText || !currentRide?._id || sendingMessage) return;
 
     const token = localStorage.getItem("token");
 
@@ -281,7 +372,7 @@ const CaptainRiding = () => {
 
     const tempMessage = {
       id: `local-${Date.now()}-${Math.random()}`,
-      rideId: rideData._id,
+      rideId: currentRide._id,
       senderType: "captain",
       from: "captain",
       text: cleanText,
@@ -296,15 +387,10 @@ const CaptainRiding = () => {
     try {
       setSendingMessage(true);
 
-      console.log("[CAPTAIN CHAT] Enviando mensaje:", {
-        rideId: rideData._id,
-        message: cleanText,
-      });
-
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/captain-chat-message`,
         {
-          rideId: rideData._id,
+          rideId: currentRide._id,
           message: cleanText,
           senderType: "captain",
         },
@@ -368,14 +454,14 @@ const CaptainRiding = () => {
   };
 
   const handleArrived = async () => {
-    if (!rideData?._id || sendingArrived) return;
+    if (!currentRide?._id || sendingArrived) return;
 
     try {
       setSendingArrived(true);
 
-      await axios.post(
+      const response = await axios.post(
         `${getApiBaseUrl()}/rides/arrived`,
-        { rideId: rideData._id },
+        { rideId: currentRide._id },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -383,8 +469,18 @@ const CaptainRiding = () => {
         }
       );
 
+      const nextRide = response?.data?.ride;
+
+      if (nextRide) {
+        setCurrentRide(nextRide);
+      }
+
       setDriverArrived(true);
-      toast.success("Se notificó al usuario que ya llegaste.");
+      setUserConfirmedPickup(false);
+
+      toast.success(
+        "Se notificó al usuario que ya llegaste. Espera su confirmación."
+      );
     } catch (error) {
       console.error("Error notificando llegada:", error);
       toast.error(
@@ -396,8 +492,51 @@ const CaptainRiding = () => {
     }
   };
 
+  const handleStartRide = async () => {
+    if (!currentRide?._id || startingRide) return;
+
+    if (!userConfirmedPickup && !currentRide?.userConfirmedAtPickup) {
+      toast.info("Espera a que el usuario confirme que ya está en el punto.");
+      return;
+    }
+
+    try {
+      setStartingRide(true);
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/start-ride`,
+        { rideId: currentRide._id },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }
+      );
+
+      const nextRide = response?.data?.ride;
+
+      if (nextRide) {
+        setCurrentRide(nextRide);
+      }
+
+      setRideStarted(true);
+      toast.success("Viaje iniciado. Ahora navega hacia el destino.");
+
+      setTimeout(() => {
+        openWazeNavigation();
+      }, 600);
+    } catch (error) {
+      console.error("Error iniciando viaje:", error);
+      toast.error(
+        error?.response?.data?.message || "No se pudo iniciar el viaje."
+      );
+    } finally {
+      setStartingRide(false);
+    }
+  };
+
   const handleCancelRide = async () => {
-    if (!rideData?._id || sendingCancel) return;
+    if (!currentRide?._id || sendingCancel) return;
 
     if (!selectedReason) {
       toast.error("Selecciona un motivo de cancelación.");
@@ -410,7 +549,7 @@ const CaptainRiding = () => {
       await axios.post(
         `${getApiBaseUrl()}/rides/cancel-by-captain`,
         {
-          rideId: rideData._id,
+          rideId: currentRide._id,
           reason: selectedReason,
           notes: cancelNotes || "",
         },
@@ -435,14 +574,19 @@ const CaptainRiding = () => {
   };
 
   const handleFinishRide = async () => {
-    if (!rideData?._id || finishingRide) return;
+    if (!currentRide?._id || finishingRide) return;
+
+    if (!rideStarted && currentRide?.status !== "ongoing") {
+      toast.info("Primero debes iniciar el viaje.");
+      return;
+    }
 
     try {
       setFinishingRide(true);
 
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/end-ride`,
-        { rideId: rideData._id },
+        { rideId: currentRide._id },
         {
           headers: {
             Authorization: `Bearer ${localStorage.getItem("token")}`,
@@ -450,8 +594,15 @@ const CaptainRiding = () => {
         }
       );
 
+      const nextRide = response?.data?.ride || response?.data;
+
+      if (nextRide?._id) {
+        setCurrentRide(nextRide);
+      }
+
+      setRideFinished(true);
       toast.success("Recorrido finalizado correctamente.");
-      navigate("/captain-home", { state: { finishedRide: response.data } });
+      setShowRatingModal(true);
     } catch (error) {
       console.error("Error finalizando recorrido:", error);
       toast.error(
@@ -462,11 +613,55 @@ const CaptainRiding = () => {
     }
   };
 
+  const handleRateUser = async () => {
+    if (!currentRide?._id || sendingRating) return;
+
+    try {
+      setSendingRating(true);
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/rate-user`,
+        {
+          rideId: currentRide._id,
+          rating: ratingValue,
+          comment: ratingComment,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }
+      );
+
+      const nextRide = response?.data?.ride;
+
+      if (nextRide) {
+        setCurrentRide(nextRide);
+      }
+
+      toast.success("Calificación enviada correctamente.");
+      setShowRatingModal(false);
+      navigate("/captain-home", {
+        state: {
+          finishedRide: nextRide || currentRide,
+          ratedUser: true,
+        },
+      });
+    } catch (error) {
+      console.error("Error calificando usuario:", error);
+      toast.error(
+        error?.response?.data?.message || "No se pudo enviar la calificación."
+      );
+    } finally {
+      setSendingRating(false);
+    }
+  };
+
   const handleSecurity = () => {
     toast.info("Centro de seguridad próximamente disponible.");
   };
 
-  if (!rideData) {
+  if (!currentRide) {
     return (
       <div className="min-h-screen bg-white flex items-center justify-center px-6">
         <div className="text-center">
@@ -485,45 +680,69 @@ const CaptainRiding = () => {
     );
   }
 
-  const pickupAddress = formatAddress(rideData?.pickup);
-  const destinationAddress = formatAddress(rideData?.destination);
+  const pickupAddress = formatAddress(currentRide?.pickup);
+  const destinationAddress = formatAddress(currentRide?.destination);
 
   const userFullName =
-    `${rideData?.user?.fullname?.firstname || ""} ${
-      rideData?.user?.fullname?.lastname || ""
+    `${currentRide?.user?.fullname?.firstname || ""} ${
+      currentRide?.user?.fullname?.lastname || ""
     }`.trim() || "Usuario";
 
   const userPhone =
-    rideData?.user?.phone ||
-    rideData?.user?.phoneNumber ||
-    rideData?.user?.mobile ||
+    currentRide?.user?.phone ||
+    currentRide?.user?.phoneNumber ||
+    currentRide?.user?.mobile ||
     "Sin teléfono";
 
   const vehicleType =
-    rideData?.captain?.vehicle?.vehicleType ||
-    rideData?.captain?.vehicleType ||
-    rideData?.vehicleType ||
-    rideData?.vehicle ||
+    currentRide?.captain?.vehicle?.vehicleType ||
+    currentRide?.captain?.vehicleType ||
+    currentRide?.vehicleType ||
+    currentRide?.vehicle ||
     "car";
 
   const vehicleLabel = getVehicleLabel(vehicleType);
 
   const plate =
-    rideData?.captain?.vehicle?.plate || rideData?.captain?.plate || "Sin placa";
+    currentRide?.captain?.vehicle?.plate ||
+    currentRide?.captain?.plate ||
+    "Sin placa";
 
   const color =
-    rideData?.captain?.vehicle?.color ||
-    rideData?.captain?.vehicleColor ||
+    currentRide?.captain?.vehicle?.color ||
+    currentRide?.captain?.vehicleColor ||
     "Color no disponible";
 
-  const fare = rideData?.fare ?? rideData?.offeredFare ?? 0;
+  const fare = currentRide?.fare ?? currentRide?.offeredFare ?? 0;
 
-  const headerStatus = driverArrived
-    ? "Llegaste al punto"
+  const canStartRide =
+    driverArrived &&
+    (userConfirmedPickup || currentRide?.userConfirmedAtPickup) &&
+    !rideStarted &&
+    currentRide?.status !== "ongoing" &&
+    currentRide?.status !== "completed";
+
+  const canFinishRide =
+    rideStarted || currentRide?.status === "ongoing";
+
+  const headerStatus = rideFinished
+    ? "Viaje finalizado"
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Viaje iniciado"
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "Usuario listo"
+    : driverArrived
+    ? "Esperando al usuario"
     : "En camino a recoger";
 
-  const headerSubtext = driverArrived
-    ? "El usuario ya fue notificado. Ahora puedes navegar hacia el destino."
+  const headerSubtext = rideFinished
+    ? "El recorrido terminó. Califica al usuario para cerrar el servicio."
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Dirígete al destino del usuario con Waze o Google Maps."
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "El usuario confirmó que ya está en el punto. Puedes iniciar el viaje."
+    : driverArrived
+    ? "El usuario recibió la notificación. Debe confirmar después de 30 segundos."
     : etaInfo?.etaText
     ? `Tiempo estimado: ${etaInfo.etaText}${
         etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
@@ -534,9 +753,10 @@ const CaptainRiding = () => {
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
       <div className="absolute inset-0 z-10">
         <LiveTracking
-          pickup={rideData?.pickup || ""}
-          selectedCaptainId={rideData?.captain?._id || null}
-          showRouteToPickup={true}
+          pickup={currentRide?.pickup || ""}
+          destination={currentRide?.destination || ""}
+          selectedCaptainId={currentRide?.captain?._id || null}
+          showRouteToPickup={!shouldNavigateToDestination}
           showPickupRadar={false}
           autoFetchNearbyDrivers={false}
           onEtaUpdate={setEtaInfo}
@@ -578,11 +798,13 @@ const CaptainRiding = () => {
       </button>
 
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
-        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[56vh] overflow-y-auto">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[62vh] overflow-y-auto">
           <div
             className="px-4 py-4 text-white"
             style={{
-              background: PURPLE_GRADIENT,
+              background: rideFinished
+                ? "linear-gradient(135deg, #111827, #374151)"
+                : PURPLE_GRADIENT,
             }}
           >
             <div className="flex items-start justify-between gap-3">
@@ -628,6 +850,50 @@ const CaptainRiding = () => {
                 </p>
               </div>
             </div>
+
+            {driverArrived && !userConfirmedPickup && !currentRide?.userConfirmedAtPickup && !rideStarted && (
+              <div
+                className="rounded-3xl border border-purple-100 px-4 py-3"
+                style={{ background: PURPLE_SOFT }}
+              >
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
+                    <i className="ri-timer-line text-2xl text-purple-700"></i>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-black text-purple-900">
+                      Esperando confirmación del usuario
+                    </p>
+                    <p className="text-xs text-purple-700 mt-1 leading-5">
+                      El usuario debe tocar “Ya estoy acá”. Después de eso se
+                      habilita el botón para iniciar el viaje.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {(userConfirmedPickup || currentRide?.userConfirmedAtPickup) &&
+              !rideStarted &&
+              currentRide?.status !== "ongoing" && (
+                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
+                      <i className="ri-checkbox-circle-fill text-2xl text-emerald-600"></i>
+                    </div>
+
+                    <div>
+                      <p className="text-sm font-black text-emerald-900">
+                        Usuario listo para abordar
+                      </p>
+                      <p className="text-xs text-emerald-700 mt-1 leading-5">
+                        Ya puedes iniciar el viaje y navegar hacia el destino.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
 
             <div className="grid grid-cols-3 gap-3 text-center">
               <button
@@ -677,7 +943,7 @@ const CaptainRiding = () => {
               <button
                 type="button"
                 onClick={handleArrived}
-                disabled={sendingArrived || driverArrived}
+                disabled={sendingArrived || driverArrived || rideStarted || rideFinished}
                 className="rounded-3xl border border-purple-200 bg-white p-3 flex flex-col items-center disabled:opacity-60 shadow-sm"
               >
                 <div
@@ -817,11 +1083,32 @@ const CaptainRiding = () => {
               </div>
             )}
 
+            {!rideStarted && currentRide?.status !== "ongoing" && !rideFinished && (
+              <button
+                type="button"
+                onClick={handleStartRide}
+                disabled={!canStartRide || startingRide}
+                className="w-full rounded-2xl py-4 text-white font-black disabled:opacity-50"
+                style={{
+                  background: canStartRide
+                    ? "linear-gradient(135deg, #16A34A, #22C55E)"
+                    : "linear-gradient(135deg, #9CA3AF, #6B7280)",
+                }}
+              >
+                {startingRide
+                  ? "Iniciando..."
+                  : canStartRide
+                  ? "Iniciar viaje"
+                  : "Esperando confirmación del usuario"}
+              </button>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
                 onClick={() => setShowCancelModal(true)}
-                className="w-full rounded-2xl py-3.5 text-white font-bold"
+                disabled={rideFinished}
+                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-50"
                 style={{
                   background: "linear-gradient(135deg, #7C3AED, #9333EA)",
                 }}
@@ -832,13 +1119,17 @@ const CaptainRiding = () => {
               <button
                 type="button"
                 onClick={handleFinishRide}
-                disabled={finishingRide}
-                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-60"
+                disabled={finishingRide || !canFinishRide || rideFinished}
+                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-50"
                 style={{
                   background: PURPLE_GRADIENT,
                 }}
               >
-                {finishingRide ? "Finalizando..." : "Finalizar"}
+                {finishingRide
+                  ? "Finalizando..."
+                  : rideFinished
+                  ? "Finalizado"
+                  : "Finalizar"}
               </button>
             </div>
           </div>
@@ -1078,6 +1369,99 @@ const CaptainRiding = () => {
                 }}
               >
                 {sendingCancel ? "Cancelando..." : "Confirmar cancelación"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showRatingModal && (
+        <div className="fixed inset-0 z-[1000] bg-black/50 flex items-end">
+          <div
+            ref={ratingModalRef}
+            className="w-full translate-y-full opacity-0 rounded-t-[28px] bg-white p-5 shadow-2xl max-h-[85vh] overflow-y-auto"
+          >
+            <div className="flex justify-center mb-3">
+              <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+            </div>
+
+            <div className="text-center">
+              <div
+                className="w-16 h-16 rounded-2xl mx-auto flex items-center justify-center"
+                style={{ background: PURPLE_GRADIENT }}
+              >
+                <i className="ri-star-smile-line text-4xl text-white"></i>
+              </div>
+
+              <h3 className="text-2xl font-extrabold text-gray-900 mt-4">
+                Califica al usuario
+              </h3>
+
+              <p className="text-sm text-gray-600 mt-2">
+                Tu calificación ayuda a mantener una comunidad segura y confiable.
+              </p>
+            </div>
+
+            <div className="flex items-center justify-center gap-2 mt-6">
+              {[1, 2, 3, 4, 5].map((star) => (
+                <button
+                  key={star}
+                  type="button"
+                  onClick={() => setRatingValue(star)}
+                  className="w-12 h-12 rounded-full flex items-center justify-center"
+                >
+                  <i
+                    className={`${
+                      star <= ratingValue ? "ri-star-fill" : "ri-star-line"
+                    } text-4xl ${
+                      star <= ratingValue ? "text-yellow-500" : "text-gray-300"
+                    }`}
+                  ></i>
+                </button>
+              ))}
+            </div>
+
+            <div className="mt-5">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
+                Comentario opcional
+              </label>
+
+              <textarea
+                rows={4}
+                value={ratingComment}
+                onChange={(e) => setRatingComment(e.target.value)}
+                placeholder="Ejemplo: usuario amable, punto claro, buen servicio..."
+                className="w-full rounded-2xl border border-gray-200 bg-gray-50 px-4 py-3 outline-none resize-none"
+              />
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-5">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowRatingModal(false);
+                  navigate("/captain-home", {
+                    state: {
+                      finishedRide: currentRide,
+                      skippedRating: true,
+                    },
+                  });
+                }}
+                className="w-full rounded-2xl border border-gray-300 bg-white py-3.5 font-bold text-gray-700"
+              >
+                Omitir
+              </button>
+
+              <button
+                type="button"
+                onClick={handleRateUser}
+                disabled={sendingRating}
+                className="w-full rounded-2xl py-3.5 font-bold text-white disabled:opacity-60"
+                style={{
+                  background: PURPLE_GRADIENT,
+                }}
+              >
+                {sendingRating ? "Enviando..." : "Enviar calificación"}
               </button>
             </div>
           </div>
