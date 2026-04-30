@@ -12,6 +12,7 @@ function getOtp(num) {
             .randomInt(Math.pow(10, size - 1), Math.pow(10, size))
             .toString();
     }
+
     return generateOtp(num);
 }
 
@@ -46,6 +47,26 @@ function getActiveDriverOffers(ride, now = Date.now()) {
 function normalizeOffer(offer) {
     if (!offer) return offer;
     return typeof offer.toObject === "function" ? offer.toObject() : { ...offer };
+}
+
+function normalizeDistanceToKm(value) {
+    const number = Number(value);
+
+    if (!Number.isFinite(number) || number <= 0) {
+        return 0;
+    }
+
+    /*
+      Si distance viene como 2517, normalmente son metros.
+      2517 metros = 2.52 km.
+
+      Si viene como 2.5, asumimos que ya viene en kilómetros.
+    */
+    if (number > 300) {
+        return Number((number / 1000).toFixed(2));
+    }
+
+    return Number(number.toFixed(2));
 }
 
 async function expirePendingOffers(ride, now = Date.now()) {
@@ -126,6 +147,9 @@ const getFare = async (pickup, destination) => {
         light_cargo: 2800,
         van: 5500,
         truck: 9000,
+        motocarro: 3200,
+        pickup: 5000,
+        moving: 9000,
     };
 
     const perKmRate = {
@@ -134,6 +158,9 @@ const getFare = async (pickup, destination) => {
         light_cargo: 900,
         van: 1800,
         truck: 2800,
+        motocarro: 1000,
+        pickup: 1700,
+        moving: 2800,
     };
 
     const perMinuteRate = {
@@ -142,6 +169,9 @@ const getFare = async (pickup, destination) => {
         light_cargo: 130,
         van: 220,
         truck: 320,
+        motocarro: 150,
+        pickup: 210,
+        moving: 320,
     };
 
     const minimumFare = {
@@ -150,43 +180,27 @@ const getFare = async (pickup, destination) => {
         light_cargo: 4000,
         van: 8000,
         truck: 15000,
+        motocarro: 5000,
+        pickup: 8000,
+        moving: 15000,
     };
 
-    const fares = {
-        motorcycle: Math.round(
-            baseFare.motorcycle +
-                perKmRate.motorcycle * distanceKm +
-                perMinuteRate.motorcycle * durationMin
-        ),
-        car: Math.round(
-            baseFare.car +
-                perKmRate.car * distanceKm +
-                perMinuteRate.car * durationMin
-        ),
-        light_cargo: Math.round(
-            baseFare.light_cargo +
-                perKmRate.light_cargo * distanceKm +
-                perMinuteRate.light_cargo * durationMin
-        ),
-        van: Math.round(
-            baseFare.van +
-                perKmRate.van * distanceKm +
-                perMinuteRate.van * durationMin
-        ),
-        truck: Math.round(
-            baseFare.truck +
-                perKmRate.truck * distanceKm +
-                perMinuteRate.truck * durationMin
-        ),
-    };
+    const fares = {};
 
-    return {
-        motorcycle: Math.max(fares.motorcycle, minimumFare.motorcycle),
-        car: Math.max(fares.car, minimumFare.car),
-        light_cargo: Math.max(fares.light_cargo, minimumFare.light_cargo),
-        van: Math.max(fares.van, minimumFare.van),
-        truck: Math.max(fares.truck, minimumFare.truck),
-    };
+    Object.keys(baseFare).forEach((vehicleType) => {
+        const calculatedFare = Math.round(
+            baseFare[vehicleType] +
+                perKmRate[vehicleType] * distanceKm +
+                perMinuteRate[vehicleType] * durationMin
+        );
+
+        fares[vehicleType] = Math.max(
+            calculatedFare,
+            minimumFare[vehicleType]
+        );
+    });
+
+    return fares;
 };
 
 const getMinOfferByVehicle = (vehicle, suggestedFare) => {
@@ -198,6 +212,9 @@ const getMinOfferByVehicle = (vehicle, suggestedFare) => {
         light_cargo: 0.85,
         van: 0.9,
         truck: 0.9,
+        motocarro: 0.85,
+        pickup: 0.9,
+        moving: 0.9,
     };
 
     const factor = factors[vehicle] ?? 0.85;
@@ -264,6 +281,15 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         cancelReason: "",
         cancelNotes: "",
         cancelledAt: null,
+
+        /*
+          Estos campos se usan si existen en el modelo.
+          Si el schema todavía no los tiene, luego los agregamos en ride.model.js.
+        */
+        completedAt: null,
+        startedAt: null,
+        userRating: null,
+        captainRating: null,
     });
 
     return ride;
@@ -279,6 +305,7 @@ const confirmRide = async ({ rideId, captain }) => {
             _id: rideId,
             selectedOfferCaptain: captain._id,
             status: { $in: ["accepted", "arrived", "ongoing"] },
+            cancelledAt: null,
         },
         {
             $set: {
@@ -291,7 +318,8 @@ const confirmRide = async ({ rideId, captain }) => {
         throw new Error("Ride not found or not assigned to this captain");
     }
 
-    const ride = await rideModel.findOne({ _id: rideId })
+    const ride = await rideModel
+        .findOne({ _id: rideId })
         .populate("user")
         .populate("captain");
 
@@ -303,40 +331,39 @@ const confirmRide = async ({ rideId, captain }) => {
 };
 
 const startRide = async ({ rideId, otp, captain }) => {
-    if (!rideId || !otp) {
-        throw new Error("rideId and otp are required");
+    if (!rideId) {
+        throw new Error("rideId is required");
     }
 
-    const rideBeforeStart = await rideModel.findOne({
+    /*
+      Tu flujo actual ya casi no usa OTP.
+      Si mandas OTP, lo validamos.
+      Si no mandas OTP, permitimos iniciar desde accepted/arrived.
+    */
+    const query = {
         _id: rideId,
-        otp: otp,
         captain: captain._id,
-    });
+        status: { $in: ["accepted", "arrived"] },
+        cancelledAt: null,
+    };
 
-    if (!rideBeforeStart) {
-        throw new Error("Ride not found");
+    if (otp) {
+        query.otp = otp;
     }
 
-    if (!["accepted", "arrived"].includes(rideBeforeStart.status)) {
-        throw new Error("Ride not accepted");
-    }
-
-    const updatedRide = await rideModel.findOneAndUpdate(
-        {
-            _id: rideId,
-            otp: otp,
-            captain: captain._id,
-            status: { $in: ["accepted", "arrived"] },
-        },
-        {
-            $set: {
-                status: "ongoing",
+    const updatedRide = await rideModel
+        .findOneAndUpdate(
+            query,
+            {
+                $set: {
+                    status: "ongoing",
+                    startedAt: new Date(),
+                },
             },
-        },
-        {
-            new: true,
-        }
-    )
+            {
+                new: true,
+            }
+        )
         .populate("user")
         .populate("captain");
 
@@ -352,31 +379,45 @@ const endRide = async ({ rideId, captain }) => {
         throw new Error("rideId is required");
     }
 
-    const updatedRide = await rideModel.findOneAndUpdate(
-        {
-            _id: rideId,
-            captain: captain._id,
-            status: "ongoing",
-        },
-        {
-            $set: {
-                status: "completed",
+    /*
+      CORRECCIÓN IMPORTANTE:
+      Antes solo permitía status: "ongoing".
+      En tu flujo real el viaje puede estar en:
+      - accepted
+      - arrived
+      - ongoing
+
+      Por eso salía:
+      "Ride not found or is not ongoing"
+    */
+    const updatedRide = await rideModel
+        .findOneAndUpdate(
+            {
+                _id: rideId,
+                captain: captain._id,
+                status: { $in: ["accepted", "arrived", "ongoing"] },
+                cancelledAt: null,
             },
-        },
-        {
-            new: true,
-        }
-    )
+            {
+                $set: {
+                    status: "completed",
+                    negotiationStatus: "closed",
+                    completedAt: new Date(),
+                },
+            },
+            {
+                new: true,
+            }
+        )
         .populate("user")
         .populate("captain");
 
     if (!updatedRide) {
-        throw new Error("Ride not found or is not ongoing");
+        throw new Error("Ride not found or cannot be completed");
     }
 
     const fareValue = safeNumber(updatedRide.fare, 0);
-    const distanceMeters = safeNumber(updatedRide.distance, 0);
-    const distanceKm = distanceMeters > 0 ? distanceMeters / 1000 : 0;
+    const distanceKm = normalizeDistanceToKm(updatedRide.distance);
 
     await captainModel.findByIdAndUpdate(
         captain._id,
@@ -398,10 +439,11 @@ const cancelRide = async ({ rideId, user }) => {
         throw new Error("rideId is required");
     }
 
-    let ride = await rideModel.findOne({
-        _id: rideId,
-        user: user._id || user,
-    })
+    let ride = await rideModel
+        .findOne({
+            _id: rideId,
+            user: user._id || user,
+        })
         .populate("user")
         .populate("captain");
 
@@ -411,10 +453,11 @@ const cancelRide = async ({ rideId, user }) => {
 
     await expirePendingOffers(ride);
 
-    ride = await rideModel.findOne({
-        _id: rideId,
-        user: user._id || user,
-    })
+    ride = await rideModel
+        .findOne({
+            _id: rideId,
+            user: user._id || user,
+        })
         .populate("user")
         .populate("captain");
 
@@ -463,10 +506,11 @@ const cancelRide = async ({ rideId, user }) => {
         throw new Error("La solicitud cambió de estado y no se pudo cancelar");
     }
 
-    const updatedRide = await rideModel.findOne({
-        _id: rideId,
-        user: user._id || user,
-    })
+    const updatedRide = await rideModel
+        .findOne({
+            _id: rideId,
+            user: user._id || user,
+        })
         .populate("user")
         .populate("captain");
 
