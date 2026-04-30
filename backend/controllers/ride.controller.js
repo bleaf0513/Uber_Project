@@ -133,6 +133,20 @@ function normalizeOffer(offer) {
     return typeof offer.toObject === "function" ? offer.toObject() : { ...offer };
 }
 
+function normalizeRating(value) {
+    const rating = Number(value);
+
+    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
+        return null;
+    }
+
+    return rating;
+}
+
+function cleanComment(value) {
+    return String(value || "").trim().slice(0, 500);
+}
+
 module.exports.createRide = async (req, res) => {
     const errors = validationResult(req);
 
@@ -646,6 +660,10 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
                     status: "accepted",
                     arrivedAtPickup: false,
                     arrivedAtPickupAt: null,
+                    userConfirmedAtPickup: false,
+                    userConfirmedAtPickupAt: null,
+                    startedAt: null,
+                    completedAt: null,
                     driverOffers: updatedOffers,
                 },
             }
@@ -1203,13 +1221,15 @@ module.exports.arrived = async (req, res) => {
                 {
                     _id: rideId,
                     captain: req.captain._id,
-                    status: { $in: ["accepted", "ongoing"] },
+                    status: { $in: ["accepted", "ongoing", "arrived"] },
                     cancelledAt: null,
                 },
                 {
                     $set: {
                         arrivedAtPickup: true,
                         arrivedAtPickupAt: new Date(),
+                        userConfirmedAtPickup: false,
+                        userConfirmedAtPickupAt: null,
                         status: "arrived",
                     },
                 },
@@ -1235,6 +1255,7 @@ module.exports.arrived = async (req, res) => {
                 data: {
                     rideId: updatedRide._id,
                     message: "Tu conductor ya llegó al punto de recogida.",
+                    waitSeconds: 30,
                     ride: updatedRide,
                 },
             });
@@ -1245,11 +1266,155 @@ module.exports.arrived = async (req, res) => {
                 ? "Llegada notificada correctamente."
                 : "Llegada registrada, pero no se pudo notificar al usuario en tiempo real.",
             userNotified: notified,
+            waitSeconds: 30,
             ride: updatedRide,
         });
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+module.exports.userAtPickup = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                user: req.user._id,
+                status: "arrived",
+                arrivedAtPickup: true,
+                cancelledAt: null,
+            })
+            .populate("user", "fullname email socketId")
+            .populate("captain", "fullname email socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message:
+                    "Viaje no encontrado o el conductor todavía no ha marcado llegada.",
+            });
+        }
+
+        if (ride.userConfirmedAtPickup) {
+            return res.status(200).json({
+                message: "Ya habías confirmado que estás en el punto.",
+                captainNotified: false,
+                ride,
+            });
+        }
+
+        ride.userConfirmedAtPickup = true;
+        ride.userConfirmedAtPickupAt = new Date();
+
+        await ride.save();
+
+        const updatedRide = await rideModel
+            .findById(rideId)
+            .populate("user")
+            .populate("captain");
+
+        let captainNotified = false;
+
+        if (updatedRide?.captain?.socketId) {
+            captainNotified = sendMessageToSocketId(updatedRide.captain.socketId, {
+                event: "user-confirmed-at-pickup",
+                data: {
+                    rideId: updatedRide._id,
+                    message: "El usuario confirmó que ya está en el punto.",
+                    ride: updatedRide,
+                },
+            });
+        }
+
+        return res.status(200).json({
+            message: captainNotified
+                ? "Confirmación enviada al conductor."
+                : "Confirmación registrada, pero el conductor no está conectado.",
+            captainNotified,
+            ride: updatedRide,
+        });
+    } catch (err) {
+        console.error("[userAtPickup] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error confirmando recogida del usuario.",
+        });
+    }
+};
+
+module.exports.startRide = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const updatedRide = await rideModel
+            .findOneAndUpdate(
+                {
+                    _id: rideId,
+                    captain: req.captain._id,
+                    status: "arrived",
+                    userConfirmedAtPickup: true,
+                    cancelledAt: null,
+                },
+                {
+                    $set: {
+                        status: "ongoing",
+                        startedAt: new Date(),
+                    },
+                },
+                {
+                    new: true,
+                }
+            )
+            .populate("user")
+            .populate("captain");
+
+        if (!updatedRide) {
+            return res.status(404).json({
+                message:
+                    "No puedes iniciar este viaje todavía. El usuario debe confirmar que ya está en el punto.",
+            });
+        }
+
+        let userNotified = false;
+
+        if (updatedRide.user?.socketId) {
+            userNotified = sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "ride-started",
+                data: {
+                    rideId: updatedRide._id,
+                    message: "Tu viaje ha iniciado.",
+                    ride: updatedRide,
+                },
+            });
+        }
+
+        return res.status(200).json({
+            message: userNotified
+                ? "Viaje iniciado correctamente y usuario notificado."
+                : "Viaje iniciado correctamente.",
+            userNotified,
+            ride: updatedRide,
+        });
+    } catch (err) {
+        console.error("[startRide] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error iniciando viaje.",
         });
     }
 };
@@ -1274,17 +1439,176 @@ module.exports.endRide = async (req, res) => {
         if (ride?.user?.socketId) {
             notified = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-ended",
-                data: ride,
+                data: {
+                    rideId: ride._id,
+                    message: "Tu viaje finalizó. Califica al conductor.",
+                    ride,
+                    shouldRateCaptain: true,
+                },
             });
         }
 
         return res.status(200).json({
             ...ride.toObject(),
             userNotified: notified,
+            shouldRateUser: true,
+            shouldRateCaptain: true,
         });
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+module.exports.rateCaptain = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId, rating, comment } = req.body;
+
+    try {
+        const safeRating = normalizeRating(rating);
+
+        if (!safeRating) {
+            return res.status(400).json({
+                message: "La calificación debe estar entre 1 y 5 estrellas.",
+            });
+        }
+
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                user: req.user._id,
+                status: "completed",
+                cancelledAt: null,
+            })
+            .populate("user", "fullname email socketId")
+            .populate("captain", "fullname email socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message: "Viaje no encontrado o aún no está finalizado.",
+            });
+        }
+
+        if (ride.userRatingToCaptain?.rating) {
+            return res.status(400).json({
+                message: "Ya calificaste a este conductor.",
+            });
+        }
+
+        ride.userRatingToCaptain = {
+            rating: safeRating,
+            comment: cleanComment(comment),
+            ratedAt: new Date(),
+        };
+
+        await ride.save();
+
+        const updatedRide = await rideModel
+            .findById(rideId)
+            .populate("user")
+            .populate("captain");
+
+        emitToCaptain(updatedRide.captain, {
+            event: "captain-rated",
+            data: {
+                rideId: updatedRide._id,
+                rating: safeRating,
+                comment: cleanComment(comment),
+                ride: updatedRide,
+            },
+        });
+
+        return res.status(200).json({
+            message: "Calificación enviada correctamente.",
+            ride: updatedRide,
+        });
+    } catch (err) {
+        console.error("[rateCaptain] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error calificando conductor.",
+        });
+    }
+};
+
+module.exports.rateUser = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId, rating, comment } = req.body;
+
+    try {
+        const safeRating = normalizeRating(rating);
+
+        if (!safeRating) {
+            return res.status(400).json({
+                message: "La calificación debe estar entre 1 y 5 estrellas.",
+            });
+        }
+
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                captain: req.captain._id,
+                status: "completed",
+                cancelledAt: null,
+            })
+            .populate("user", "fullname email socketId")
+            .populate("captain", "fullname email socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message: "Viaje no encontrado o aún no está finalizado.",
+            });
+        }
+
+        if (ride.captainRatingToUser?.rating) {
+            return res.status(400).json({
+                message: "Ya calificaste a este usuario.",
+            });
+        }
+
+        ride.captainRatingToUser = {
+            rating: safeRating,
+            comment: cleanComment(comment),
+            ratedAt: new Date(),
+        };
+
+        await ride.save();
+
+        const updatedRide = await rideModel
+            .findById(rideId)
+            .populate("user")
+            .populate("captain");
+
+        emitToUser(updatedRide.user, {
+            event: "user-rated",
+            data: {
+                rideId: updatedRide._id,
+                rating: safeRating,
+                comment: cleanComment(comment),
+                ride: updatedRide,
+            },
+        });
+
+        return res.status(200).json({
+            message: "Calificación enviada correctamente.",
+            ride: updatedRide,
+        });
+    } catch (err) {
+        console.error("[rateUser] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error calificando usuario.",
         });
     }
 };

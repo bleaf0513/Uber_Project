@@ -28,7 +28,7 @@ const driverOfferSchema = new mongoose.Schema(
         },
         expiresAt: {
             type: Date,
-            default: () => new Date(Date.now() + 10000),
+            default: () => new Date(Date.now() + 60000),
         },
         respondedAt: {
             type: Date,
@@ -38,23 +38,48 @@ const driverOfferSchema = new mongoose.Schema(
     { _id: true }
 );
 
+const ratingSchema = new mongoose.Schema(
+    {
+        rating: {
+            type: Number,
+            min: 1,
+            max: 5,
+            default: null,
+        },
+        comment: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+        ratedAt: {
+            type: Date,
+            default: null,
+        },
+    },
+    { _id: false }
+);
+
 const rideSchema = new mongoose.Schema(
     {
         user: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "user",
             required: true,
+            index: true,
         },
+
         pickup: {
             type: String,
             required: true,
             trim: true,
         },
+
         destination: {
             type: String,
             required: true,
             trim: true,
         },
+
         status: {
             type: String,
             enum: [
@@ -70,11 +95,14 @@ const rideSchema = new mongoose.Schema(
             default: "pending",
             index: true,
         },
+
         captain: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "captain",
             default: null,
+            index: true,
         },
+
         vehicleType: {
             type: String,
             required: true,
@@ -84,42 +112,59 @@ const rideSchema = new mongoose.Schema(
                 "light_cargo",
                 "van",
                 "truck",
+                "motocarro",
+                "pickup",
+                "moving",
             ],
         },
+
         suggestedFare: {
             type: Number,
             required: true,
             min: 0,
         },
+
         offeredFare: {
             type: Number,
             required: true,
             min: 0,
         },
+
         fare: {
             type: Number,
             required: true,
             min: 0,
         },
+
         duration: {
             type: Number,
             default: null,
         },
+
         distance: {
             type: Number,
             default: null,
         },
+
         paymentId: {
             type: String,
             default: null,
         },
+
         orderId: {
             type: String,
             default: null,
         },
+
         signature: {
             type: String,
             default: null,
+        },
+
+        paymentMethod: {
+            type: String,
+            trim: true,
+            default: "",
         },
 
         otp: {
@@ -132,11 +177,13 @@ const rideSchema = new mongoose.Schema(
             type: [driverOfferSchema],
             default: [],
         },
+
         selectedOfferCaptain: {
             type: mongoose.Schema.Types.ObjectId,
             ref: "captain",
             default: null,
         },
+
         negotiationStatus: {
             type: String,
             enum: ["open", "driver_selected", "closed"],
@@ -148,9 +195,48 @@ const rideSchema = new mongoose.Schema(
             type: Boolean,
             default: false,
         },
+
         arrivedAtPickupAt: {
             type: Date,
             default: null,
+        },
+
+        userConfirmedAtPickup: {
+            type: Boolean,
+            default: false,
+        },
+
+        userConfirmedAtPickupAt: {
+            type: Date,
+            default: null,
+        },
+
+        startedAt: {
+            type: Date,
+            default: null,
+        },
+
+        completedAt: {
+            type: Date,
+            default: null,
+        },
+
+        userRatingToCaptain: {
+            type: ratingSchema,
+            default: () => ({
+                rating: null,
+                comment: "",
+                ratedAt: null,
+            }),
+        },
+
+        captainRatingToUser: {
+            type: ratingSchema,
+            default: () => ({
+                rating: null,
+                comment: "",
+                ratedAt: null,
+            }),
         },
 
         cancelledBy: {
@@ -158,16 +244,19 @@ const rideSchema = new mongoose.Schema(
             enum: ["user", "captain", null],
             default: null,
         },
+
         cancelReason: {
             type: String,
             trim: true,
             default: "",
         },
+
         cancelNotes: {
             type: String,
             trim: true,
             default: "",
         },
+
         cancelledAt: {
             type: Date,
             default: null,
@@ -177,6 +266,10 @@ const rideSchema = new mongoose.Schema(
         timestamps: true,
     }
 );
+
+rideSchema.index({ captain: 1, status: 1, updatedAt: -1 });
+rideSchema.index({ user: 1, status: 1, updatedAt: -1 });
+rideSchema.index({ status: 1, negotiationStatus: 1, createdAt: -1 });
 
 const rideModel = mongoose.model("Ride", rideSchema);
 

@@ -21,7 +21,6 @@ const DriverSelected = (props) => {
 
   const [localCaptainArrived, setLocalCaptainArrived] = useState(false);
   const [arrivalCountdown, setArrivalCountdown] = useState(30);
-  const [canConfirmPickup, setCanConfirmPickup] = useState(false);
   const [confirmingPickup, setConfirmingPickup] = useState(false);
   const [userConfirmedPickup, setUserConfirmedPickup] = useState(false);
 
@@ -80,14 +79,15 @@ const DriverSelected = (props) => {
     }
 
     const arrivedAtValue = currentRide?.arrivedAtPickupAt;
-    const arrivedAtTime = arrivedAtValue ? new Date(arrivedAtValue).getTime() : Date.now();
+    const arrivedAtTime = arrivedAtValue
+      ? new Date(arrivedAtValue).getTime()
+      : Date.now();
 
     const updateCountdown = () => {
       const secondsPassed = Math.floor((Date.now() - arrivedAtTime) / 1000);
       const remaining = Math.max(30 - secondsPassed, 0);
 
       setArrivalCountdown(remaining);
-      setCanConfirmPickup(remaining <= 0);
 
       if (remaining <= 0 && countdownIntervalRef.current) {
         clearInterval(countdownIntervalRef.current);
@@ -231,7 +231,6 @@ const DriverSelected = (props) => {
       setLocalCaptainArrived(true);
       setUserConfirmedPickup(false);
       setArrivalCountdown(Number(payload?.waitSeconds || 30));
-      setCanConfirmPickup(false);
 
       alert("Tu conductor ya llegó al punto de recogida.");
     };
@@ -307,11 +306,6 @@ const DriverSelected = (props) => {
     try {
       setSendingMessage(true);
 
-      console.log("[USER CHAT] Enviando mensaje:", {
-        rideId: currentRide._id,
-        message: cleanText,
-      });
-
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/chat-message`,
         {
@@ -381,11 +375,6 @@ const DriverSelected = (props) => {
   const handleUserAtPickup = async () => {
     if (!currentRide?._id || confirmingPickup) return;
 
-    if (!canConfirmPickup) {
-      alert(`Espera ${arrivalCountdown} segundos para confirmar.`);
-      return;
-    }
-
     const token = localStorage.getItem("token");
 
     if (!token) {
@@ -416,13 +405,6 @@ const DriverSelected = (props) => {
       alert("Listo. Le avisamos al conductor que ya estás en el punto.");
     } catch (error) {
       console.error("Error confirmando recogida:", error);
-
-      const secondsRemaining = Number(error?.response?.data?.secondsRemaining);
-
-      if (Number.isFinite(secondsRemaining) && secondsRemaining > 0) {
-        setArrivalCountdown(secondsRemaining);
-        setCanConfirmPickup(false);
-      }
 
       alert(
         error?.response?.data?.message ||
@@ -539,9 +521,9 @@ const DriverSelected = (props) => {
     : userConfirmedPickup || currentRide?.userConfirmedAtPickup
     ? "Ya avisamos al conductor que estás en el punto."
     : localCaptainArrived
-    ? canConfirmPickup
-      ? "Confirma cuando ya estés en el punto de recogida."
-      : `Puedes confirmar en ${arrivalCountdown} segundos.`
+    ? arrivalCountdown > 0
+      ? `El contador termina en ${arrivalCountdown}s, pero puedes confirmar si ya estás en el punto.`
+      : "Confirma cuando ya estés en el punto de recogida."
     : `${color} ${vehicleLabel}`;
 
   return (
@@ -606,27 +588,27 @@ const DriverSelected = (props) => {
                   </p>
 
                   <p className="text-sm text-purple-700 mt-1 leading-5">
-                    Para evitar confusiones, espera el contador y confirma
-                    cuando ya estés en el punto.
+                    El contador es solo una referencia. Si ya estás en el punto,
+                    puedes confirmar de inmediato.
                   </p>
 
                   <button
                     type="button"
                     onClick={handleUserAtPickup}
-                    disabled={!canConfirmPickup || confirmingPickup}
+                    disabled={confirmingPickup}
                     className="w-full mt-4 rounded-2xl py-3.5 text-white font-black disabled:opacity-50"
                     style={{
-                      background: canConfirmPickup
-                        ? PURPLE_GRADIENT
-                        : "linear-gradient(135deg, #9CA3AF, #6B7280)",
+                      background: PURPLE_GRADIENT,
                     }}
                   >
-                    {confirmingPickup
-                      ? "Confirmando..."
-                      : canConfirmPickup
-                      ? "Ya estoy acá"
-                      : `Disponible en ${arrivalCountdown}s`}
+                    {confirmingPickup ? "Confirmando..." : "Ya estoy acá"}
                   </button>
+
+                  {arrivalCountdown > 0 && (
+                    <p className="text-xs text-purple-700 mt-2 text-center font-bold">
+                      Referencia: {arrivalCountdown}s
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

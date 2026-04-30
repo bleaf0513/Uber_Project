@@ -113,12 +113,12 @@ router.get(
     rideController.getCaptainHistory
 );
 
-router.get(
-    "/:rideId/offers",
-    authMiddleware.authUser,
-    param("rideId").isMongoId().withMessage("Invalid ride id"),
-    rideController.getRideOffers
-);
+/*
+  IMPORTANTE:
+  Estas rutas específicas deben ir antes de "/:rideId/offers",
+  para que Express no confunda textos como "start-ride"
+  o "user-at-pickup" con un rideId.
+*/
 
 router.post(
     "/arrived",
@@ -128,12 +128,17 @@ router.post(
 );
 
 router.post(
-    "/cancel-by-captain",
+    "/user-at-pickup",
+    authMiddleware.authUser,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    rideController.userAtPickup
+);
+
+router.post(
+    "/start-ride",
     authMiddleware.authCaptain,
     body("rideId").isMongoId().withMessage("Invalid ride id"),
-    body("reason").isString().notEmpty().withMessage("Invalid reason"),
-    body("notes").optional().isString().withMessage("Invalid notes"),
-    rideController.cancelByCaptain
+    rideController.startRide
 );
 
 router.post(
@@ -141,6 +146,47 @@ router.post(
     authMiddleware.authCaptain,
     body("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.endRide
+);
+
+router.post(
+    "/rate-captain",
+    authMiddleware.authUser,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("rating")
+        .isInt({ min: 1, max: 5 })
+        .withMessage("Rating must be between 1 and 5"),
+    body("comment")
+        .optional()
+        .isString()
+        .trim()
+        .isLength({ max: 500 })
+        .withMessage("Comment too long"),
+    rideController.rateCaptain
+);
+
+router.post(
+    "/rate-user",
+    authMiddleware.authCaptain,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("rating")
+        .isInt({ min: 1, max: 5 })
+        .withMessage("Rating must be between 1 and 5"),
+    body("comment")
+        .optional()
+        .isString()
+        .trim()
+        .isLength({ max: 500 })
+        .withMessage("Comment too long"),
+    rideController.rateUser
+);
+
+router.post(
+    "/cancel-by-captain",
+    authMiddleware.authCaptain,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("reason").isString().notEmpty().withMessage("Invalid reason"),
+    body("notes").optional().isString().withMessage("Invalid notes"),
+    rideController.cancelByCaptain
 );
 
 router.post(
@@ -183,6 +229,13 @@ router.post(
         next();
     },
     rideController.sendRideChatMessage
+);
+
+router.get(
+    "/:rideId/offers",
+    authMiddleware.authUser,
+    param("rideId").isMongoId().withMessage("Invalid ride id"),
+    rideController.getRideOffers
 );
 
 module.exports = router;
