@@ -692,6 +692,12 @@ module.exports.getAvailableForCaptain = async (req, res) => {
             });
         }
 
+        const captain = await captainModel.findById(captainId);
+
+        const captainLat = toNumber(captain?.location?.ltd);
+        const captainLng = toNumber(captain?.location?.lng);
+        const hasCaptainLocation = isValidLatLng(captainLat, captainLng);
+
         const maxAgeMinutes = 30;
         const createdAfter = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
 
@@ -750,7 +756,85 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                 continue;
             }
 
-            availableRides.push(ridePayloadWithActiveOffers(freshRide));
+            let driverToPickupKm = null;
+            let pickupToDestinationKm = null;
+
+            try {
+                const pickupCoordinates = await mapService.getAddressCoordinates(
+                    freshRide.pickup
+                );
+
+                if (
+                    pickupCoordinates &&
+                    Number.isFinite(pickupCoordinates.ltd) &&
+                    Number.isFinite(pickupCoordinates.lng)
+                ) {
+                    if (hasCaptainLocation) {
+                        const metersDriverToPickup = haversineMeters(
+                            captainLat,
+                            captainLng,
+                            pickupCoordinates.ltd,
+                            pickupCoordinates.lng
+                        );
+
+                        driverToPickupKm = Number(
+                            (metersDriverToPickup / 1000).toFixed(2)
+                        );
+                    }
+
+                    if (Number.isFinite(Number(freshRide.distance))) {
+                        pickupToDestinationKm = Number(
+                            Number(freshRide.distance).toFixed(2)
+                        );
+                    } else {
+                        const destinationCoordinates =
+                            await mapService.getAddressCoordinates(
+                                freshRide.destination
+                            );
+
+                        if (
+                            destinationCoordinates &&
+                            Number.isFinite(destinationCoordinates.ltd) &&
+                            Number.isFinite(destinationCoordinates.lng)
+                        ) {
+                            const metersPickupToDestination = haversineMeters(
+                                pickupCoordinates.ltd,
+                                pickupCoordinates.lng,
+                                destinationCoordinates.ltd,
+                                destinationCoordinates.lng
+                            );
+
+                            pickupToDestinationKm = Number(
+                                (metersPickupToDestination / 1000).toFixed(2)
+                            );
+                        }
+                    }
+                }
+            } catch (metricsError) {
+                console.warn(
+                    "[getAvailableForCaptain] No se pudieron calcular métricas:",
+                    metricsError?.message
+                );
+            }
+
+            const payload = ridePayloadWithActiveOffers(freshRide);
+
+            availableRides.push({
+                ...payload,
+                metrics: {
+                    driverToPickupKm,
+                    pickupToDestinationKm,
+                    driverToPickupText:
+                        Number.isFinite(driverToPickupKm) && driverToPickupKm > 0
+                            ? `${driverToPickupKm.toFixed(1)} km`
+                            : "-- km",
+                    pickupToDestinationText:
+                        Number.isFinite(pickupToDestinationKm) &&
+                        pickupToDestinationKm > 0
+                            ? `${pickupToDestinationKm.toFixed(1)} km`
+                            : "-- km",
+                },
+            });
         }
 
         return res.status(200).json({

@@ -18,7 +18,6 @@ import { getApiBaseUrl } from "../apiBase";
 import LiveTracking from "../../components/LiveTracking";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
-const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
 
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
@@ -56,6 +55,16 @@ const CaptainHome = () => {
       currency: "COP",
       maximumFractionDigits: 0,
     }).format(Math.ceil(number));
+  };
+
+  const formatKm = (value) => {
+    const number = Number(value);
+
+    if (!Number.isFinite(number) || number <= 0) {
+      return "-- km";
+    }
+
+    return `${number.toFixed(1)} km`;
   };
 
   const formatShortAddress = (address = "") => {
@@ -139,23 +148,17 @@ const CaptainHome = () => {
 
   const emitCaptainLocation = useCallback(
     (coords, source = "unknown") => {
-      if (!captain?._id || !socket?.connected) {
-        return;
-      }
+      if (!captain?._id || !socket?.connected) return;
 
       const ltd = Number(coords?.latitude);
       const lng = Number(coords?.longitude);
 
-      if (!Number.isFinite(ltd) || !Number.isFinite(lng)) {
-        return;
-      }
+      if (!Number.isFinite(ltd) || !Number.isFinite(lng)) return;
 
       const now = Date.now();
       const elapsed = now - lastLocationSentRef.current;
 
-      if (elapsed < 1500 && source !== "connect-refresh") {
-        return;
-      }
+      if (elapsed < 1500 && source !== "connect-refresh") return;
 
       lastLocationSentRef.current = now;
       setLocationReady(true);
@@ -174,17 +177,9 @@ const CaptainHome = () => {
   const getGeolocationErrorMessage = (error) => {
     const code = error?.code;
 
-    if (code === 1) {
-      return "Debes permitir el acceso a la ubicación para continuar.";
-    }
-
-    if (code === 2) {
-      return "No se pudo detectar tu ubicación. Activa el GPS del dispositivo.";
-    }
-
-    if (code === 3) {
-      return "La ubicación tardó demasiado. Intenta nuevamente.";
-    }
+    if (code === 1) return "Debes permitir el acceso a la ubicación para continuar.";
+    if (code === 2) return "No se pudo detectar tu ubicación. Activa el GPS del dispositivo.";
+    if (code === 3) return "La ubicación tardó demasiado. Intenta nuevamente.";
 
     return error?.message || "No se pudo obtener la ubicación.";
   };
@@ -339,7 +334,6 @@ const CaptainHome = () => {
       if (!captain?._id) return;
 
       const token = localStorage.getItem("token");
-
       if (!token) return;
 
       const response = await axios.get(
@@ -516,9 +510,7 @@ const CaptainHome = () => {
     try {
       const rideToOffer = targetRide || ride;
 
-      if (!rideToOffer?._id) {
-        return;
-      }
+      if (!rideToOffer?._id) return;
 
       setProcessing(true);
       setProcessingRideId(String(rideToOffer._id));
@@ -562,9 +554,7 @@ const CaptainHome = () => {
     try {
       const rideToConfirm = targetRide || ride;
 
-      if (!rideToConfirm?._id) {
-        return;
-      }
+      if (!rideToConfirm?._id) return;
 
       const currentFare =
         Number(
@@ -723,10 +713,20 @@ const CaptainHome = () => {
               const rideId = String(item?._id || "");
               const isThisProcessing = processing && processingRideId === rideId;
 
+              const driverToPickupKm =
+                item?.metrics?.driverToPickupKm ??
+                item?.metrics?.driverToPickup ??
+                null;
+
+              const pickupToDestinationKm =
+                item?.metrics?.pickupToDestinationKm ??
+                item?.distance ??
+                null;
+
               return (
                 <div
                   key={rideId}
-                  className="snap-start shrink-0 w-[86vw] max-w-[380px] rounded-[26px] bg-white shadow-2xl border border-purple-100 overflow-hidden"
+                  className="snap-start shrink-0 w-[86vw] max-w-[360px] rounded-[24px] bg-white shadow-2xl border border-purple-100 overflow-hidden"
                 >
                   <div
                     className="px-4 py-3 text-white"
@@ -734,20 +734,24 @@ const CaptainHome = () => {
                       background: PURPLE_GRADIENT,
                     }}
                   >
-                    <div className="flex items-center justify-between gap-3">
+                    <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <p className="text-[11px] uppercase tracking-wide text-white/80">
+                        <p className="text-[10px] uppercase tracking-wide text-white/80">
                           Nueva solicitud
                         </p>
 
-                        <h4 className="text-lg font-black truncate">
+                        <h4 className="text-base font-black truncate">
                           {getUserName(item)}
                         </h4>
+
+                        <p className="text-[11px] text-white/85 mt-1">
+                          Evalúa distancia y recorrido
+                        </p>
                       </div>
 
                       <div className="text-right shrink-0">
-                        <p className="text-[11px] uppercase tracking-wide text-white/80">
-                          Oferta usuario
+                        <p className="text-[10px] uppercase tracking-wide text-white/80">
+                          Oferta
                         </p>
 
                         <p className="text-lg font-black">
@@ -762,32 +766,54 @@ const CaptainHome = () => {
                     </div>
                   </div>
 
-                  <div className="p-4 space-y-3">
-                    <div className="grid grid-cols-[38px_1fr] gap-3">
-                      <div className="w-9 h-9 rounded-2xl bg-purple-100 flex items-center justify-center">
-                        <i className="ri-map-pin-range-fill text-purple-700 text-lg"></i>
-                      </div>
-
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-500">
-                          Recoger en
+                  <div className="p-3 space-y-3">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="rounded-2xl bg-purple-50 border border-purple-100 p-3">
+                        <p className="text-[10px] font-black text-purple-600 uppercase">
+                          Tú al cliente
                         </p>
-                        <p className="text-sm font-bold text-gray-900 truncate">
-                          {formatShortAddress(item?.pickup)}
+                        <p className="text-xl font-black text-purple-950 mt-1">
+                          {formatKm(driverToPickupKm)}
                         </p>
                       </div>
 
-                      <div className="w-9 h-9 rounded-2xl bg-purple-100 flex items-center justify-center">
-                        <i className="ri-flag-fill text-purple-700 text-lg"></i>
+                      <div className="rounded-2xl bg-purple-50 border border-purple-100 p-3">
+                        <p className="text-[10px] font-black text-purple-600 uppercase">
+                          Recorrido
+                        </p>
+                        <p className="text-xl font-black text-purple-950 mt-1">
+                          {formatKm(pickupToDestinationKm)}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <div className="flex items-start gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                          <i className="ri-map-pin-range-fill text-purple-700 text-base"></i>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black text-gray-500 uppercase">
+                            Recoger
+                          </p>
+                          <p className="text-xs font-bold text-gray-900 truncate">
+                            {formatShortAddress(item?.pickup)}
+                          </p>
+                        </div>
                       </div>
 
-                      <div className="min-w-0">
-                        <p className="text-xs font-bold text-gray-500">
-                          Llevar a
-                        </p>
-                        <p className="text-sm font-bold text-gray-900 truncate">
-                          {formatShortAddress(item?.destination)}
-                        </p>
+                      <div className="flex items-start gap-2">
+                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                          <i className="ri-flag-fill text-purple-700 text-base"></i>
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-[10px] font-black text-gray-500 uppercase">
+                            Llevar
+                          </p>
+                          <p className="text-xs font-bold text-gray-900 truncate">
+                            {formatShortAddress(item?.destination)}
+                          </p>
+                        </div>
                       </div>
                     </div>
 
@@ -801,7 +827,7 @@ const CaptainHome = () => {
                           background: PURPLE_GRADIENT,
                         }}
                       >
-                        {isThisProcessing ? "Enviando..." : "Aceptar"}
+                        {isThisProcessing ? "..." : "Aceptar"}
                       </button>
 
                       <button
