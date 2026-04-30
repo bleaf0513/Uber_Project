@@ -29,6 +29,7 @@ const CaptainHome = () => {
   const lastLocationSentRef = useRef(0);
   const availableRidesIntervalRef = useRef(null);
   const ignoredRideIdsRef = useRef(new Set());
+  const activeRideCheckRef = useRef(false);
 
   const navigate = useNavigate();
 
@@ -144,6 +145,66 @@ const CaptainHome = () => {
 
     return [option1, option2, option3];
   };
+
+  const goToActiveRide = useCallback(
+    (rideData) => {
+      if (!rideData?._id) return;
+
+      setRide(rideData);
+      setRidePopup(false);
+      setRideDetailsOpen(false);
+
+      setAvailableRides((prev) =>
+        prev.filter((item) => String(item?._id) !== String(rideData._id))
+      );
+
+      navigate("/captain-riding", {
+        state: {
+          ride: rideData,
+        },
+      });
+    },
+    [navigate]
+  );
+
+  const fetchCaptainActiveRide = useCallback(
+    async ({ redirect = false } = {}) => {
+      try {
+        const token = localStorage.getItem("token");
+
+        if (!token) return null;
+
+        const response = await axios.get(
+          `${getApiBaseUrl()}/rides/captain/active`,
+          {
+            headers: {
+              Authorization: `Bearer ${token}`,
+            },
+          }
+        );
+
+        const activeRide = response?.data?.ride || null;
+
+        if (activeRide?._id) {
+          if (redirect) {
+            goToActiveRide(activeRide);
+          }
+
+          return activeRide;
+        }
+
+        return null;
+      } catch (error) {
+        console.warn(
+          "[captain-home] No se pudo consultar carrera activa:",
+          error?.response?.data?.message || error?.message
+        );
+
+        return null;
+      }
+    },
+    [goToActiveRide]
+  );
 
   const upsertAvailableRide = useCallback((rideData) => {
     if (!rideData?._id) return;
@@ -397,6 +458,13 @@ const CaptainHome = () => {
       const token = localStorage.getItem("token");
       if (!token) return;
 
+      const activeRide = await fetchCaptainActiveRide({ redirect: false });
+
+      if (activeRide?._id) {
+        goToActiveRide(activeRide);
+        return;
+      }
+
       const response = await axios.get(
         `${getApiBaseUrl()}/rides/available-for-captain`,
         {
@@ -422,7 +490,16 @@ const CaptainHome = () => {
         error?.response?.data?.message || error?.message
       );
     }
-  }, [captain?._id]);
+  }, [captain?._id, fetchCaptainActiveRide, goToActiveRide]);
+
+  useEffect(() => {
+    if (!captain?._id) return;
+    if (activeRideCheckRef.current) return;
+
+    activeRideCheckRef.current = true;
+
+    fetchCaptainActiveRide({ redirect: true });
+  }, [captain?._id, fetchCaptainActiveRide]);
 
   useEffect(() => {
     if (!socket) return;
@@ -436,8 +513,12 @@ const CaptainHome = () => {
       }, 500);
 
       setTimeout(() => {
+        fetchCaptainActiveRide({ redirect: true });
+      }, 650);
+
+      setTimeout(() => {
         fetchAvailableRidesForCaptain();
-      }, 700);
+      }, 900);
     };
 
     const onDisconnect = () => {
@@ -474,19 +555,55 @@ const CaptainHome = () => {
     };
 
     const onRideOfferAccepted = (payload) => {
-      const acceptedRideId = String(payload?._id || payload?.rideId || "");
+      const acceptedRide = payload?.ride || payload;
+      const acceptedRideId = String(
+        acceptedRide?._id || payload?.rideId || ""
+      );
+
+      if (!acceptedRideId) return;
+
+      const acceptedCaptainId = String(
+        acceptedRide?.captain?._id || acceptedRide?.captain || ""
+      );
+
+      const currentCaptainId = String(captain?._id || "");
       const currentRideId = String(ride?._id || "");
 
-      if (acceptedRideId && currentRideId && acceptedRideId === currentRideId) {
-        setRide(payload);
-        setRidePopup(false);
-        setRideDetailsOpen(false);
+      const belongsToMe =
+        acceptedCaptainId && currentCaptainId
+          ? acceptedCaptainId === currentCaptainId
+          : true;
 
-        navigate("/captain-riding", {
-          state: { ride: payload },
-        });
-      } else if (acceptedRideId) {
-        removeAvailableRide(acceptedRideId);
+      if (belongsToMe) {
+        goToActiveRide(acceptedRide);
+        return;
+      }
+
+      if (currentRideId && acceptedRideId === currentRideId) {
+        goToActiveRide(acceptedRide);
+        return;
+      }
+
+      removeAvailableRide(acceptedRideId);
+    };
+
+    const onRideUpdated = (payload) => {
+      const updatedRide = payload?.ride || payload;
+      const updatedRideId = String(updatedRide?._id || payload?.rideId || "");
+
+      if (!updatedRideId) return;
+
+      const updatedCaptainId = String(
+        updatedRide?.captain?._id || updatedRide?.captain || ""
+      );
+
+      if (
+        updatedCaptainId &&
+        captain?._id &&
+        updatedCaptainId === String(captain._id) &&
+        ["accepted", "arrived", "ongoing"].includes(updatedRide?.status)
+      ) {
+        goToActiveRide(updatedRide);
       }
     };
 
@@ -496,6 +613,7 @@ const CaptainHome = () => {
     socket.off("ride-no-longer-available", onRideNoLongerAvailable);
     socket.off("ride-offer-rejected", onRideOfferRejected);
     socket.off("ride-offer-accepted", onRideOfferAccepted);
+    socket.off("ride-updated", onRideUpdated);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -503,6 +621,7 @@ const CaptainHome = () => {
     socket.on("ride-no-longer-available", onRideNoLongerAvailable);
     socket.on("ride-offer-rejected", onRideOfferRejected);
     socket.on("ride-offer-accepted", onRideOfferAccepted);
+    socket.on("ride-updated", onRideUpdated);
 
     if (socket.connected) {
       onConnect();
@@ -515,16 +634,19 @@ const CaptainHome = () => {
       socket.off("ride-no-longer-available", onRideNoLongerAvailable);
       socket.off("ride-offer-rejected", onRideOfferRejected);
       socket.off("ride-offer-accepted", onRideOfferAccepted);
+      socket.off("ride-updated", onRideUpdated);
     };
   }, [
     socket,
     emitCaptainJoin,
     requestAndEmitCurrentLocation,
     ride?._id,
-    navigate,
+    captain?._id,
+    fetchCaptainActiveRide,
     fetchAvailableRidesForCaptain,
     upsertAvailableRide,
     removeAvailableRide,
+    goToActiveRide,
   ]);
 
   useEffect(() => {

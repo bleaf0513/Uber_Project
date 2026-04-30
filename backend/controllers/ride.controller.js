@@ -557,10 +557,23 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
         const selectedOffer = currentOffers[offerIndex];
 
-        if (
-            selectedOffer.status !== "pending" ||
-            rideService.isOfferExpired(selectedOffer)
-        ) {
+        /*
+          CORRECCIÓN:
+          Antes se rechazaba la oferta apenas el reloj la marcaba como vencida.
+          Eso causaba falsos mensajes de "Esta oferta ya expiró" cuando el usuario
+          tocaba aceptar justo en el límite. Dejamos 10 segundos de tolerancia.
+        */
+        const OFFER_ACCEPT_GRACE_MS = 10000;
+
+        const offerExpiresAtMs = selectedOffer?.expiresAt
+            ? new Date(selectedOffer.expiresAt).getTime()
+            : null;
+
+        const offerReallyExpired =
+            Number.isFinite(offerExpiresAtMs) &&
+            Date.now() > offerExpiresAtMs + OFFER_ACCEPT_GRACE_MS;
+
+        if (selectedOffer.status !== "pending" || offerReallyExpired) {
             return res.status(400).json({
                 message: "Esta oferta ya expiró o no está disponible.",
             });
@@ -688,6 +701,11 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
             data: populatedRide,
         });
 
+        emitToCaptain(acceptedCaptain, {
+            event: "ride-updated",
+            data: populatedRide,
+        });
+
         for (const offer of populatedRide.driverOffers || []) {
             const offerCaptainId = String(offer.captain?._id || offer.captain);
 
@@ -704,6 +722,11 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
         emitToUser(populatedRide.user, {
             event: "ride-confirmed",
+            data: populatedRide,
+        });
+
+        emitToUser(populatedRide.user, {
+            event: "ride-updated",
             data: populatedRide,
         });
 
@@ -746,6 +769,49 @@ module.exports.getMyActiveRide = async (req, res) => {
     } catch (err) {
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+/*
+  NUEVO:
+  Permite que el conductor recupere su carrera activa si actualiza la página
+  o entra directamente a /captain-riding.
+*/
+module.exports.getCaptainActiveRide = async (req, res) => {
+    try {
+        const captainId = req.captain?._id;
+
+        if (!captainId) {
+            return res.status(401).json({
+                message: "Conductor no autenticado.",
+            });
+        }
+
+        const ride = await rideModel
+            .findOne({
+                captain: captainId,
+                status: {
+                    $in: ["accepted", "arrived", "ongoing", "completed"],
+                },
+                cancelledAt: null,
+                cancelledBy: null,
+            })
+            .sort({ updatedAt: -1 })
+            .populate("user")
+            .populate("captain")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        return res.status(200).json({
+            ride: ride || null,
+        });
+    } catch (err) {
+        console.error("[getCaptainActiveRide] error:", err);
+
+        return res.status(500).json({
+            message:
+                err.message ||
+                "Error consultando carrera activa del conductor.",
         });
     }
 };
@@ -1249,16 +1315,25 @@ module.exports.arrived = async (req, res) => {
 
         let notified = false;
 
+        const payload = {
+            rideId: updatedRide._id,
+            message: "Tu conductor ya llegó al punto de recogida.",
+            waitSeconds: 30,
+            ride: updatedRide,
+        };
+
         if (updatedRide.user?.socketId) {
-            notified = sendMessageToSocketId(updatedRide.user.socketId, {
+            const notifiedMain = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "captain-arrived",
-                data: {
-                    rideId: updatedRide._id,
-                    message: "Tu conductor ya llegó al punto de recogida.",
-                    waitSeconds: 30,
-                    ride: updatedRide,
-                },
+                data: payload,
             });
+
+            const notifiedUpdate = sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "ride-updated",
+                data: updatedRide,
+            });
+
+            notified = Boolean(notifiedMain || notifiedUpdate);
         }
 
         return res.status(200).json({
@@ -1324,15 +1399,36 @@ module.exports.userAtPickup = async (req, res) => {
 
         let captainNotified = false;
 
+        /*
+          CORRECCIÓN:
+          Conservamos el evento viejo user-confirmed-at-pickup
+          y enviamos también user-confirmed-pickup + ride-updated.
+          Así el conductor tiene más probabilidad de recibir el estado aunque
+          haya reconectado o el frontend escuche otro nombre de evento.
+        */
         if (updatedRide?.captain?.socketId) {
-            captainNotified = sendMessageToSocketId(updatedRide.captain.socketId, {
+            const payload = {
+                rideId: updatedRide._id,
+                message: "El usuario confirmó que ya está en el punto.",
+                ride: updatedRide,
+            };
+
+            const notifiedMain = sendMessageToSocketId(updatedRide.captain.socketId, {
                 event: "user-confirmed-at-pickup",
-                data: {
-                    rideId: updatedRide._id,
-                    message: "El usuario confirmó que ya está en el punto.",
-                    ride: updatedRide,
-                },
+                data: payload,
             });
+
+            const notifiedAlias = sendMessageToSocketId(updatedRide.captain.socketId, {
+                event: "user-confirmed-pickup",
+                data: payload,
+            });
+
+            const notifiedUpdate = sendMessageToSocketId(updatedRide.captain.socketId, {
+                event: "ride-updated",
+                data: updatedRide,
+            });
+
+            captainNotified = Boolean(notifiedMain || notifiedAlias || notifiedUpdate);
         }
 
         return res.status(200).json({
@@ -1392,15 +1488,24 @@ module.exports.startRide = async (req, res) => {
 
         let userNotified = false;
 
+        const payload = {
+            rideId: updatedRide._id,
+            message: "Tu viaje ha iniciado.",
+            ride: updatedRide,
+        };
+
         if (updatedRide.user?.socketId) {
-            userNotified = sendMessageToSocketId(updatedRide.user.socketId, {
+            const notifiedMain = sendMessageToSocketId(updatedRide.user.socketId, {
                 event: "ride-started",
-                data: {
-                    rideId: updatedRide._id,
-                    message: "Tu viaje ha iniciado.",
-                    ride: updatedRide,
-                },
+                data: payload,
             });
+
+            const notifiedUpdate = sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "ride-updated",
+                data: updatedRide,
+            });
+
+            userNotified = Boolean(notifiedMain || notifiedUpdate);
         }
 
         return res.status(200).json({
@@ -1437,15 +1542,24 @@ module.exports.endRide = async (req, res) => {
         let notified = false;
 
         if (ride?.user?.socketId) {
-            notified = sendMessageToSocketId(ride.user.socketId, {
+            const payload = {
+                rideId: ride._id,
+                message: "Tu viaje finalizó. Califica al conductor.",
+                ride,
+                shouldRateCaptain: true,
+            };
+
+            const notifiedMain = sendMessageToSocketId(ride.user.socketId, {
                 event: "ride-ended",
-                data: {
-                    rideId: ride._id,
-                    message: "Tu viaje finalizó. Califica al conductor.",
-                    ride,
-                    shouldRateCaptain: true,
-                },
+                data: payload,
             });
+
+            const notifiedUpdate = sendMessageToSocketId(ride.user.socketId, {
+                event: "ride-updated",
+                data: ride,
+            });
+
+            notified = Boolean(notifiedMain || notifiedUpdate);
         }
 
         return res.status(200).json({

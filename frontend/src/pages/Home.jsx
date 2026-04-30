@@ -48,6 +48,7 @@ function Home() {
   const [nearbyDrivers, setNearbyDrivers] = useState([]);
   const [offerNow, setOfferNow] = useState(Date.now());
   const [captainArrived, setCaptainArrived] = useState(false);
+  const [acceptingOfferId, setAcceptingOfferId] = useState(null);
   const [etaInfo, setEtaInfo] = useState({
     etaText: "",
     distanceText: "",
@@ -69,6 +70,69 @@ function Home() {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const navigate = useNavigate();
 
+  const normalizeSocketRide = useCallback((payload) => {
+    return payload?.data?.ride || payload?.ride || payload?.data || payload || null;
+  }, []);
+
+  const syncRideState = useCallback(
+    (rideData) => {
+      if (!rideData?._id) return;
+
+      setRide((prev) => ({
+        ...(prev || {}),
+        ...(rideData || {}),
+        _id: rideData?._id || prev?._id,
+        pickup: rideData?.pickup || prev?.pickup || pickup,
+        destination: rideData?.destination || prev?.destination || destination,
+      }));
+
+      if (rideData?.status === "accepted") {
+        setVehicleFound(false);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+        setDriverSelected(true);
+        setCaptainArrived(false);
+      }
+
+      if (rideData?.status === "arrived" || rideData?.arrivedAtPickup) {
+        setVehicleFound(false);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+        setDriverSelected(true);
+        setCaptainArrived(true);
+      }
+
+      if (rideData?.status === "ongoing") {
+        setCaptainArrived(false);
+        setDriverSelected(false);
+        setVehicleFound(false);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+
+        navigate("/riding", {
+          state: {
+            ride: rideData,
+          },
+        });
+      }
+
+      if (rideData?.status === "completed") {
+        setCaptainArrived(false);
+        setDriverSelected(false);
+        setVehicleFound(false);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+
+        navigate("/riding", {
+          state: {
+            ride: rideData,
+          },
+        });
+      }
+    },
+    [pickup, destination, navigate]
+  );
+
   useEffect(() => {
     const timer = setInterval(() => {
       setOfferNow(Date.now());
@@ -86,6 +150,12 @@ function Home() {
           userType: "user",
           userId: user._id,
         });
+
+        if (ride?._id) {
+          socket.emit("join-ride", {
+            rideId: ride._id,
+          });
+        }
       } catch (error) {
         console.error("Error enviando join del usuario:", error);
       }
@@ -118,45 +188,46 @@ function Home() {
       socket.io?.off?.("reconnect", onReconnect);
       socket.off("socket-joined", onSocketJoined);
     };
-  }, [socket, user?._id]);
+  }, [socket, user?._id, ride?._id]);
 
   useEffect(() => {
     if (!socket) return;
 
     const onRideStarted = (payload) => {
-  const nextRide = payload?.ride || payload || ride;
+      const nextRide = normalizeSocketRide(payload) || ride;
 
-  if (!nextRide?._id) {
-    console.error("[user socket] ride-started sin ride válido:", payload);
-    alert("El viaje inició, pero no se pudo cargar la información completa.");
-    return;
-  }
+      if (!nextRide?._id) {
+        console.error("[user socket] ride-started sin ride válido:", payload);
+        alert("El viaje inició, pero no se pudo cargar la información completa.");
+        return;
+      }
 
-  setRide(nextRide);
-  setCaptainArrived(false);
-  setDriverSelected(false);
-  setVehicleFound(false);
-  setConfirmRidePanel(false);
-  setVehiclePanel(false);
+      syncRideState(nextRide);
 
-  navigate("/riding", {
-    state: {
-      ride: nextRide,
-    },
-  });
-};
+      navigate("/riding", {
+        state: {
+          ride: nextRide,
+        },
+      });
+    };
 
-    const onRideConfirmed = (rideData) => {
+    const onRideConfirmed = (payload) => {
+      const rideData = normalizeSocketRide(payload);
+
+      if (!rideData?._id) return;
+
       setCaptainArrived(false);
       setVehicleFound(false);
       setConfirmRidePanel(false);
       setVehiclePanel(false);
       setDriverSelected(true);
-      setRide(rideData || null);
+      setRide(rideData);
     };
 
-    const onRideOfferUpdated = (rideData) => {
-      const nextRide = rideData || null;
+    const onRideOfferUpdated = (payload) => {
+      const nextRide = normalizeSocketRide(payload);
+
+      if (!nextRide?._id) return;
 
       setRide((prev) => ({
         ...(prev || {}),
@@ -166,12 +237,27 @@ function Home() {
         destination: nextRide?.destination || prev?.destination || destination,
       }));
 
-      if (nextRide?._id) {
+      if (
+        nextRide?.status === "pending" ||
+        nextRide?.status === "negotiating"
+      ) {
         setVehiclePanel(false);
         setConfirmRidePanel(false);
         setDriverSelected(false);
         setVehicleFound(true);
       }
+
+      if (nextRide?.status === "accepted") {
+        syncRideState(nextRide);
+      }
+    };
+
+    const onRideUpdated = (payload) => {
+      const nextRide = normalizeSocketRide(payload);
+
+      if (!nextRide?._id) return;
+
+      syncRideState(nextRide);
     };
 
     const onNearbyCaptains = (drivers) => {
@@ -216,8 +302,10 @@ function Home() {
       console.log("[user socket] captain-arrived:", payload);
       setCaptainArrived(true);
 
-      if (payload?.ride) {
-        setRide(payload.ride);
+      const nextRide = normalizeSocketRide(payload);
+
+      if (nextRide?._id) {
+        setRide(nextRide);
       }
 
       alert(payload?.message || "Tu conductor ya llegó al punto de recogida.");
@@ -239,6 +327,7 @@ function Home() {
     socket.on("ride-started", onRideStarted);
     socket.on("ride-confirmed", onRideConfirmed);
     socket.on("ride-offer-updated", onRideOfferUpdated);
+    socket.on("ride-updated", onRideUpdated);
     socket.on("nearby-captains", onNearbyCaptains);
     socket.on("captain-location-updated", onCaptainLocationUpdated);
     socket.on("captain-arrived", onCaptainArrived);
@@ -248,12 +337,21 @@ function Home() {
       socket.off("ride-started", onRideStarted);
       socket.off("ride-confirmed", onRideConfirmed);
       socket.off("ride-offer-updated", onRideOfferUpdated);
+      socket.off("ride-updated", onRideUpdated);
       socket.off("nearby-captains", onNearbyCaptains);
       socket.off("captain-location-updated", onCaptainLocationUpdated);
       socket.off("captain-arrived", onCaptainArrived);
       socket.off("ride-cancelled-by-captain", onRideCancelledByCaptain);
     };
-  }, [socket, navigate, pickup, destination]);
+  }, [
+    socket,
+    navigate,
+    pickup,
+    destination,
+    ride,
+    normalizeSocketRide,
+    syncRideState,
+  ]);
 
   const normalizeSuggestionRows = (rows) =>
     (Array.isArray(rows) ? rows : [])
@@ -557,10 +655,7 @@ function Home() {
     const offers = ride?.activeDriverOffers || ride?.driverOffers || [];
 
     return (Array.isArray(offers) ? offers : [])
-      .filter((offer) => {
-        if (offer?.status !== "pending") return false;
-        return getOfferExpiresAtMs(offer) > offerNow;
-      })
+      .filter((offer) => offer?.status === "pending")
       .map((offer) => ({
         ...offer,
         remainingMs: Math.max(0, getOfferExpiresAtMs(offer) - offerNow),
@@ -653,9 +748,18 @@ function Home() {
     "car";
 
   const acceptOffer = async (captainId) => {
+    const selectedOffer = liveOffers.find((offer) => {
+      const offerCaptainId = String(offer?.captain?._id || offer?.captain || "");
+      return offerCaptainId === String(captainId);
+    });
+
+    const offerKey = selectedOffer?._id || captainId;
+
     try {
       const token = localStorage.getItem("token");
-      if (!ride?._id || !captainId) return;
+      if (!ride?._id || !captainId || !token) return;
+
+      setAcceptingOfferId(offerKey);
 
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/respond-offer`,
@@ -669,18 +773,66 @@ function Home() {
         }
       );
 
-      setRide(response?.data || ride);
-      setVehicleFound(false);
-      setDriverSelected(true);
-      setCaptainArrived(false);
+      const nextRide = response?.data?.ride || response?.data || ride;
+
+      if (nextRide?._id) {
+        setRide(nextRide);
+        setVehicleFound(false);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+        setDriverSelected(true);
+        setCaptainArrived(false);
+        return;
+      }
+
+      alert("Oferta aceptada, pero no se pudo cargar la información completa.");
     } catch (error) {
       console.error("Error aceptando oferta:", error);
 
-      alert(
+      const message =
         error?.response?.data?.message ||
-          error?.message ||
-          "No se pudo aceptar la oferta."
-      );
+        error?.message ||
+        "No se pudo aceptar la oferta.";
+
+      try {
+        const token = localStorage.getItem("token");
+
+        if (token) {
+          const activeResponse = await axios.get(
+            `${getApiBaseUrl()}/rides/my-active`,
+            {
+              headers: {
+                Authorization: `Bearer ${token}`,
+              },
+            }
+          );
+
+          const activeRide = activeResponse?.data?.ride || null;
+
+          if (
+            activeRide?._id &&
+            String(activeRide._id) === String(ride?._id) &&
+            activeRide?.status === "accepted"
+          ) {
+            setRide(activeRide);
+            setVehicleFound(false);
+            setConfirmRidePanel(false);
+            setVehiclePanel(false);
+            setDriverSelected(true);
+            setCaptainArrived(false);
+            return;
+          }
+        }
+      } catch (activeError) {
+        console.warn(
+          "No se pudo validar carrera activa después de error:",
+          activeError?.response?.data?.message || activeError?.message
+        );
+      }
+
+      alert(message);
+    } finally {
+      setAcceptingOfferId(null);
     }
   };
 
@@ -895,7 +1047,9 @@ function Home() {
                       </p>
 
                       <p className="text-xs text-orange-600 font-semibold mt-1">
-                        Expira en {secondsLeft}s
+                        {secondsLeft > 0
+                          ? `Expira en ${secondsLeft}s`
+                          : "Validando disponibilidad"}
                       </p>
                     </div>
 
@@ -927,13 +1081,20 @@ function Home() {
 
                     <button
                       type="button"
+                      disabled={
+                        acceptingOfferId === (offer?._id || captainId) ||
+                        !captainId
+                      }
                       onClick={() => acceptOffer(captainId)}
-                      className="w-full rounded-2xl py-2.5 text-sm font-semibold text-white"
+                      className="w-full rounded-2xl py-2.5 text-sm font-semibold text-white disabled:opacity-60"
                       style={{
-                        background: "linear-gradient(to right, #1d976c, #93f9b9)",
+                        background:
+                          "linear-gradient(to right, #1d976c, #93f9b9)",
                       }}
                     >
-                      Aceptar
+                      {acceptingOfferId === (offer?._id || captainId)
+                        ? "Aceptando..."
+                        : "Aceptar"}
                     </button>
                   </div>
                 </div>

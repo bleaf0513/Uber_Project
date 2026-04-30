@@ -95,6 +95,17 @@ router.get(
     rideController.getMyActiveRide
 );
 
+/*
+  NUEVO:
+  Esta ruta permite que el conductor recupere la carrera activa
+  si actualiza la página o si entra directo a /captain-riding.
+*/
+router.get(
+    "/captain/active",
+    authMiddleware.authCaptain,
+    rideController.getCaptainActiveRide
+);
+
 router.get(
     "/available-for-captain",
     authMiddleware.authCaptain,
