@@ -1,249 +1,185 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
 
-const rideController = require('../controllers/ride.controller');
-const { body, query, param } = require('express-validator');
-const authMiddleware = require('../middlewares/auth.middleware');
+const rideController = require("../controllers/ride.controller");
+const { body, query, param } = require("express-validator");
+const authMiddleware = require("../middlewares/auth.middleware");
 
 const VALID_VEHICLE_TYPES = [
-    'motorcycle',
-    'car',
-    'light_cargo',
-    'van',
-    'truck',
-    'motocarro',
-    'pickup',
-    'moving',
+    "motorcycle",
+    "car",
+    "light_cargo",
+    "van",
+    "truck",
+    "motocarro",
+    "pickup",
+    "moving",
 ];
 
 router.post(
-    '/create',
+    "/create",
     authMiddleware.authUser,
-    body('pickup')
+    body("pickup")
         .isString()
         .notEmpty()
         .isLength({ min: 3 })
-        .withMessage('Invalid Pickup Address'),
-    body('destination')
+        .withMessage("Invalid Pickup Address"),
+    body("destination")
         .isString()
         .notEmpty()
         .isLength({ min: 3 })
-        .withMessage('Invalid Destination Address'),
-    body('vehicle')
+        .withMessage("Invalid Destination Address"),
+    body("vehicle")
         .isString()
         .notEmpty()
         .isIn(VALID_VEHICLE_TYPES)
-        .withMessage('Invalid Vehicle Type'),
-    body('offeredFare')
+        .withMessage("Invalid Vehicle Type"),
+    body("offeredFare")
         .optional()
         .isNumeric()
-        .withMessage('Invalid offered fare'),
+        .withMessage("Invalid offered fare"),
     rideController.createRide
 );
 
 router.get(
-    '/fare',
+    "/fare",
     authMiddleware.authUser,
-    query('pickup')
+    query("pickup")
         .isString()
         .notEmpty()
         .isLength({ min: 3 })
-        .withMessage('Invalid Pickup Address'),
-    query('destination')
+        .withMessage("Invalid Pickup Address"),
+    query("destination")
         .isString()
         .notEmpty()
         .isLength({ min: 3 })
-        .withMessage('Invalid Destination Address'),
+        .withMessage("Invalid Destination Address"),
     rideController.getFare
 );
 
 router.post(
-    '/cancel',
+    "/cancel",
     authMiddleware.authUser,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.cancelRide
 );
 
 router.post(
-    '/confirm',
+    "/confirm",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.confirmRide
 );
 
 router.post(
-    '/captain-offer',
+    "/captain-offer",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
-    body('price')
-        .isNumeric()
-        .withMessage('Invalid price'),
-    body('message')
-        .optional()
-        .isString()
-        .withMessage('Invalid message'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("price").isNumeric().withMessage("Invalid price"),
+    body("message").optional().isString().withMessage("Invalid message"),
     rideController.captainOfferRide
 );
 
 router.post(
-    '/respond-offer',
+    "/respond-offer",
     authMiddleware.authUser,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
-    body('captainId')
-        .isMongoId()
-        .withMessage('Invalid captain id'),
-    body('action')
-        .isIn(['accepted', 'rejected'])
-        .withMessage('Invalid action'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("captainId").isMongoId().withMessage("Invalid captain id"),
+    body("action").isIn(["accepted", "rejected"]).withMessage("Invalid action"),
     rideController.userRespondToCaptainOffer
 );
 
 router.get(
-    '/my-active',
+    "/my-active",
     authMiddleware.authUser,
     rideController.getMyActiveRide
 );
 
-/*
-  VIAJES ABIERTOS PARA CONDUCTORES
-
-  Esta ruta permite que el conductor consulte automáticamente
-  servicios disponibles aunque no le haya llegado el socket "new-ride",
-  o cuando el usuario rechaza una oferta y el viaje sigue abierto.
-
-  IMPORTANTE:
-  Debe ir antes de '/:rideId/offers' para que Express no confunda
-  "available-for-captain" con un rideId.
-*/
 router.get(
-    '/available-for-captain',
+    "/available-for-captain",
     authMiddleware.authCaptain,
     rideController.getAvailableForCaptain
 );
 
-/*
-  ESTADÍSTICAS REALES DEL CONDUCTOR
-
-  Esta ruta alimenta el panel CaptainDetails.jsx:
-  - horas online
-  - distancia total
-  - ganancias
-  - efectivo
-  - transferencias
-  - pendiente por liquidar
-  - viajes finalizados
-
-  IMPORTANTE:
-  Debe ir antes de '/:rideId/offers' para que Express no confunda
-  "captain-stats" con un rideId.
-*/
 router.get(
-    '/captain-stats',
+    "/captain-stats",
     authMiddleware.authCaptain,
     rideController.getCaptainStats
 );
 
 router.get(
-    '/:rideId/offers',
+    "/captain-history",
+    authMiddleware.authCaptain,
+    rideController.getCaptainHistory
+);
+
+router.get(
+    "/:rideId/offers",
     authMiddleware.authUser,
-    param('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
+    param("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.getRideOffers
 );
 
 router.post(
-    '/arrived',
+    "/arrived",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.arrived
 );
 
 router.post(
-    '/cancel-by-captain',
+    "/cancel-by-captain",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
-    body('reason')
-        .isString()
-        .notEmpty()
-        .withMessage('Invalid reason'),
-    body('notes')
-        .optional()
-        .isString()
-        .withMessage('Invalid notes'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("reason").isString().notEmpty().withMessage("Invalid reason"),
+    body("notes").optional().isString().withMessage("Invalid notes"),
     rideController.cancelByCaptain
 );
 
 router.post(
-    '/end-ride',
+    "/end-ride",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
     rideController.endRide
 );
 
-/*
-  CHAT USUARIO -> CONDUCTOR
-  Esta ruta la usa el usuario desde DriverSelected.jsx.
-*/
 router.post(
-    '/chat-message',
+    "/chat-message",
     authMiddleware.authUser,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
-    body('message')
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("message")
         .isString()
         .trim()
         .notEmpty()
         .isLength({ max: 1000 })
-        .withMessage('Invalid message'),
-    body('senderType')
+        .withMessage("Invalid message"),
+    body("senderType")
         .optional()
-        .isIn(['user'])
-        .withMessage('Invalid sender type'),
+        .isIn(["user"])
+        .withMessage("Invalid sender type"),
     (req, res, next) => {
-        req.body.senderType = 'user';
+        req.body.senderType = "user";
         next();
     },
     rideController.sendRideChatMessage
 );
 
-/*
-  CHAT CONDUCTOR -> USUARIO
-  Esta ruta la usa el conductor desde CaptainRiding.jsx.
-*/
 router.post(
-    '/captain-chat-message',
+    "/captain-chat-message",
     authMiddleware.authCaptain,
-    body('rideId')
-        .isMongoId()
-        .withMessage('Invalid ride id'),
-    body('message')
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("message")
         .isString()
         .trim()
         .notEmpty()
         .isLength({ max: 1000 })
-        .withMessage('Invalid message'),
-    body('senderType')
+        .withMessage("Invalid message"),
+    body("senderType")
         .optional()
-        .isIn(['captain'])
-        .withMessage('Invalid sender type'),
+        .isIn(["captain"])
+        .withMessage("Invalid sender type"),
     (req, res, next) => {
-        req.body.senderType = 'captain';
+        req.body.senderType = "captain";
         next();
     },
     rideController.sendRideChatMessage

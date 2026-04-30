@@ -61,18 +61,45 @@ function normalizeDistanceToKm(value) {
         return null;
     }
 
-    /*
-      IMPORTANTE:
-      Si distance viene como 2517, eso normalmente son metros.
-      2517 metros = 2.52 km.
-
-      Si viene como 2.5, asumimos que ya viene en kilómetros.
-    */
     if (number > 300) {
         return Number((number / 1000).toFixed(2));
     }
 
     return Number(number.toFixed(2));
+}
+
+function normalizePaymentMethod(ride) {
+    const raw = String(
+        ride?.paymentMethod ||
+            ride?.paymentType ||
+            ride?.payment_method ||
+            ride?.method ||
+            ride?.payment ||
+            ""
+    )
+        .trim()
+        .toLowerCase();
+
+    if (
+        raw.includes("cash") ||
+        raw.includes("efectivo") ||
+        raw.includes("contado")
+    ) {
+        return "cash";
+    }
+
+    if (
+        raw.includes("transfer") ||
+        raw.includes("nequi") ||
+        raw.includes("bancolombia") ||
+        raw.includes("daviplata") ||
+        raw.includes("digital") ||
+        raw.includes("tarjeta")
+    ) {
+        return "transfer";
+    }
+
+    return "unknown";
 }
 
 function emitToUser(userLike, payload) {
@@ -93,9 +120,11 @@ function ridePayloadWithActiveOffers(rideDoc) {
 
     return {
         ...rideObject,
-        activeDriverOffers: rideService.getActiveDriverOffers(rideDoc).map((offer) =>
-            typeof offer?.toObject === "function" ? offer.toObject() : offer
-        ),
+        activeDriverOffers: rideService
+            .getActiveDriverOffers(rideDoc)
+            .map((offer) =>
+                typeof offer?.toObject === "function" ? offer.toObject() : offer
+            ),
     };
 }
 
@@ -910,40 +939,6 @@ module.exports.getCaptainStats = async (req, res) => {
             .sort({ updatedAt: -1 })
             .populate("user", "fullname email phone");
 
-        const normalizePaymentMethod = (ride) => {
-            const raw = String(
-                ride?.paymentMethod ||
-                    ride?.paymentType ||
-                    ride?.payment_method ||
-                    ride?.method ||
-                    ride?.payment ||
-                    ""
-            )
-                .trim()
-                .toLowerCase();
-
-            if (
-                raw.includes("cash") ||
-                raw.includes("efectivo") ||
-                raw.includes("contado")
-            ) {
-                return "cash";
-            }
-
-            if (
-                raw.includes("transfer") ||
-                raw.includes("nequi") ||
-                raw.includes("bancolombia") ||
-                raw.includes("daviplata") ||
-                raw.includes("digital") ||
-                raw.includes("tarjeta")
-            ) {
-                return "transfer";
-            }
-
-            return "unknown";
-        };
-
         let totalTrips = 0;
         let totalDistanceKm = 0;
         let totalEarning = 0;
@@ -984,6 +979,7 @@ module.exports.getCaptainStats = async (req, res) => {
                 paymentMethod,
                 status: ride.status,
                 completedAt: ride.completedAt || ride.updatedAt,
+                createdAt: ride.createdAt,
                 user: ride.user || null,
             };
         });
@@ -1025,6 +1021,70 @@ module.exports.getCaptainStats = async (req, res) => {
 
         return res.status(500).json({
             message: err.message || "Error consultando estadísticas del conductor.",
+        });
+    }
+};
+
+module.exports.getCaptainHistory = async (req, res) => {
+    try {
+        const captainId = req.captain?._id;
+
+        if (!captainId) {
+            return res.status(401).json({
+                message: "Conductor no autenticado.",
+            });
+        }
+
+        const limitParam = Number(req.query?.limit || 50);
+        const limit = Math.min(
+            Number.isFinite(limitParam) && limitParam > 0 ? limitParam : 50,
+            100
+        );
+
+        const completedRides = await rideModel
+            .find({
+                captain: captainId,
+                status: "completed",
+            })
+            .sort({ updatedAt: -1 })
+            .limit(limit)
+            .populate("user", "fullname email phone");
+
+        const rides = completedRides.map((ride) => {
+            const fare =
+                Number(
+                    ride?.fare ??
+                        ride?.offeredFare ??
+                        ride?.suggestedFare ??
+                        0
+                ) || 0;
+
+            const distanceKm = normalizeDistanceToKm(ride?.distance) || 0;
+
+            return {
+                _id: ride._id,
+                pickup: ride.pickup,
+                destination: ride.destination,
+                fare: Math.round(fare),
+                distanceKm: Number(distanceKm.toFixed(2)),
+                paymentMethod: normalizePaymentMethod(ride),
+                status: ride.status,
+                completedAt: ride.completedAt || ride.updatedAt,
+                createdAt: ride.createdAt,
+                user: ride.user || null,
+            };
+        });
+
+        return res.status(200).json({
+            ok: true,
+            count: rides.length,
+            rides,
+        });
+    } catch (err) {
+        console.error("[getCaptainHistory] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error consultando historial del conductor.",
         });
     }
 };

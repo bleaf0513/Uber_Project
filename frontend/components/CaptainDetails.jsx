@@ -15,10 +15,15 @@ const CaptainDetails = () => {
 
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summaryMode, setSummaryMode] = useState("summary");
+
   const [statsLoading, setStatsLoading] = useState(false);
   const [statsError, setStatsError] = useState("");
   const [driverStats, setDriverStats] = useState(null);
-  const [driverRides, setDriverRides] = useState([]);
+  const [todayRides, setTodayRides] = useState([]);
+
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState("");
+  const [historyRides, setHistoryRides] = useState([]);
 
   const firstname = captain?.fullname?.firstname ?? "";
   const lastname = captain?.fullname?.lastname ?? "";
@@ -48,6 +53,12 @@ const CaptainDetails = () => {
   const totalTrips = Number(stats?.totalTrips ?? 0);
   const pendingToSettle = Number(stats?.pendingToSettle ?? 0);
 
+  const averageFare =
+    totalTrips > 0 ? Math.round(totalEarning / totalTrips) : 0;
+
+  const averageKm =
+    totalTrips > 0 ? Number((totalDistanceKm / totalTrips).toFixed(1)) : 0;
+
   const hasAnyStats =
     hoursOnline > 0 ||
     totalDistanceKm > 0 ||
@@ -72,6 +83,55 @@ const CaptainDetails = () => {
     });
   }, []);
 
+  const dateFormatter = useMemo(() => {
+    return new Intl.DateTimeFormat("es-CO", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  }, []);
+
+  const getUserName = (ride) => {
+    const user = ride?.user || {};
+    const fullname = user?.fullname || {};
+
+    return (
+      [fullname?.firstname, fullname?.lastname].filter(Boolean).join(" ") ||
+      user?.name ||
+      "Usuario"
+    );
+  };
+
+  const getPaymentLabel = (method) => {
+    if (method === "cash") return "Efectivo";
+    if (method === "transfer") return "Transferencia";
+    return "No registrado";
+  };
+
+  const getPaymentIcon = (method) => {
+    if (method === "cash") return "ri-cash-line";
+    if (method === "transfer") return "ri-bank-card-line";
+    return "ri-question-line";
+  };
+
+  const getPaymentClass = (method) => {
+    if (method === "cash") return "text-emerald-600";
+    if (method === "transfer") return "text-cyan-600";
+    return "text-orange-600";
+  };
+
+  const formatDate = (value) => {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "Fecha no disponible";
+    }
+
+    return dateFormatter.format(date);
+  };
+
   const fetchCaptainStats = async () => {
     try {
       setStatsLoading(true);
@@ -91,7 +151,7 @@ const CaptainDetails = () => {
       });
 
       setDriverStats(response?.data?.stats || null);
-      setDriverRides(
+      setTodayRides(
         Array.isArray(response?.data?.rides) ? response.data.rides : []
       );
     } catch (error) {
@@ -104,8 +164,43 @@ const CaptainDetails = () => {
     }
   };
 
+  const fetchCaptainHistory = async () => {
+    try {
+      setHistoryLoading(true);
+      setHistoryError("");
+
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        setHistoryError("No hay sesión activa del conductor.");
+        return;
+      }
+
+      const response = await axios.get(
+        `${getApiBaseUrl()}/rides/captain-history?limit=50`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setHistoryRides(
+        Array.isArray(response?.data?.rides) ? response.data.rides : []
+      );
+    } catch (error) {
+      setHistoryError(
+        error?.response?.data?.message ||
+          "No se pudo cargar el historial de viajes."
+      );
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchCaptainStats();
+    fetchCaptainHistory();
 
     const interval = setInterval(() => {
       fetchCaptainStats();
@@ -117,7 +212,12 @@ const CaptainDetails = () => {
   const openSummary = (mode) => {
     setSummaryMode(mode);
     setSummaryOpen(true);
-    fetchCaptainStats();
+
+    if (mode === "history") {
+      fetchCaptainHistory();
+    } else {
+      fetchCaptainStats();
+    }
   };
 
   const closeSummary = () => {
@@ -211,18 +311,80 @@ const CaptainDetails = () => {
     );
   };
 
+  const RideHistoryCard = ({ item }) => {
+    return (
+      <div className="rounded-[22px] border border-gray-200 bg-white p-4 shadow-sm">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-lg font-black text-gray-950">
+              {currencyFormatter.format(item?.fare || 0)}
+            </p>
+
+            <p className="text-xs font-bold text-gray-500 mt-0.5">
+              {formatDate(item?.completedAt || item?.createdAt)}
+            </p>
+          </div>
+
+          <div className="text-right shrink-0">
+            <div className="inline-flex items-center gap-1 rounded-full bg-purple-50 text-purple-700 px-3 py-1 text-xs font-black">
+              <i className="ri-route-line"></i>
+              {numberFormatter.format(item?.distanceKm || 0)} km
+            </div>
+
+            <div className="mt-2 inline-flex items-center gap-1 rounded-full bg-gray-100 text-gray-700 px-3 py-1 text-xs font-black">
+              <i className={`${getPaymentIcon(item?.paymentMethod)} ${getPaymentClass(item?.paymentMethod)}`}></i>
+              {getPaymentLabel(item?.paymentMethod)}
+            </div>
+          </div>
+        </div>
+
+        <div className="mt-3 rounded-2xl bg-gray-50 border border-gray-100 p-3 space-y-2">
+          <div className="flex items-start gap-2">
+            <span className="mt-1 w-4 h-4 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-purple-700" />
+            </span>
+
+            <p className="text-xs font-bold text-gray-800 leading-4">
+              {item?.pickup || "Origen no disponible"}
+            </p>
+          </div>
+
+          <div className="flex items-start gap-2">
+            <span className="mt-1 w-4 h-4 rounded-full bg-fuchsia-100 flex items-center justify-center shrink-0">
+              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-700" />
+            </span>
+
+            <p className="text-xs font-bold text-gray-800 leading-4">
+              {item?.destination || "Destino no disponible"}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-gray-500 truncate">
+            Cliente: <span className="font-black">{getUserName(item)}</span>
+          </p>
+
+          <span className="rounded-full bg-emerald-50 text-emerald-700 px-3 py-1 text-[11px] font-black">
+            Finalizado
+          </span>
+        </div>
+      </div>
+    );
+  };
+
   const modalTitle =
-    summaryMode === "settlement"
-      ? "Liquidación del día"
+    summaryMode === "history"
+      ? "Historial de viajes"
       : summaryMode === "statistics"
       ? "Estadísticas"
       : "Resumen operativo";
 
   const modalSubtitle =
-    summaryMode === "settlement"
-      ? "Recaudo, transferencias y pendiente por liquidar."
+    summaryMode === "history"
+      ? "Últimos viajes finalizados por el conductor."
       : summaryMode === "statistics"
-      ? "Rendimiento general del conductor."
+      ? "Rendimiento, promedios y operación del día."
       : "Control rápido de viajes, recaudo y operación.";
 
   return (
@@ -302,7 +464,7 @@ const CaptainDetails = () => {
                         </p>
                         <p className="text-xs text-gray-600 mt-1 leading-5">
                           Cuando finalices viajes, aquí aparecerán kilómetros,
-                          ganancias y liquidación real.
+                          ganancias y resumen real.
                         </p>
                       </div>
                     </div>
@@ -347,13 +509,16 @@ const CaptainDetails = () => {
                     Menú del conductor
                   </h4>
                   <p className="text-xs text-gray-500">
-                    Consulta tu operación sin ocupar toda la pantalla.
+                    Operación, rendimiento e historial.
                   </p>
                 </div>
 
                 <button
                   type="button"
-                  onClick={fetchCaptainStats}
+                  onClick={() => {
+                    fetchCaptainStats();
+                    fetchCaptainHistory();
+                  }}
                   className="w-11 h-11 rounded-2xl flex items-center justify-center border border-purple-100"
                   style={{
                     background: PURPLE_SOFT,
@@ -361,7 +526,7 @@ const CaptainDetails = () => {
                 >
                   <i
                     className={`ri-refresh-line text-2xl text-purple-700 ${
-                      statsLoading ? "animate-spin" : ""
+                      statsLoading || historyLoading ? "animate-spin" : ""
                     }`}
                   ></i>
                 </button>
@@ -385,10 +550,10 @@ const CaptainDetails = () => {
                   />
 
                   <ActionButton
-                    icon="ri-wallet-3-line"
-                    title="Liquidación"
-                    subtitle={currencyFormatter.format(pendingToSettle)}
-                    onClick={() => openSummary("settlement")}
+                    icon="ri-history-line"
+                    title="Historial"
+                    subtitle={`${historyRides.length} viajes`}
+                    onClick={() => openSummary("history")}
                   />
                 </div>
               </div>
@@ -399,7 +564,7 @@ const CaptainDetails = () => {
 
       {summaryOpen && (
         <div className="fixed inset-0 z-[95] bg-black/50 flex items-end">
-          <div className="w-full rounded-t-[30px] bg-white shadow-2xl max-h-[82vh] overflow-y-auto">
+          <div className="w-full rounded-t-[30px] bg-white shadow-2xl max-h-[84vh] overflow-y-auto">
             <div className="flex justify-center py-3">
               <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
             </div>
@@ -425,99 +590,154 @@ const CaptainDetails = () => {
                 </button>
               </div>
 
-              <div
-                className="mt-5 rounded-[26px] p-4 text-white"
-                style={{
-                  background: PURPLE_GRADIENT,
-                }}
-              >
-                <p className="text-white/80 text-xs font-black uppercase">
-                  Ganancia de hoy
-                </p>
-                <p className="text-3xl font-black mt-1">
-                  {currencyFormatter.format(totalEarning)}
-                </p>
-
-                <div className="grid grid-cols-2 gap-3 mt-4">
-                  <div className="rounded-2xl bg-white/15 p-3">
-                    <p className="text-white/70 text-xs">Servicios</p>
-                    <p className="text-xl font-black mt-1">{totalTrips}</p>
-                  </div>
-
-                  <div className="rounded-2xl bg-white/15 p-3">
-                    <p className="text-white/70 text-xs">Horas online</p>
-                    <p className="text-xl font-black mt-1">
-                      {numberFormatter.format(hoursOnline)} h
+              {summaryMode !== "history" && (
+                <>
+                  <div
+                    className="mt-5 rounded-[26px] p-4 text-white"
+                    style={{
+                      background: PURPLE_GRADIENT,
+                    }}
+                  >
+                    <p className="text-white/80 text-xs font-black uppercase">
+                      Ganancia de hoy
                     </p>
-                  </div>
-                </div>
-              </div>
+                    <p className="text-3xl font-black mt-1">
+                      {currencyFormatter.format(totalEarning)}
+                    </p>
 
-              <div className="mt-4 space-y-3">
-                <SummaryRow
-                  icon="ri-route-line"
-                  label="Distancia total"
-                  value={`${numberFormatter.format(totalDistanceKm)} km`}
-                />
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                      <div className="rounded-2xl bg-white/15 p-3">
+                        <p className="text-white/70 text-xs">Servicios</p>
+                        <p className="text-xl font-black mt-1">{totalTrips}</p>
+                      </div>
 
-                <SummaryRow
-                  icon="ri-cash-line"
-                  label="Efectivo recogido"
-                  value={currencyFormatter.format(cashCollected)}
-                  colorClass="text-emerald-600"
-                />
-
-                <SummaryRow
-                  icon="ri-bank-card-line"
-                  label="Transferencias"
-                  value={currencyFormatter.format(transferCollected)}
-                  colorClass="text-cyan-600"
-                />
-
-                <SummaryRow
-                  icon="ri-question-line"
-                  label="Método no registrado"
-                  value={currencyFormatter.format(unknownPaymentCollected)}
-                  colorClass="text-orange-600"
-                />
-
-                <SummaryRow
-                  icon="ri-wallet-3-line"
-                  label="Pendiente por liquidar"
-                  value={currencyFormatter.format(pendingToSettle)}
-                  colorClass="text-purple-700"
-                />
-              </div>
-
-              {driverRides.length > 0 && (
-                <div className="mt-5">
-                  <h4 className="text-base font-black text-gray-950 mb-3">
-                    Servicios finalizados hoy
-                  </h4>
-
-                  <div className="space-y-2">
-                    {driverRides.slice(0, 8).map((item) => (
-                      <div
-                        key={item._id}
-                        className="rounded-2xl border border-gray-200 bg-gray-50 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-3">
-                          <p className="text-sm font-black text-gray-950">
-                            {currencyFormatter.format(item.fare || 0)}
-                          </p>
-
-                          <p className="text-xs font-bold text-gray-500">
-                            {numberFormatter.format(item.distanceKm || 0)} km
-                          </p>
-                        </div>
-
-                        <p className="text-xs text-gray-600 mt-2 truncate">
-                          {item.pickup}
-                        </p>
-                        <p className="text-xs text-gray-600 truncate">
-                          {item.destination}
+                      <div className="rounded-2xl bg-white/15 p-3">
+                        <p className="text-white/70 text-xs">Horas online</p>
+                        <p className="text-xl font-black mt-1">
+                          {numberFormatter.format(hoursOnline)} h
                         </p>
                       </div>
+                    </div>
+                  </div>
+
+                  {summaryMode === "statistics" && (
+                    <div className="grid grid-cols-2 gap-3 mt-4">
+                      <div className="rounded-2xl bg-gray-950 text-white p-4">
+                        <p className="text-white/60 text-xs font-bold">
+                          Promedio por viaje
+                        </p>
+                        <p className="text-xl font-black mt-1">
+                          {currencyFormatter.format(averageFare)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-2xl bg-gray-950 text-white p-4">
+                        <p className="text-white/60 text-xs font-bold">
+                          Km promedio
+                        </p>
+                        <p className="text-xl font-black mt-1">
+                          {numberFormatter.format(averageKm)} km
+                        </p>
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="mt-4 space-y-3">
+                    <SummaryRow
+                      icon="ri-route-line"
+                      label="Distancia total"
+                      value={`${numberFormatter.format(totalDistanceKm)} km`}
+                    />
+
+                    <SummaryRow
+                      icon="ri-cash-line"
+                      label="Efectivo recogido"
+                      value={currencyFormatter.format(cashCollected)}
+                      colorClass="text-emerald-600"
+                    />
+
+                    <SummaryRow
+                      icon="ri-bank-card-line"
+                      label="Transferencias"
+                      value={currencyFormatter.format(transferCollected)}
+                      colorClass="text-cyan-600"
+                    />
+
+                    <SummaryRow
+                      icon="ri-question-line"
+                      label="Método no registrado"
+                      value={currencyFormatter.format(unknownPaymentCollected)}
+                      colorClass="text-orange-600"
+                    />
+
+                    <SummaryRow
+                      icon="ri-wallet-3-line"
+                      label="Pendiente por liquidar"
+                      value={currencyFormatter.format(pendingToSettle)}
+                      colorClass="text-purple-700"
+                    />
+                  </div>
+
+                  {todayRides.length > 0 && (
+                    <div className="mt-5">
+                      <h4 className="text-base font-black text-gray-950 mb-3">
+                        Servicios de hoy
+                      </h4>
+
+                      <div className="space-y-2">
+                        {todayRides.slice(0, 5).map((item) => (
+                          <RideHistoryCard key={item._id} item={item} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {summaryMode === "history" && (
+                <div className="mt-5">
+                  {historyLoading && (
+                    <div className="rounded-2xl bg-purple-50 border border-purple-100 p-4 text-center">
+                      <i className="ri-loader-4-line animate-spin text-2xl text-purple-700"></i>
+                      <p className="text-sm font-bold text-purple-800 mt-2">
+                        Cargando historial...
+                      </p>
+                    </div>
+                  )}
+
+                  {!!historyError && (
+                    <div className="rounded-2xl bg-red-50 border border-red-100 p-4">
+                      <p className="text-sm font-bold text-red-700">
+                        {historyError}
+                      </p>
+                    </div>
+                  )}
+
+                  {!historyLoading && !historyError && historyRides.length === 0 && (
+                    <div
+                      className="rounded-[24px] border border-purple-100 p-5 text-center"
+                      style={{
+                        background: PURPLE_SOFT,
+                      }}
+                    >
+                      <div className="w-14 h-14 rounded-2xl bg-white flex items-center justify-center mx-auto">
+                        <i className="ri-history-line text-3xl text-purple-700"></i>
+                      </div>
+
+                      <h4 className="text-lg font-black text-gray-950 mt-3">
+                        Sin historial todavía
+                      </h4>
+
+                      <p className="text-sm text-gray-600 mt-2 leading-5">
+                        Cuando finalices viajes, aquí aparecerá el histórico de
+                        servicios realizados.
+                      </p>
+                    </div>
+                  )}
+
+                  <div className="space-y-3">
+                    {historyRides.map((item) => (
+                      <RideHistoryCard key={item._id} item={item} />
                     ))}
                   </div>
                 </div>
