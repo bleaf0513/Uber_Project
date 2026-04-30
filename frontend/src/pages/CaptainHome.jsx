@@ -19,9 +19,11 @@ import LiveTracking from "../../components/LiveTracking";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+const DARK_GLASS = "rgba(17, 24, 39, 0.94)";
 
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
+  const rideDetailsRef = useRef(null);
   const locationWatchIdRef = useRef(null);
   const locationIntervalRef = useRef(null);
   const lastLocationSentRef = useRef(0);
@@ -34,6 +36,7 @@ const CaptainHome = () => {
   const { socket } = useContext(SocketContext);
 
   const [ridePopup, setRidePopup] = useState(false);
+  const [rideDetailsOpen, setRideDetailsOpen] = useState(false);
   const [ride, setRide] = useState(null);
   const [availableRides, setAvailableRides] = useState([]);
 
@@ -58,11 +61,23 @@ const CaptainHome = () => {
     }).format(Math.ceil(number));
   };
 
+  const formatCOPShort = (value) => {
+    const number = Number(value) || 0;
+
+    return new Intl.NumberFormat("es-CO", {
+      maximumFractionDigits: 0,
+    }).format(Math.ceil(number));
+  };
+
   const formatKm = (value) => {
     const number = Number(value);
 
     if (!Number.isFinite(number) || number <= 0) {
       return "-- km";
+    }
+
+    if (number < 1) {
+      return `${Math.round(number * 1000)} m`;
     }
 
     return `${number.toFixed(1)} km`;
@@ -92,6 +107,42 @@ const CaptainHome = () => {
       user?.name ||
       "Usuario"
     );
+  };
+
+  const getRideFare = (rideData) => {
+    return Number(
+      rideData?.offeredFare ?? rideData?.fare ?? rideData?.suggestedFare ?? 0
+    );
+  };
+
+  const getDriverToPickupKm = (rideData) => {
+    return (
+      rideData?.metrics?.driverToPickupKm ??
+      rideData?.metrics?.driverToPickup ??
+      null
+    );
+  };
+
+  const getPickupToDestinationKm = (rideData) => {
+    return (
+      rideData?.metrics?.pickupToDestinationKm ??
+      rideData?.distance ??
+      null
+    );
+  };
+
+  const getQuickOfferValues = (rideData) => {
+    const base = getRideFare(rideData);
+
+    if (!base || base <= 0) {
+      return [8000, 10000, 12000];
+    }
+
+    const option1 = Math.ceil((base * 1.08) / 500) * 500;
+    const option2 = Math.ceil((base * 1.18) / 500) * 500;
+    const option3 = Math.ceil((base * 1.3) / 500) * 500;
+
+    return [option1, option2, option3];
   };
 
   const upsertAvailableRide = useCallback((rideData) => {
@@ -124,6 +175,7 @@ const CaptainHome = () => {
 
       if (String(ride?._id || "") === String(rideId)) {
         setRidePopup(false);
+        setRideDetailsOpen(false);
         setRide(null);
       }
     },
@@ -403,10 +455,6 @@ const CaptainHome = () => {
       if (!payloadRideId) return;
 
       removeAvailableRide(payloadRideId);
-
-      if (payload?.message) {
-        console.log("[captain-home] ride no disponible:", payload.message);
-      }
     };
 
     const onRideOfferRejected = (payload) => {
@@ -415,6 +463,7 @@ const CaptainHome = () => {
       alert("El usuario rechazó tu oferta para este viaje.");
 
       setRidePopup(false);
+      setRideDetailsOpen(false);
       setRide(null);
 
       if (rideId) {
@@ -431,6 +480,7 @@ const CaptainHome = () => {
       if (acceptedRideId && currentRideId && acceptedRideId === currentRideId) {
         setRide(payload);
         setRidePopup(false);
+        setRideDetailsOpen(false);
 
         navigate("/captain-riding", {
           state: { ride: payload },
@@ -542,6 +592,7 @@ const CaptainHome = () => {
 
       setRide(updatedRide);
       setRidePopup(false);
+      setRideDetailsOpen(false);
 
       setAvailableRides((prev) =>
         prev.filter((item) => String(item._id) !== String(rideToOffer._id))
@@ -565,13 +616,7 @@ const CaptainHome = () => {
 
       if (!rideToConfirm?._id) return;
 
-      const currentFare =
-        Number(
-          rideToConfirm?.offeredFare ??
-            rideToConfirm?.fare ??
-            rideToConfirm?.suggestedFare ??
-            0
-        ) || 0;
+      const currentFare = getRideFare(rideToConfirm);
 
       if (!currentFare || currentFare <= 0) {
         alert("No hay un valor válido para aceptar este viaje.");
@@ -596,11 +641,30 @@ const CaptainHome = () => {
     });
   };
 
-  const openCounterOffer = (rideData) => {
+  const sendQuickOffer = async (value) => {
+    if (!ride?._id) return;
+
+    await sendRideOffer({
+      targetRide: ride,
+      price: Number(value || 0),
+      message: "Oferta rápida del conductor.",
+    });
+  };
+
+  const openCustomCounterOffer = () => {
+    if (!ride?._id) return;
+    setRidePopup(true);
+  };
+
+  const openRideDetails = (rideData) => {
     if (!rideData?._id) return;
 
     setRide(rideData);
-    setRidePopup(true);
+    setRideDetailsOpen(true);
+  };
+
+  const closeRideDetails = () => {
+    setRideDetailsOpen(false);
   };
 
   const ignoreRide = (rideData = null) => {
@@ -612,6 +676,7 @@ const CaptainHome = () => {
     }
 
     setRidePopup(false);
+    setRideDetailsOpen(false);
     setRide(null);
   };
 
@@ -649,6 +714,26 @@ const CaptainHome = () => {
       }
     },
     [ridePopup]
+  );
+
+  useGSAP(
+    () => {
+      if (rideDetailsOpen) {
+        gsap.to(rideDetailsRef.current, {
+          y: "0%",
+          delay: 0.05,
+          duration: 0.25,
+          ease: "power2.out",
+        });
+      } else {
+        gsap.to(rideDetailsRef.current, {
+          y: "110%",
+          duration: 0.2,
+          ease: "power2.inOut",
+        });
+      }
+    },
+    [rideDetailsOpen]
   );
 
   const gpsBlocked = !locationReady || locationPermission !== "granted";
@@ -696,7 +781,7 @@ const CaptainHome = () => {
         <LiveTracking />
       </div>
 
-      {availableRides.length > 0 && (
+      {availableRides.length > 0 && !rideDetailsOpen && (
         <div className="absolute top-[92px] left-0 right-0 bottom-[43%] z-40 px-3 pointer-events-none">
           <div className="flex items-center justify-between px-1 mb-2 pointer-events-auto">
             <div
@@ -717,170 +802,95 @@ const CaptainHome = () => {
             </button>
           </div>
 
-          <div className="h-full overflow-y-auto space-y-2 pr-1 pb-3 pointer-events-auto">
+          <div className="h-full overflow-y-auto space-y-2 pr-1 pb-6 pointer-events-auto overscroll-contain">
             {availableRides.map((item) => {
               const rideId = String(item?._id || "");
-              const isThisProcessing = processing && processingRideId === rideId;
-
-              const driverToPickupKm =
-                item?.metrics?.driverToPickupKm ??
-                item?.metrics?.driverToPickup ??
-                null;
-
-              const pickupToDestinationKm =
-                item?.metrics?.pickupToDestinationKm ??
-                item?.distance ??
-                null;
+              const driverToPickupKm = getDriverToPickupKm(item);
+              const pickupToDestinationKm = getPickupToDestinationKm(item);
+              const fare = getRideFare(item);
 
               return (
-                <div
+                <button
                   key={rideId}
-                  className="w-full rounded-[22px] bg-white shadow-2xl border border-purple-100 overflow-hidden"
+                  type="button"
+                  onClick={() => openRideDetails(item)}
+                  className="w-full text-left rounded-[20px] bg-white/95 shadow-xl border border-purple-100 overflow-hidden active:scale-[0.99] transition"
                 >
                   <div
-                    className="h-1.5"
+                    className="h-1"
                     style={{
                       background: PURPLE_GRADIENT,
                     }}
                   />
 
                   <div className="p-3">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="inline-flex rounded-xl bg-purple-50 px-3 py-1 text-[11px] font-black text-purple-800 mb-1">
-                          Nueva solicitud
+                    <div className="flex items-start gap-3">
+                      <div className="w-12 shrink-0 flex flex-col items-center">
+                        <div className="w-10 h-10 rounded-full bg-purple-100 flex items-center justify-center">
+                          <i className="ri-user-3-fill text-purple-700 text-lg"></i>
                         </div>
 
-                        <h4 className="text-lg font-black text-gray-950 leading-5 truncate">
-                          {getUserName(item)}
-                        </h4>
-
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <i className="ri-star-fill text-yellow-500 text-base"></i>
-                          <span className="text-xs font-black text-gray-900">
+                        <div className="mt-1 flex items-center gap-0.5">
+                          <i className="ri-star-fill text-yellow-500 text-[11px]"></i>
+                          <span className="text-[10px] font-black text-gray-800">
                             5.0
                           </span>
-                          <span className="text-xs text-gray-500">
-                            Central Go
+                        </div>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-black text-purple-700">
+                              {formatKm(driverToPickupKm)} de ti
+                            </p>
+
+                            <h4 className="text-base font-black text-gray-950 truncate">
+                              {getUserName(item)}
+                            </h4>
+                          </div>
+
+                          <div className="text-right shrink-0">
+                            <p className="text-xl font-black text-purple-900 leading-6">
+                              {formatCOP(fare)}
+                            </p>
+                            <p className="text-[10px] font-bold text-gray-500">
+                              viaje {formatKm(pickupToDestinationKm)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 space-y-1">
+                          <div className="flex items-start gap-1.5">
+                            <span className="mt-1 w-4 h-4 rounded-full bg-purple-100 flex items-center justify-center shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-700" />
+                            </span>
+                            <p className="text-xs font-bold text-gray-800 leading-4 line-clamp-1">
+                              {formatShortAddress(item?.pickup)}
+                            </p>
+                          </div>
+
+                          <div className="flex items-start gap-1.5">
+                            <span className="mt-1 w-4 h-4 rounded-full bg-fuchsia-100 flex items-center justify-center shrink-0">
+                              <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-700" />
+                            </span>
+                            <p className="text-xs font-bold text-gray-800 leading-4 line-clamp-1">
+                              {formatShortAddress(item?.destination)}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="rounded-full bg-purple-50 px-2.5 py-1 text-[10px] font-black text-purple-700">
+                            Tocar para ver detalle
                           </span>
+
+                          <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
                         </div>
                       </div>
-
-                      <div className="text-right shrink-0">
-                        <p className="text-[10px] font-black text-gray-500 uppercase">
-                          Oferta
-                        </p>
-
-                        <p className="text-2xl font-black text-purple-900 leading-7">
-                          {formatCOP(
-                            item?.offeredFare ??
-                              item?.fare ??
-                              item?.suggestedFare ??
-                              0
-                          )}
-                        </p>
-
-                        <p className="text-[11px] font-bold text-gray-500 mt-0.5">
-                          {formatKm(driverToPickupKm)} hasta cliente
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mt-3">
-                      <div
-                        className="rounded-2xl border border-purple-100 p-2.5"
-                        style={{
-                          background: PURPLE_SOFT,
-                        }}
-                      >
-                        <p className="text-[9px] font-black text-purple-700 uppercase">
-                          Tú al cliente
-                        </p>
-                        <p className="text-lg font-black text-gray-950 mt-0.5">
-                          {formatKm(driverToPickupKm)}
-                        </p>
-                      </div>
-
-                      <div
-                        className="rounded-2xl border border-purple-100 p-2.5"
-                        style={{
-                          background: PURPLE_SOFT,
-                        }}
-                      >
-                        <p className="text-[9px] font-black text-purple-700 uppercase">
-                          Recorrido
-                        </p>
-                        <p className="text-lg font-black text-gray-950 mt-0.5">
-                          {formatKm(pickupToDestinationKm)}
-                        </p>
-                      </div>
-                    </div>
-
-                    <div className="mt-3 space-y-1.5">
-                      <div className="flex items-start gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
-                          <i className="ri-map-pin-range-fill text-purple-700 text-base"></i>
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-black text-gray-500 uppercase">
-                            Recoger
-                          </p>
-                          <p className="text-xs font-bold text-gray-950 truncate">
-                            {formatShortAddress(item?.pickup)}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="flex items-start gap-2">
-                        <div className="w-8 h-8 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
-                          <i className="ri-flag-fill text-purple-700 text-base"></i>
-                        </div>
-
-                        <div className="min-w-0">
-                          <p className="text-[9px] font-black text-gray-500 uppercase">
-                            Llevar
-                          </p>
-                          <p className="text-xs font-bold text-gray-950 truncate">
-                            {formatShortAddress(item?.destination)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-2 mt-3">
-                      <button
-                        type="button"
-                        disabled={processing}
-                        onClick={() => ignoreRide(item)}
-                        className="rounded-2xl py-2.5 bg-gray-100 text-gray-900 text-xs font-black disabled:opacity-60"
-                      >
-                        Ocultar
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={processing}
-                        onClick={() => openCounterOffer(item)}
-                        className="rounded-2xl py-2.5 bg-purple-100 text-purple-800 text-xs font-black disabled:opacity-60"
-                      >
-                        Ofertar
-                      </button>
-
-                      <button
-                        type="button"
-                        disabled={isThisProcessing}
-                        onClick={() => confirmRide(item)}
-                        className="rounded-2xl py-2.5 text-white text-xs font-black disabled:opacity-60"
-                        style={{
-                          background: PURPLE_GRADIENT,
-                        }}
-                      >
-                        {isThisProcessing ? "..." : "Aceptar"}
-                      </button>
                     </div>
                   </div>
-                </div>
+                </button>
               );
             })}
           </div>
@@ -951,7 +961,7 @@ const CaptainHome = () => {
         </div>
       )}
 
-      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-50 shadow-2xl max-h-[42%]">
+      <div className="bg-white absolute bottom-0 w-screen rounded-t-[24px] overflow-y-auto overflow-x-hidden z-30 shadow-2xl max-h-[42%]">
         <div className="pt-2">
           <div className="flex justify-center py-2">
             <div className="w-16 h-1.5 rounded-full bg-gray-300"></div>
@@ -1084,20 +1094,208 @@ const CaptainHome = () => {
             </div>
           </div>
         </div>
+      </div>
 
-        <div
-          ref={ridePopupRef}
-          className="fixed z-[60] bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-scroll shadow-2xl"
-        >
-          <RidePopup
-            setRidePopup={setRidePopup}
-            ride={ride}
-            confirmRide={() => confirmRide(ride)}
-            onIgnoreRide={() => ignoreRide(ride)}
-            onCounterOffer={handleCounterOffer}
-            isSubmitting={processing}
-          />
-        </div>
+      <div
+        ref={rideDetailsRef}
+        className="fixed z-[80] left-0 right-0 bottom-0 translate-y-[110%] rounded-t-[28px] overflow-hidden shadow-2xl"
+        style={{
+          background: DARK_GLASS,
+        }}
+      >
+        {ride && (
+          <div className="max-h-[82vh] overflow-y-auto pb-5">
+            <div className="flex justify-center py-3">
+              <div className="w-16 h-1.5 rounded-full bg-white/30"></div>
+            </div>
+
+            <div className="px-5 pb-2 flex items-center justify-between">
+              <div>
+                <p className="text-white/60 text-xs font-black uppercase">
+                  Solicitud de viaje
+                </p>
+                <h2 className="text-white text-xl font-black">
+                  {formatCOP(getRideFare(ride))}
+                </h2>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeRideDetails}
+                className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center"
+              >
+                <i className="ri-close-line text-white text-2xl"></i>
+              </button>
+            </div>
+
+            <div className="mx-5 mt-3 rounded-[24px] bg-white/10 border border-white/10 p-4">
+              <div className="flex items-start gap-3">
+                <div className="w-12 h-12 rounded-full bg-white/15 flex items-center justify-center shrink-0">
+                  <i className="ri-user-3-fill text-white text-xl"></i>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <h3 className="text-white text-lg font-black truncate">
+                    {getUserName(ride)}
+                  </h3>
+
+                  <div className="flex items-center gap-2 mt-1">
+                    <i className="ri-star-fill text-yellow-400"></i>
+                    <span className="text-white text-sm font-black">5.0</span>
+                    <span className="text-white/60 text-sm">Central Go</span>
+                  </div>
+                </div>
+
+                <div className="text-right">
+                  <p className="text-white/60 text-xs font-black">
+                    A recoger
+                  </p>
+                  <p className="text-white text-base font-black">
+                    {formatKm(getDriverToPickupKm(ride))}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="mx-5 mt-3 rounded-[24px] bg-white p-4">
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div
+                  className="rounded-2xl border border-purple-100 p-3"
+                  style={{ background: PURPLE_SOFT }}
+                >
+                  <p className="text-[10px] text-purple-700 font-black uppercase">
+                    Tú al cliente
+                  </p>
+                  <p className="text-2xl font-black text-gray-950 mt-1">
+                    {formatKm(getDriverToPickupKm(ride))}
+                  </p>
+                </div>
+
+                <div
+                  className="rounded-2xl border border-purple-100 p-3"
+                  style={{ background: PURPLE_SOFT }}
+                >
+                  <p className="text-[10px] text-purple-700 font-black uppercase">
+                    Recorrido
+                  </p>
+                  <p className="text-2xl font-black text-gray-950 mt-1">
+                    {formatKm(getPickupToDestinationKm(ride))}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+                    <i className="ri-map-pin-range-fill text-purple-700"></i>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase text-gray-500">
+                      Punto A - Recoger
+                    </p>
+                    <p className="text-sm font-black text-gray-950 leading-5">
+                      {formatShortAddress(ride?.pickup)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-2xl bg-fuchsia-100 flex items-center justify-center shrink-0">
+                    <i className="ri-flag-fill text-fuchsia-700"></i>
+                  </div>
+
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-black uppercase text-gray-500">
+                      Punto B - Destino
+                    </p>
+                    <p className="text-sm font-black text-gray-950 leading-5">
+                      {formatShortAddress(ride?.destination)}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="px-5 mt-4">
+              <button
+                type="button"
+                disabled={processing && processingRideId === String(ride?._id)}
+                onClick={() => confirmRide(ride)}
+                className="w-full rounded-2xl py-4 text-white text-base font-black disabled:opacity-60"
+                style={{
+                  background: PURPLE_GRADIENT,
+                }}
+              >
+                {processing && processingRideId === String(ride?._id)
+                  ? "Enviando..."
+                  : `Aceptar por ${formatCOP(getRideFare(ride))}`}
+              </button>
+            </div>
+
+            <div className="px-5 mt-4">
+              <p className="text-white/70 text-sm font-bold text-center mb-3">
+                Ofrece tu tarifa
+              </p>
+
+              <div className="grid grid-cols-3 gap-2">
+                {getQuickOfferValues(ride).map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    disabled={processing}
+                    onClick={() => sendQuickOffer(value)}
+                    className="rounded-2xl py-3 bg-white/10 border border-white/10 text-white text-sm font-black disabled:opacity-60"
+                  >
+                    {formatCOPShort(value)}
+                  </button>
+                ))}
+              </div>
+
+              <button
+                type="button"
+                onClick={openCustomCounterOffer}
+                disabled={processing}
+                className="w-full mt-3 rounded-2xl py-3 bg-white text-purple-800 text-sm font-black disabled:opacity-60"
+              >
+                Personalizar oferta
+              </button>
+
+              <div className="grid grid-cols-2 gap-2 mt-3">
+                <button
+                  type="button"
+                  disabled={processing}
+                  onClick={() => ignoreRide(ride)}
+                  className="rounded-2xl py-3 bg-white/10 border border-white/10 text-white text-sm font-black disabled:opacity-60"
+                >
+                  Ocultar
+                </button>
+
+                <button
+                  type="button"
+                  onClick={closeRideDetails}
+                  className="rounded-2xl py-3 bg-white/10 border border-white/10 text-white text-sm font-black"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <div
+        ref={ridePopupRef}
+        className="fixed z-[90] bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-scroll shadow-2xl"
+      >
+        <RidePopup
+          setRidePopup={setRidePopup}
+          ride={ride}
+          confirmRide={() => confirmRide(ride)}
+          onIgnoreRide={() => ignoreRide(ride)}
+          onCounterOffer={handleCounterOffer}
+          isSubmitting={processing}
+        />
       </div>
     </div>
   );
