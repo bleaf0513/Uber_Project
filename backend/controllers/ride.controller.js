@@ -871,6 +871,164 @@ module.exports.getAvailableForCaptain = async (req, res) => {
     }
 };
 
+module.exports.getCaptainStats = async (req, res) => {
+    try {
+        const captainId = req.captain?._id;
+
+        if (!captainId) {
+            return res.status(401).json({
+                message: "Conductor no autenticado.",
+            });
+        }
+
+        const dateParam = req.query?.date;
+        const selectedDate = dateParam ? new Date(dateParam) : new Date();
+
+        if (Number.isNaN(selectedDate.getTime())) {
+            return res.status(400).json({
+                message: "Fecha inválida.",
+            });
+        }
+
+        const startOfDay = new Date(selectedDate);
+        startOfDay.setHours(0, 0, 0, 0);
+
+        const endOfDay = new Date(selectedDate);
+        endOfDay.setHours(23, 59, 59, 999);
+
+        const captain = await captainModel.findById(captainId);
+
+        const completedRides = await rideModel
+            .find({
+                captain: captainId,
+                status: "completed",
+                updatedAt: {
+                    $gte: startOfDay,
+                    $lte: endOfDay,
+                },
+            })
+            .sort({ updatedAt: -1 })
+            .populate("user", "fullname email phone");
+
+        const normalizePaymentMethod = (ride) => {
+            const raw = String(
+                ride?.paymentMethod ||
+                    ride?.paymentType ||
+                    ride?.payment_method ||
+                    ride?.method ||
+                    ride?.payment ||
+                    ""
+            )
+                .trim()
+                .toLowerCase();
+
+            if (
+                raw.includes("cash") ||
+                raw.includes("efectivo") ||
+                raw.includes("contado")
+            ) {
+                return "cash";
+            }
+
+            if (
+                raw.includes("transfer") ||
+                raw.includes("nequi") ||
+                raw.includes("bancolombia") ||
+                raw.includes("daviplata") ||
+                raw.includes("digital") ||
+                raw.includes("tarjeta")
+            ) {
+                return "transfer";
+            }
+
+            return "unknown";
+        };
+
+        let totalTrips = 0;
+        let totalDistanceKm = 0;
+        let totalEarning = 0;
+        let cashCollected = 0;
+        let transferCollected = 0;
+        let unknownPaymentCollected = 0;
+
+        const rides = completedRides.map((ride) => {
+            const fare =
+                Number(
+                    ride?.fare ??
+                        ride?.offeredFare ??
+                        ride?.suggestedFare ??
+                        0
+                ) || 0;
+
+            const distanceKm = normalizeDistanceToKm(ride?.distance) || 0;
+            const paymentMethod = normalizePaymentMethod(ride);
+
+            totalTrips += 1;
+            totalDistanceKm += distanceKm;
+            totalEarning += fare;
+
+            if (paymentMethod === "cash") {
+                cashCollected += fare;
+            } else if (paymentMethod === "transfer") {
+                transferCollected += fare;
+            } else {
+                unknownPaymentCollected += fare;
+            }
+
+            return {
+                _id: ride._id,
+                pickup: ride.pickup,
+                destination: ride.destination,
+                fare: Math.round(fare),
+                distanceKm: Number(distanceKm.toFixed(2)),
+                paymentMethod,
+                status: ride.status,
+                completedAt: ride.completedAt || ride.updatedAt,
+                user: ride.user || null,
+            };
+        });
+
+        let hoursOnline = Number(captain?.stats?.hoursOnline ?? 0) || 0;
+
+        if (captain?.onlineSession?.isOnline && captain?.onlineSession?.startedAt) {
+            const startedAt = new Date(captain.onlineSession.startedAt);
+            const diffMs = Date.now() - startedAt.getTime();
+
+            if (Number.isFinite(diffMs) && diffMs > 0) {
+                hoursOnline = diffMs / (1000 * 60 * 60);
+            }
+        }
+
+        const pendingToSettle = cashCollected;
+
+        return res.status(200).json({
+            ok: true,
+            date: startOfDay.toISOString().slice(0, 10),
+            range: {
+                start: startOfDay,
+                end: endOfDay,
+            },
+            stats: {
+                hoursOnline: Number(hoursOnline.toFixed(2)),
+                totalDistanceKm: Number(totalDistanceKm.toFixed(2)),
+                totalEarning: Math.round(totalEarning),
+                cashCollected: Math.round(cashCollected),
+                transferCollected: Math.round(transferCollected),
+                unknownPaymentCollected: Math.round(unknownPaymentCollected),
+                totalTrips,
+                pendingToSettle: Math.round(pendingToSettle),
+            },
+            rides,
+        });
+    } catch (err) {
+        console.error("[getCaptainStats] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error consultando estadísticas del conductor.",
+        });
+    }
+};
+
 module.exports.getRideOffers = async (req, res) => {
     const errors = validationResult(req);
 

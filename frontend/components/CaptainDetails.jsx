@@ -1,6 +1,8 @@
-import React, { useContext, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useState } from "react";
 import "remixicon/fonts/remixicon.css";
+import axios from "axios";
 import { CaptainDataContext } from "../src/context/CaptainContext";
+import { getApiBaseUrl } from "../src/apiBase";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
@@ -13,6 +15,10 @@ const CaptainDetails = () => {
 
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summaryMode, setSummaryMode] = useState("summary");
+  const [statsLoading, setStatsLoading] = useState(false);
+  const [statsError, setStatsError] = useState("");
+  const [driverStats, setDriverStats] = useState(null);
+  const [driverRides, setDriverRides] = useState([]);
 
   const firstname = captain?.fullname?.firstname ?? "";
   const lastname = captain?.fullname?.lastname ?? "";
@@ -30,13 +36,15 @@ const CaptainDetails = () => {
   const rating = Number(captain?.rating ?? 5);
   const isOnline = Boolean(captain?.onlineSession?.isOnline);
 
-  const stats = captain?.stats || {};
+  const fallbackStats = captain?.stats || {};
+  const stats = driverStats || fallbackStats || {};
 
   const hoursOnline = Number(stats?.hoursOnline ?? 0);
   const totalDistanceKm = Number(stats?.totalDistanceKm ?? 0);
   const totalEarning = Number(stats?.totalEarning ?? 0);
   const cashCollected = Number(stats?.cashCollected ?? 0);
   const transferCollected = Number(stats?.transferCollected ?? 0);
+  const unknownPaymentCollected = Number(stats?.unknownPaymentCollected ?? 0);
   const totalTrips = Number(stats?.totalTrips ?? 0);
   const pendingToSettle = Number(stats?.pendingToSettle ?? 0);
 
@@ -46,6 +54,7 @@ const CaptainDetails = () => {
     totalEarning > 0 ||
     cashCollected > 0 ||
     transferCollected > 0 ||
+    unknownPaymentCollected > 0 ||
     totalTrips > 0 ||
     pendingToSettle > 0;
 
@@ -63,9 +72,52 @@ const CaptainDetails = () => {
     });
   }, []);
 
+  const fetchCaptainStats = async () => {
+    try {
+      setStatsLoading(true);
+      setStatsError("");
+
+      const token = localStorage.getItem("token");
+
+      if (!token) {
+        setStatsError("No hay sesión activa del conductor.");
+        return;
+      }
+
+      const response = await axios.get(`${getApiBaseUrl()}/rides/captain-stats`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      setDriverStats(response?.data?.stats || null);
+      setDriverRides(
+        Array.isArray(response?.data?.rides) ? response.data.rides : []
+      );
+    } catch (error) {
+      setStatsError(
+        error?.response?.data?.message ||
+          "No se pudieron cargar las estadísticas del conductor."
+      );
+    } finally {
+      setStatsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCaptainStats();
+
+    const interval = setInterval(() => {
+      fetchCaptainStats();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
   const openSummary = (mode) => {
     setSummaryMode(mode);
     setSummaryOpen(true);
+    fetchCaptainStats();
   };
 
   const closeSummary = () => {
@@ -94,7 +146,9 @@ const CaptainDetails = () => {
           <p className="text-[10px] font-black text-gray-500 uppercase tracking-wide mt-1">
             {label}
           </p>
-          {!!helper && <p className="text-[10px] text-gray-400 mt-0.5">{helper}</p>}
+          {!!helper && (
+            <p className="text-[10px] text-gray-400 mt-0.5">{helper}</p>
+          )}
         </div>
       </div>
     );
@@ -244,14 +298,20 @@ const CaptainDetails = () => {
 
                       <div>
                         <p className="text-sm font-black text-gray-950">
-                          Estadísticas en preparación
+                          Sin servicios finalizados hoy
                         </p>
                         <p className="text-xs text-gray-600 mt-1 leading-5">
-                          Cuando finalices servicios, aquí verás horas, kilómetros,
+                          Cuando finalices viajes, aquí aparecerán kilómetros,
                           ganancias y liquidación real.
                         </p>
                       </div>
                     </div>
+                  </div>
+                )}
+
+                {!!statsError && (
+                  <div className="mt-4 rounded-2xl border border-red-100 bg-red-50 px-4 py-3">
+                    <p className="text-xs font-bold text-red-700">{statsError}</p>
                   </div>
                 )}
               </div>
@@ -269,14 +329,14 @@ const CaptainDetails = () => {
                 icon="ri-route-line"
                 label="Ruta"
                 value={`${numberFormatter.format(totalDistanceKm)} km`}
-                helper="Recorridos"
+                helper="Hoy"
               />
 
               <MetricCard
                 icon="ri-money-dollar-circle-line"
                 label="Ganado"
                 value={currencyFormatter.format(totalEarning)}
-                helper="Total"
+                helper="Hoy"
               />
             </div>
 
@@ -291,14 +351,20 @@ const CaptainDetails = () => {
                   </p>
                 </div>
 
-                <div
-                  className="w-11 h-11 rounded-2xl flex items-center justify-center"
+                <button
+                  type="button"
+                  onClick={fetchCaptainStats}
+                  className="w-11 h-11 rounded-2xl flex items-center justify-center border border-purple-100"
                   style={{
                     background: PURPLE_SOFT,
                   }}
                 >
-                  <i className="ri-dashboard-3-line text-2xl text-purple-700"></i>
-                </div>
+                  <i
+                    className={`ri-refresh-line text-2xl text-purple-700 ${
+                      statsLoading ? "animate-spin" : ""
+                    }`}
+                  ></i>
+                </button>
               </div>
 
               <div className="grid grid-cols-1 gap-3">
@@ -314,14 +380,14 @@ const CaptainDetails = () => {
                   <ActionButton
                     icon="ri-line-chart-line"
                     title="Estadísticas"
-                    subtitle="Rendimiento"
+                    subtitle={`${totalTrips} servicios hoy`}
                     onClick={() => openSummary("statistics")}
                   />
 
                   <ActionButton
                     icon="ri-wallet-3-line"
                     title="Liquidación"
-                    subtitle="Cierre del día"
+                    subtitle={currencyFormatter.format(pendingToSettle)}
                     onClick={() => openSummary("settlement")}
                   />
                 </div>
@@ -366,7 +432,7 @@ const CaptainDetails = () => {
                 }}
               >
                 <p className="text-white/80 text-xs font-black uppercase">
-                  Ganancia total
+                  Ganancia de hoy
                 </p>
                 <p className="text-3xl font-black mt-1">
                   {currencyFormatter.format(totalEarning)}
@@ -409,6 +475,13 @@ const CaptainDetails = () => {
                 />
 
                 <SummaryRow
+                  icon="ri-question-line"
+                  label="Método no registrado"
+                  value={currencyFormatter.format(unknownPaymentCollected)}
+                  colorClass="text-orange-600"
+                />
+
+                <SummaryRow
                   icon="ri-wallet-3-line"
                   label="Pendiente por liquidar"
                   value={currencyFormatter.format(pendingToSettle)}
@@ -416,29 +489,39 @@ const CaptainDetails = () => {
                 />
               </div>
 
-              <div
-                className="mt-5 rounded-2xl border border-purple-100 p-4"
-                style={{
-                  background: PURPLE_SOFT,
-                }}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-10 h-10 rounded-2xl bg-white flex items-center justify-center shrink-0">
-                    <i className="ri-tools-line text-purple-700 text-xl"></i>
-                  </div>
+              {driverRides.length > 0 && (
+                <div className="mt-5">
+                  <h4 className="text-base font-black text-gray-950 mb-3">
+                    Servicios finalizados hoy
+                  </h4>
 
-                  <div>
-                    <p className="text-sm font-black text-gray-950">
-                      Próximo paso técnico
-                    </p>
-                    <p className="text-xs text-gray-600 mt-1 leading-5">
-                      Para que estos datos sean reales, conectamos un endpoint del
-                      backend que calcule viajes finalizados, kilómetros, efectivo,
-                      transferencias y liquidación por conductor.
-                    </p>
+                  <div className="space-y-2">
+                    {driverRides.slice(0, 8).map((item) => (
+                      <div
+                        key={item._id}
+                        className="rounded-2xl border border-gray-200 bg-gray-50 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-black text-gray-950">
+                            {currencyFormatter.format(item.fare || 0)}
+                          </p>
+
+                          <p className="text-xs font-bold text-gray-500">
+                            {numberFormatter.format(item.distanceKm || 0)} km
+                          </p>
+                        </div>
+
+                        <p className="text-xs text-gray-600 mt-2 truncate">
+                          {item.pickup}
+                        </p>
+                        <p className="text-xs text-gray-600 truncate">
+                          {item.destination}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 </div>
-              </div>
+              )}
 
               <button
                 type="button"

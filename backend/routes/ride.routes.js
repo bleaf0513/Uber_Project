@@ -129,6 +129,28 @@ router.get(
     rideController.getAvailableForCaptain
 );
 
+/*
+  ESTADÍSTICAS REALES DEL CONDUCTOR
+
+  Esta ruta alimenta el panel CaptainDetails.jsx:
+  - horas online
+  - distancia total
+  - ganancias
+  - efectivo
+  - transferencias
+  - pendiente por liquidar
+  - viajes finalizados
+
+  IMPORTANTE:
+  Debe ir antes de '/:rideId/offers' para que Express no confunda
+  "captain-stats" con un rideId.
+*/
+router.get(
+    '/captain-stats',
+    authMiddleware.authCaptain,
+    rideController.getCaptainStats
+);
+
 router.get(
     '/:rideId/offers',
     authMiddleware.authUser,
