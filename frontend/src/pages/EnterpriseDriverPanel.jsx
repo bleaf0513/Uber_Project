@@ -13,27 +13,6 @@ const API_BASE = getApiBaseUrl();
 const DEFAULT_CENTER = { lat: 6.2442, lng: -75.5812 };
 const GPS_MARKER_ICON = "https://maps.google.com/mapfiles/ms/icons/blue-dot.png";
 
-const haversineDistanceKm = (a, b) => {
-  const toRad = (deg) => (deg * Math.PI) / 180;
-  const R = 6371;
-
-  const dLat = toRad(Number(b.lat) - Number(a.lat));
-  const dLng = toRad(Number(b.lng) - Number(a.lng));
-
-  const lat1 = toRad(Number(a.lat));
-  const lat2 = toRad(Number(b.lat));
-
-  const aa =
-    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-    Math.sin(dLng / 2) *
-      Math.sin(dLng / 2) *
-      Math.cos(lat1) *
-      Math.cos(lat2);
-
-  const c = 2 * Math.atan2(Math.sqrt(aa), Math.sqrt(1 - aa));
-  return R * c;
-};
-
 const haversineDistanceMeters = (a, b) => {
   const toRad = (deg) => (deg * Math.PI) / 180;
   const R = 6371000;
@@ -65,6 +44,12 @@ const getStatusBadgeClass = (status) => {
   }
 
   return "bg-amber-100 text-amber-700 border border-amber-200";
+};
+
+const getStatusDotClass = (status) => {
+  if (status === "Finalizada") return "bg-emerald-500";
+  if (status === "En curso") return "bg-blue-500";
+  return "bg-amber-500";
 };
 
 const formatCurrencyCOP = (value) => {
@@ -100,7 +85,6 @@ const EnterpriseDriverMap = ({
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
   const mapRef = useRef(null);
-  const directionsPanelRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const driverMarkerRef = useRef(null);
   const directionsRendererRef = useRef(null);
@@ -290,7 +274,11 @@ const EnterpriseDriverMap = ({
 
       updateDriverMarker(normalizedCoords);
 
-      if (options.shouldCenterMap && mapInstanceRef.current && !pendingStops.length) {
+      if (
+        options.shouldCenterMap &&
+        mapInstanceRef.current &&
+        !pendingStops.length
+      ) {
         mapInstanceRef.current.setCenter(normalizedCoords);
         mapInstanceRef.current.setZoom(15);
       }
@@ -343,10 +331,6 @@ const EnterpriseDriverMap = ({
           },
         });
       }
-    }
-
-    if (directionsRendererRef.current && directionsPanelRef.current) {
-      directionsRendererRef.current.setPanel(directionsPanelRef.current);
     }
   }, [mapsApiLoaded, selectedDriver]);
 
@@ -460,10 +444,6 @@ const EnterpriseDriverMap = ({
     if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
 
-      if (directionsPanelRef.current) {
-        directionsPanelRef.current.innerHTML = "";
-      }
-
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
@@ -528,15 +508,7 @@ const EnterpriseDriverMap = ({
           lng: Number(driverLocation.lng),
         };
 
-        let orderedStops = [...geocodedStops];
-
-        if (!(activeDelivery?._id || activeDelivery?.id)) {
-          orderedStops.sort((a, b) => {
-            const distA = haversineDistanceKm(originCoords, a.coords);
-            const distB = haversineDistanceKm(originCoords, b.coords);
-            return distA - distB;
-          });
-        }
+        const orderedStops = [...geocodedStops];
 
         const directionsService = new window.google.maps.DirectionsService();
 
@@ -559,7 +531,7 @@ const EnterpriseDriverMap = ({
             origin: originCoords,
             destination,
             waypoints,
-            optimizeWaypoints: !(activeDelivery?._id || activeDelivery?.id),
+            optimizeWaypoints: false,
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
           (result, status) => {
@@ -584,27 +556,9 @@ const EnterpriseDriverMap = ({
               const totalKm = (totalDistanceMeters / 1000).toFixed(1);
               const totalMin = Math.round(totalDurationSeconds / 60);
 
-              let orderedStopsFromRoute = orderedStops;
-
-              if (
-                route?.waypoint_order &&
-                Array.isArray(route.waypoint_order) &&
-                orderedStops.length > 1 &&
-                !(activeDelivery?._id || activeDelivery?.id)
-              ) {
-                const reorderedIntermediate = route.waypoint_order.map(
-                  (idx) => orderedStops[idx]
-                );
-                const finalDestination = orderedStops[orderedStops.length - 1];
-                orderedStopsFromRoute = [
-                  ...reorderedIntermediate,
-                  finalDestination,
-                ];
-              }
-
               setRouteInfo({
-                orderedStops: orderedStopsFromRoute,
-                totalStops: orderedStopsFromRoute.length,
+                orderedStops,
+                totalStops: orderedStops.length,
                 totalDistanceText: `${totalKm} km`,
                 totalDurationText:
                   totalMin >= 60
@@ -687,25 +641,33 @@ const EnterpriseDriverMap = ({
       : [];
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-      <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-green-50 px-5 py-4">
+    <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.10)]">
+      <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-emerald-50 px-5 py-5">
         <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h3 className="text-lg font-extrabold text-slate-900">
-              Mapa y navegación de ruta
+            <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-700">
+              <span>🗺️</span>
+              <span>Ruta en vivo</span>
+            </div>
+
+            <h3 className="text-xl font-extrabold text-slate-900">
+              Mapa del conductor
             </h3>
-            <p className="text-sm text-slate-500">
-              Seguimiento en tiempo real, orden de paradas e indicaciones paso a paso.
+
+            <p className="mt-1 text-sm font-medium text-slate-500">
+              Seguimiento GPS, ruta optimizada y paradas asignadas.
             </p>
           </div>
 
-          <div className="flex flex-wrap gap-2 text-xs font-semibold">
+          <div className="flex flex-wrap gap-2 text-xs font-extrabold">
             <span
               className={`rounded-full px-3 py-1 ${
-                isTracking ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700"
+                isTracking
+                  ? "bg-emerald-100 text-emerald-700"
+                  : "bg-red-100 text-red-700"
               }`}
             >
-              {isTracking ? "Seguimiento activo" : "Seguimiento inactivo"}
+              {isTracking ? "GPS activo" : "GPS inactivo"}
             </span>
 
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
@@ -713,7 +675,7 @@ const EnterpriseDriverMap = ({
             </span>
 
             <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">
-              Distancia: {routeInfo.totalDistanceText || "—"}
+              {routeInfo.totalDistanceText || "Sin distancia"}
             </span>
           </div>
         </div>
@@ -722,128 +684,155 @@ const EnterpriseDriverMap = ({
       <div className="p-5">
         <div
           ref={mapRef}
-          className="w-full h-[420px] rounded-[24px] overflow-hidden border border-slate-200"
+          className="h-[430px] w-full overflow-hidden rounded-[28px] border border-slate-200 bg-slate-100"
         />
 
-        <div className="mt-4 grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2 space-y-4">
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Estado GPS
-                </p>
-                <p
-                  className={`mt-2 text-sm font-bold ${
-                    isTracking ? "text-emerald-600" : "text-red-600"
-                  }`}
-                >
-                  {isTracking ? "Activo" : "Inactivo"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Paradas
-                </p>
-                <p className="mt-2 text-sm font-bold text-slate-900">
-                  {visibleStops.length}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Distancia total
-                </p>
-                <p className="mt-2 text-sm font-bold text-slate-900">
-                  {routeInfo.totalDistanceText || "—"}
-                </p>
-              </div>
-
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                  Tiempo estimado
-                </p>
-                <p className="mt-2 text-sm font-bold text-slate-900">
-                  {routeInfo.totalDurationText || "—"}
-                </p>
-              </div>
-            </div>
-
-            {geoError ? (
-              <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-medium text-red-700">
-                {geoError}
-              </div>
-            ) : null}
-
-            {activeDelivery ? (
-              <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4">
-                <p className="text-sm font-bold text-blue-900 mb-1">
-                  Entrega en curso
-                </p>
-                <p className="text-sm text-blue-800">
-                  {activeDelivery.clientName} — {activeDelivery.address}
-                </p>
-              </div>
-            ) : null}
-
-            <div className="flex flex-wrap gap-3">
-              <button
-                type="button"
-                onClick={openExternalGoogleMaps}
-                disabled={!canNavigate}
-                className={`px-4 py-2.5 rounded-2xl font-semibold transition ${
-                  canNavigate
-                    ? "bg-green-600 text-white hover:scale-[1.02]"
-                    : "bg-gray-300 text-gray-500 cursor-not-allowed"
+        <div className="mt-4 space-y-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                Estado GPS
+              </p>
+              <p
+                className={`mt-2 text-sm font-extrabold ${
+                  isTracking ? "text-emerald-600" : "text-red-600"
                 }`}
               >
-                Abrir navegación en Google Maps
-              </button>
-            </div>
-
-            {visibleStops.length > 0 ? (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                <p className="text-sm font-bold text-slate-900 mb-3">
-                  Orden de la ruta
-                </p>
-
-                <div className="space-y-2">
-                  {visibleStops.map((stop, index) => (
-                    <div
-                      key={stop._id || stop.id || index}
-                      className={`rounded-xl border px-3 py-3 text-sm ${
-                        String(activeDelivery?._id || activeDelivery?.id) ===
-                        String(stop._id || stop.id)
-                          ? "border-blue-200 bg-blue-50 text-blue-700 font-semibold"
-                          : "border-slate-200 bg-white text-slate-700"
-                      }`}
-                    >
-                      <span className="font-semibold">{index + 1}.</span>{" "}
-                      {stop.clientName} — {stop.address}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm text-slate-500">
-                Aún no hay direcciones pendientes para dibujar la ruta.
-              </div>
-            )}
-          </div>
-
-          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
-            <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
-              <p className="font-bold text-slate-900">Indicaciones</p>
-              <p className="text-xs text-slate-500">
-                Paso a paso de la navegación
+                {isTracking ? "Activo" : "Inactivo"}
               </p>
             </div>
 
-            <div
-              ref={directionsPanelRef}
-              className="p-3 text-sm text-slate-700 max-h-[420px] overflow-y-auto"
-            />
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                Paradas
+              </p>
+              <p className="mt-2 text-sm font-extrabold text-slate-900">
+                {visibleStops.length}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                Distancia total
+              </p>
+              <p className="mt-2 text-sm font-extrabold text-slate-900">
+                {routeInfo.totalDistanceText || "—"}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                Tiempo estimado
+              </p>
+              <p className="mt-2 text-sm font-extrabold text-slate-900">
+                {routeInfo.totalDurationText || "—"}
+              </p>
+            </div>
           </div>
+
+          {geoError ? (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+              {geoError}
+            </div>
+          ) : null}
+
+          {activeDelivery ? (
+            <div className="rounded-3xl border border-blue-200 bg-gradient-to-r from-blue-50 to-white p-4">
+              <p className="text-sm font-extrabold text-blue-900">
+                Entrega activa
+              </p>
+
+              <p className="mt-1 text-sm font-semibold text-blue-800">
+                {activeDelivery.clientName} — {activeDelivery.address}
+              </p>
+            </div>
+          ) : null}
+
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={openExternalGoogleMaps}
+              disabled={!canNavigate}
+              className={`rounded-2xl px-5 py-3 font-extrabold transition ${
+                canNavigate
+                  ? "bg-green-600 text-white shadow-lg shadow-green-600/20 hover:scale-[1.02]"
+                  : "cursor-not-allowed bg-gray-300 text-gray-500"
+              }`}
+            >
+              Abrir ruta en Google Maps
+            </button>
+          </div>
+
+          {visibleStops.length > 0 ? (
+            <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
+              <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-base font-extrabold text-slate-900">
+                    Orden de la ruta
+                  </p>
+
+                  <p className="text-xs font-semibold text-slate-500">
+                    Se respeta el orden enviado por logística.
+                  </p>
+                </div>
+
+                <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-600">
+                  {visibleStops.length} paradas
+                </span>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {visibleStops.map((stop, index) => {
+                  const isCurrentStop =
+                    String(activeDelivery?._id || activeDelivery?.id) ===
+                    String(stop._id || stop.id);
+
+                  return (
+                    <div
+                      key={stop._id || stop.id || index}
+                      className={`rounded-2xl border px-4 py-3 ${
+                        isCurrentStop
+                          ? "border-blue-300 bg-blue-50"
+                          : "border-slate-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start gap-3">
+                        <div
+                          className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-sm font-extrabold ${
+                            isCurrentStop
+                              ? "bg-blue-600 text-white"
+                              : "bg-slate-900 text-white"
+                          }`}
+                        >
+                          {index + 1}
+                        </div>
+
+                        <div>
+                          <p className="text-sm font-extrabold text-slate-900">
+                            {stop.clientName || "Cliente"}
+                          </p>
+
+                          <p className="mt-1 text-xs font-semibold text-slate-600">
+                            {stop.address}
+                          </p>
+
+                          {isCurrentStop ? (
+                            <span className="mt-2 inline-flex rounded-full bg-blue-600 px-3 py-1 text-xs font-bold text-white">
+                              Parada activa
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-500">
+              Aún no hay direcciones pendientes para dibujar la ruta.
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -1098,39 +1087,71 @@ const EnterpriseDriverPanel = () => {
     return date.toISOString().slice(0, 10);
   }, []);
 
+  const getDeliverySmartOrder = useCallback((delivery, fallbackIndex = 0) => {
+    const possibleOrder =
+      delivery?.routeOrder ??
+      delivery?.smartRouteOrder ??
+      delivery?.optimizedOrder ??
+      delivery?.stopOrder ??
+      delivery?.sequence ??
+      delivery?.order ??
+      delivery?.position;
+
+    const numericOrder = Number(possibleOrder);
+
+    if (Number.isFinite(numericOrder)) {
+      return numericOrder;
+    }
+
+    return fallbackIndex;
+  }, []);
+
+  const getDeliveryStatusWeight = useCallback((status) => {
+    if (status === "En curso") return 0;
+    if (status === "Pendiente") return 1;
+    if (status === "Finalizada") return 2;
+    return 3;
+  }, []);
+
   const filteredAssignedDeliveries = useMemo(() => {
     return assignedDeliveries
-      .filter((delivery) => {
+      .map((delivery, index) => ({
+        delivery,
+        originalIndex: index,
+      }))
+      .filter(({ delivery }) => {
         const matchesStatus =
           listStatusFilter === "Todos" ||
           String(delivery?.status || "") === String(listStatusFilter);
 
         const deliveryDate = getDeliveryReferenceDate(delivery);
-
-        const matchesDate =
-          listScopeFilter === "Todos"
-            ? !listDateFilter || deliveryDate === listDateFilter
-            : !listDateFilter || deliveryDate === listDateFilter;
+        const matchesDate = !listDateFilter || deliveryDate === listDateFilter;
 
         return matchesStatus && matchesDate;
       })
       .sort((a, b) => {
-        const aTime = new Date(
-          a?.createdAt || a?.updatedAt || a?.startedAt || a?.finishedAt || 0
-        ).getTime();
+        const statusDiff =
+          getDeliveryStatusWeight(a.delivery?.status) -
+          getDeliveryStatusWeight(b.delivery?.status);
 
-        const bTime = new Date(
-          b?.createdAt || b?.updatedAt || b?.startedAt || b?.finishedAt || 0
-        ).getTime();
+        if (statusDiff !== 0) return statusDiff;
 
-        return bTime - aTime;
-      });
+        const orderDiff =
+          getDeliverySmartOrder(a.delivery, a.originalIndex) -
+          getDeliverySmartOrder(b.delivery, b.originalIndex);
+
+        if (orderDiff !== 0) return orderDiff;
+
+        return a.originalIndex - b.originalIndex;
+      })
+      .map(({ delivery }) => delivery);
   }, [
     assignedDeliveries,
     listStatusFilter,
     listDateFilter,
-    listScopeFilter,
     getDeliveryReferenceDate,
+    getDeliverySmartOrder,
+    getDeliveryStatusWeight,
   ]);
 
   const stats = useMemo(() => {
@@ -1436,7 +1457,7 @@ const EnterpriseDriverPanel = () => {
 
   if (!activeCedula) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6">
         <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
           <h2 className="text-2xl font-extrabold text-slate-900">Sesión no válida</h2>
           <p className="mt-3 text-slate-600">
@@ -1444,7 +1465,7 @@ const EnterpriseDriverPanel = () => {
           </p>
           <Link
             to="/enterprise-driver-login"
-            className="inline-flex mt-5 rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
+            className="mt-5 inline-flex rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
           >
             Ir al login del conductor
           </Link>
@@ -1455,7 +1476,7 @@ const EnterpriseDriverPanel = () => {
 
   if (loadingDriver) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6">
         <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
           <h2 className="text-2xl font-extrabold text-slate-900">Cargando panel...</h2>
           <p className="mt-3 text-slate-600">
@@ -1468,7 +1489,7 @@ const EnterpriseDriverPanel = () => {
 
   if (!selectedDriver) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-100 px-6">
+      <div className="flex min-h-screen items-center justify-center bg-slate-100 px-6">
         <div className="w-full max-w-md rounded-[28px] border border-slate-200 bg-white p-6 text-center shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
           <h2 className="text-2xl font-extrabold text-slate-900">
             Conductor no encontrado
@@ -1478,7 +1499,7 @@ const EnterpriseDriverPanel = () => {
           </p>
           <Link
             to="/enterprise-driver-login"
-            className="inline-flex mt-5 rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
+            className="mt-5 inline-flex rounded-2xl bg-green-600 px-5 py-3 font-semibold text-white"
           >
             Volver al login del conductor
           </Link>
@@ -1491,8 +1512,8 @@ const EnterpriseDriverPanel = () => {
     <div className="min-h-screen bg-slate-50">
       <div className="relative overflow-hidden border-b border-slate-200 bg-gradient-to-br from-slate-950 via-green-900 to-green-700 text-white">
         <div className="absolute inset-0 opacity-25">
-          <div className="absolute -top-16 -left-10 h-48 w-48 rounded-full bg-emerald-400 blur-3xl" />
-          <div className="absolute top-8 right-0 h-56 w-56 rounded-full bg-green-300 blur-3xl" />
+          <div className="absolute -left-10 -top-16 h-48 w-48 rounded-full bg-emerald-400 blur-3xl" />
+          <div className="absolute right-0 top-8 h-56 w-56 rounded-full bg-green-300 blur-3xl" />
         </div>
 
         <div className="relative mx-auto max-w-7xl px-5 py-8 lg:px-8">
@@ -1506,6 +1527,7 @@ const EnterpriseDriverPanel = () => {
               <h1 className="text-3xl font-extrabold tracking-tight md:text-4xl">
                 Panel del Conductor
               </h1>
+
               <p className="mt-2 text-sm text-green-100 md:text-base">
                 Bienvenido, {selectedDriver.name}
               </p>
@@ -1561,11 +1583,11 @@ const EnterpriseDriverPanel = () => {
       <div className="mx-auto max-w-7xl px-5 py-6 lg:px-8">
         <div className="grid grid-cols-1 gap-6 xl:grid-cols-12">
           <div className="xl:col-span-4">
-            <div className="overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
+            <div className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.10)]">
               <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-green-50 px-6 py-5">
                 <h2 className="text-xl font-extrabold text-slate-900">Tus datos</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Información general del conductor y ubicación actual.
+                  Información general del conductor.
                 </p>
               </div>
 
@@ -1576,7 +1598,7 @@ const EnterpriseDriverPanel = () => {
                   </p>
 
                   <div className="mt-4 grid grid-cols-1 gap-3">
-                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Cédula
                       </p>
@@ -1585,16 +1607,17 @@ const EnterpriseDriverPanel = () => {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Estado
                       </p>
+
                       <div className="mt-2">
                         <span
                           className={`inline-flex rounded-full px-3 py-1 text-sm font-bold ${
                             selectedDriver.status === "En ruta"
-                              ? "bg-blue-100 text-blue-700 border border-blue-200"
-                              : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                              ? "border border-blue-200 bg-blue-100 text-blue-700"
+                              : "border border-emerald-200 bg-emerald-100 text-emerald-700"
                           }`}
                         >
                           {selectedDriver.status || "Disponible"}
@@ -1602,7 +1625,7 @@ const EnterpriseDriverPanel = () => {
                       </div>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Vehículo
                       </p>
@@ -1611,24 +1634,27 @@ const EnterpriseDriverPanel = () => {
                       </p>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Ubicación
                       </p>
-                      <p className="mt-1 text-sm font-bold text-slate-900">
-                        {selectedDriver.currentLocation?.lat && selectedDriver.currentLocation?.lng
+                      <p className="mt-1 break-all text-sm font-bold text-slate-900">
+                        {selectedDriver.currentLocation?.lat &&
+                        selectedDriver.currentLocation?.lng
                           ? `${selectedDriver.currentLocation.lat}, ${selectedDriver.currentLocation.lng}`
                           : "Aún no reportada"}
                       </p>
                     </div>
 
-                    <div className="rounded-2xl bg-white p-4 border border-slate-200">
+                    <div className="rounded-2xl border border-slate-200 bg-white p-4">
                       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
                         Última actualización
                       </p>
                       <p className="mt-1 text-sm font-bold text-slate-900">
                         {selectedDriver.currentLocation?.updatedAt
-                          ? new Date(selectedDriver.currentLocation.updatedAt).toLocaleString()
+                          ? new Date(
+                              selectedDriver.currentLocation.updatedAt
+                            ).toLocaleString()
                           : "Sin actualización"}
                       </p>
                     </div>
@@ -1657,297 +1683,414 @@ const EnterpriseDriverPanel = () => {
           </div>
         ) : null}
 
-        <div className="mt-6 overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-[0_12px_40px_rgba(15,23,42,0.08)]">
-          <div className="border-b border-slate-100 bg-gradient-to-r from-white via-slate-50 to-slate-100 px-6 py-5">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="mt-6 overflow-hidden rounded-[34px] border border-slate-200 bg-white shadow-[0_18px_55px_rgba(15,23,42,0.10)]">
+          <div className="relative overflow-hidden border-b border-slate-100 bg-gradient-to-br from-slate-950 via-slate-900 to-emerald-800 px-6 py-6 text-white">
+            <div className="absolute -right-10 -top-10 h-36 w-36 rounded-full bg-emerald-400/30 blur-3xl" />
+            <div className="absolute -left-10 bottom-0 h-32 w-32 rounded-full bg-green-300/20 blur-3xl" />
+
+            <div className="relative flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
               <div>
-                <h2 className="text-xl font-extrabold text-slate-900">
+                <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-emerald-100">
+                  <span>📦</span>
+                  <span>Ruta asignada</span>
+                </div>
+
+                <h2 className="text-2xl font-extrabold tracking-tight">
                   Tus pedidos asignados
                 </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Por defecto se muestran los pedidos pendientes para evitar una lista muy larga.
+
+                <p className="mt-1 max-w-2xl text-sm text-emerald-100">
+                  Aquí ves las entregas en orden. Inicia una entrega, navega al
+                  cliente y finalízala cuando termines.
                 </p>
               </div>
 
-              <div className="rounded-2xl bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600 border border-slate-200">
-                Total mostrados: {filteredAssignedDeliveries.length}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                  <p className="text-xs text-emerald-100">Pendientes</p>
+                  <p className="text-2xl font-extrabold">{stats.pending}</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                  <p className="text-xs text-emerald-100">En curso</p>
+                  <p className="text-2xl font-extrabold">{stats.inProgress}</p>
+                </div>
+
+                <div className="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                  <p className="text-xs text-emerald-100">Hechas</p>
+                  <p className="text-2xl font-extrabold">{stats.finished}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-slate-50 px-6 py-5">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleScopeChange("Pendientes")}
+                  className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold transition ${
+                    listScopeFilter === "Pendientes"
+                      ? "bg-amber-500 text-white shadow-lg shadow-amber-500/20"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  Pendientes
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleScopeChange("En curso")}
+                  className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold transition ${
+                    listScopeFilter === "En curso"
+                      ? "bg-blue-600 text-white shadow-lg shadow-blue-600/20"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  En curso
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleScopeChange("Finalizados")}
+                  className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold transition ${
+                    listScopeFilter === "Finalizados"
+                      ? "bg-emerald-600 text-white shadow-lg shadow-emerald-600/20"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  Finalizados
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => handleScopeChange("Todos")}
+                  className={`rounded-2xl px-4 py-2.5 text-sm font-extrabold transition ${
+                    listScopeFilter === "Todos"
+                      ? "bg-slate-900 text-white shadow-lg shadow-slate-900/20"
+                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                  }`}
+                >
+                  Todos
+                </button>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3 xl:w-[620px]">
+                <input
+                  type="date"
+                  value={listDateFilter}
+                  onChange={(e) => {
+                    setListDateFilter(e.target.value);
+                    setListScopeFilter("Todos");
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-green-400 focus:ring-4 focus:ring-green-100"
+                />
+
+                <select
+                  value={listStatusFilter}
+                  onChange={(e) => {
+                    setListStatusFilter(e.target.value);
+                    setListScopeFilter("Todos");
+                  }}
+                  className="w-full rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-900 outline-none transition focus:border-green-400 focus:ring-4 focus:ring-green-100"
+                >
+                  <option value="Todos">Todos los estados</option>
+                  <option value="Pendiente">Pendiente</option>
+                  <option value="En curso">En curso</option>
+                  <option value="Finalizada">Finalizada</option>
+                </select>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setListStatusFilter("Pendiente");
+                    setListDateFilter("");
+                    setListScopeFilter("Pendientes");
+                  }}
+                  className="w-full rounded-2xl bg-slate-900 px-4 py-3 text-sm font-extrabold text-white transition hover:scale-[1.01]"
+                >
+                  Limpiar filtros
+                </button>
               </div>
             </div>
           </div>
 
           <div className="p-6">
-            <div className="flex flex-wrap gap-2 mb-4">
-              <button
-                type="button"
-                onClick={() => handleScopeChange("Pendientes")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "Pendientes"
-                    ? "bg-amber-500 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                Pendientes
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleScopeChange("En curso")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "En curso"
-                    ? "bg-blue-600 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                En curso
-              </button>
-
-              <button
-                type="button"
-                onClick={() => handleScopeChange("Finalizados")}
-                className={`px-4 py-2 rounded-2xl font-semibold transition ${
-                  listScopeFilter === "Finalizados"
-                    ? "bg-emerald-600 text-white shadow-md"
-                    : "bg-slate-100 text-slate-700 border border-slate-200"
-                }`}
-              >
-                Finalizados
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-5">
-              <input
-                type="date"
-                value={listDateFilter}
-                onChange={(e) => {
-                  setListDateFilter(e.target.value);
-                  setListScopeFilter("Todos");
-                }}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-green-400 focus:bg-white focus:ring-4 focus:ring-green-100"
-              />
-
-              <select
-                value={listStatusFilter}
-                onChange={(e) => {
-                  setListStatusFilter(e.target.value);
-                  setListScopeFilter("Todos");
-                }}
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-slate-900 outline-none transition focus:border-green-400 focus:bg-white focus:ring-4 focus:ring-green-100"
-              >
-                <option value="Todos">Todos los estados</option>
-                <option value="Pendiente">Pendiente</option>
-                <option value="En curso">En curso</option>
-                <option value="Finalizada">Finalizada</option>
-              </select>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setListStatusFilter("Pendiente");
-                  setListDateFilter("");
-                  setListScopeFilter("Pendientes");
-                }}
-                className="w-full rounded-2xl bg-slate-800 px-4 py-3 font-semibold text-white transition hover:scale-[1.01]"
-              >
-                Reiniciar filtros
-              </button>
-            </div>
-
             {assignedDeliveries.length === 0 ? (
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
-                No tienes pedidos asignados en este momento.
+              <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl shadow-sm">
+                  📭
+                </div>
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  No tienes pedidos asignados
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Cuando logística te asigne una ruta, aparecerá automáticamente aquí.
+                </p>
               </div>
             ) : filteredAssignedDeliveries.length === 0 ? (
-              <div className="rounded-3xl border border-slate-200 bg-slate-50 px-5 py-10 text-center text-slate-500">
-                No hay pedidos para este filtro.
+              <div className="rounded-[28px] border border-dashed border-slate-300 bg-slate-50 px-5 py-12 text-center">
+                <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-3xl bg-white text-3xl shadow-sm">
+                  🔎
+                </div>
+                <h3 className="text-lg font-extrabold text-slate-900">
+                  No hay pedidos para este filtro
+                </h3>
+                <p className="mt-2 text-sm text-slate-500">
+                  Cambia el estado o limpia los filtros para ver más entregas.
+                </p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                {filteredAssignedDeliveries.map((delivery) => {
+              <div className="space-y-4">
+                {filteredAssignedDeliveries.map((delivery, index) => {
                   const deliveryId = String(delivery._id || delivery.id || "");
                   const isStarting = startingDeliveryId === deliveryId;
                   const isFinishing = finishingDeliveryId === deliveryId;
                   const isBusy = !!startingDeliveryId || !!finishingDeliveryId;
+                  const isActive =
+                    String(activeDeliveryId || "") === deliveryId ||
+                    delivery.status === "En curso";
+
+                  const mapsUrl = delivery.address
+                    ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
+                        delivery.address
+                      )}`
+                    : "";
 
                   return (
                     <div
                       key={delivery._id || delivery.id}
-                      className="rounded-[26px] border border-slate-200 bg-gradient-to-br from-white to-slate-50 p-5 shadow-sm transition hover:-translate-y-0.5 hover:shadow-lg"
+                      className={`group overflow-hidden rounded-[30px] border bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-xl ${
+                        isActive
+                          ? "border-blue-300 ring-4 ring-blue-100"
+                          : delivery.status === "Finalizada"
+                          ? "border-emerald-200"
+                          : "border-slate-200"
+                      }`}
                     >
-                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-                        <div>
-                          <div className="flex flex-wrap items-center gap-2">
-                            <p className="text-lg font-extrabold text-slate-900">
-                              Factura #{delivery.invoiceNumber}
-                            </p>
-
-                            <span
-                              className={`inline-flex rounded-full px-3 py-1 text-xs font-bold ${getStatusBadgeClass(
-                                delivery.status
-                              )}`}
-                            >
-                              {delivery.status}
-                            </span>
-                          </div>
-
-                          <p className="mt-1 text-xs text-slate-500">
-                            Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
-                          </p>
-                        </div>
-                      </div>
-
-                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Cliente
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.clientName}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Teléfono
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.clientPhone || "Sin teléfono"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200 sm:col-span-2">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Dirección
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.address}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Valor factura
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-emerald-700">
-                            {formatCurrencyCOP(delivery.invoiceValue)}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Método de pago
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.paymentMethod || "No definido"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Barrio
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.neighborhood || "Sin barrio"}
-                          </p>
-                        </div>
-
-                        <div className="rounded-2xl bg-white p-4 border border-slate-200">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Referencia
-                          </p>
-                          <p className="mt-1 text-sm font-bold text-slate-900">
-                            {delivery.reference || "Sin referencia"}
-                          </p>
-                        </div>
-
-                        {delivery.placeId ? (
-                          <div className="rounded-2xl bg-white p-4 border border-slate-200 sm:col-span-2">
-                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                              Place ID
-                            </p>
-                            <p className="mt-1 text-sm font-bold text-slate-900 break-all">
-                              {delivery.placeId}
-                            </p>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {delivery.notes ? (
-                        <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                            Observaciones
-                          </p>
-                          <p className="mt-1 text-sm text-slate-700">
-                            {delivery.notes}
-                          </p>
-                        </div>
-                      ) : null}
-
-                      {delivery.startedAt || delivery.finishedAt ? (
-                        <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
-                          {delivery.startedAt ? (
-                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Inicio
-                              </p>
-                              <p className="mt-1 text-sm font-medium text-slate-800">
-                                {new Date(delivery.startedAt).toLocaleString()}
-                              </p>
-                            </div>
-                          ) : null}
-
-                          {delivery.finishedAt ? (
-                            <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-                              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-                                Finalizó
-                              </p>
-                              <p className="mt-1 text-sm font-medium text-slate-800">
-                                {new Date(delivery.finishedAt).toLocaleString()}
-                              </p>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-
-                      <div className="mt-5 flex gap-3 flex-wrap">
-                        {delivery.status === "Pendiente" && (
-                          <button
-                            type="button"
-                            disabled={isBusy}
-                            onClick={() =>
-                              handleStartDelivery(delivery._id || delivery.id)
-                            }
-                            className={`px-4 py-2.5 rounded-2xl font-semibold text-white transition ${
-                              isBusy
-                                ? "bg-blue-300 cursor-not-allowed"
-                                : "bg-blue-600 hover:scale-[1.02]"
+                      <div
+                        className={`flex flex-col gap-4 border-b px-5 py-4 lg:flex-row lg:items-center lg:justify-between ${
+                          isActive
+                            ? "border-blue-100 bg-blue-50"
+                            : delivery.status === "Finalizada"
+                            ? "border-emerald-100 bg-emerald-50"
+                            : "border-slate-100 bg-gradient-to-r from-white to-slate-50"
+                        }`}
+                      >
+                        <div className="flex items-start gap-4">
+                          <div
+                            className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl text-lg font-extrabold shadow-sm ${
+                              isActive
+                                ? "bg-blue-600 text-white"
+                                : delivery.status === "Finalizada"
+                                ? "bg-emerald-600 text-white"
+                                : "bg-amber-500 text-white"
                             }`}
                           >
-                            {isStarting ? "Iniciando..." : "Iniciar entrega"}
-                          </button>
-                        )}
+                            {delivery.status === "Finalizada" ? "✓" : index + 1}
+                          </div>
 
-                        {delivery.status === "En curso" && (
-                          <>
+                          <div>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-lg font-extrabold text-slate-900">
+                                Factura #{delivery.invoiceNumber || "Sin número"}
+                              </h3>
+
+                              <span
+                                className={`inline-flex rounded-full px-3 py-1 text-xs font-extrabold ${getStatusBadgeClass(
+                                  delivery.status
+                                )}`}
+                              >
+                                {delivery.status || "Pendiente"}
+                              </span>
+
+                              {isActive ? (
+                                <span className="inline-flex rounded-full border border-blue-200 bg-white px-3 py-1 text-xs font-extrabold text-blue-700">
+                                  Ruta activa
+                                </span>
+                              ) : null}
+                            </div>
+
+                            <p className="mt-1 text-sm font-semibold text-slate-600">
+                              {delivery.clientName || "Cliente sin nombre"}
+                            </p>
+
+                            <p className="mt-1 text-xs text-slate-500">
+                              Fecha: {getDeliveryReferenceDate(delivery) || "Sin fecha"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-2">
+                          {mapsUrl ? (
+                            <a
+                              href={mapsUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="inline-flex items-center justify-center rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-extrabold text-slate-700 transition hover:bg-slate-100"
+                            >
+                              Ver dirección
+                            </a>
+                          ) : null}
+
+                          {delivery.status === "Pendiente" ? (
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() =>
+                                handleStartDelivery(delivery._id || delivery.id)
+                              }
+                              className={`inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-extrabold text-white transition ${
+                                isBusy
+                                  ? "cursor-not-allowed bg-blue-300"
+                                  : "bg-blue-600 shadow-lg shadow-blue-600/20 hover:scale-[1.02]"
+                              }`}
+                            >
+                              {isStarting ? "Iniciando..." : "Iniciar entrega"}
+                            </button>
+                          ) : null}
+
+                          {delivery.status === "En curso" ? (
                             <button
                               type="button"
                               disabled={isBusy}
                               onClick={() =>
                                 handleFinishDelivery(delivery._id || delivery.id)
                               }
-                              className={`px-4 py-2.5 rounded-2xl font-semibold text-white transition ${
+                              className={`inline-flex items-center justify-center rounded-2xl px-5 py-2.5 text-sm font-extrabold text-white transition ${
                                 isBusy
-                                  ? "bg-green-300 cursor-not-allowed"
-                                  : "bg-green-600 hover:scale-[1.02]"
+                                  ? "cursor-not-allowed bg-emerald-300"
+                                  : "bg-emerald-600 shadow-lg shadow-emerald-600/20 hover:scale-[1.02]"
                               }`}
                             >
                               {isFinishing ? "Finalizando..." : "Finalizar entrega"}
                             </button>
+                          ) : null}
+                        </div>
+                      </div>
 
-                            <span className="inline-flex items-center rounded-2xl bg-blue-50 px-4 py-2.5 text-sm font-semibold text-blue-700 border border-blue-200">
-                              Ruta activa en el mapa
+                      <div className="grid grid-cols-1 gap-4 p-5 lg:grid-cols-12">
+                        <div className="lg:col-span-7">
+                          <div className="rounded-3xl border border-slate-200 bg-slate-50 p-4">
+                            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                              Dirección de entrega
+                            </p>
+
+                            <p className="mt-2 text-base font-extrabold leading-snug text-slate-900">
+                              {delivery.address || "Sin dirección"}
+                            </p>
+
+                            <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                                <p className="text-xs font-bold uppercase text-slate-400">
+                                  Barrio
+                                </p>
+                                <p className="mt-1 text-sm font-extrabold text-slate-800">
+                                  {delivery.neighborhood || "Sin barrio"}
+                                </p>
+                              </div>
+
+                              <div className="rounded-2xl border border-slate-200 bg-white p-3">
+                                <p className="text-xs font-bold uppercase text-slate-400">
+                                  Referencia
+                                </p>
+                                <p className="mt-1 text-sm font-extrabold text-slate-800">
+                                  {delivery.reference || "Sin referencia"}
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="lg:col-span-5">
+                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1">
+                            <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                                Valor factura
+                              </p>
+                              <p className="mt-2 text-xl font-extrabold text-emerald-700">
+                                {formatCurrencyCOP(delivery.invoiceValue)}
+                              </p>
+                            </div>
+
+                            <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                                Método de pago
+                              </p>
+                              <p className="mt-2 text-sm font-extrabold text-slate-900">
+                                {delivery.paymentMethod || "No definido"}
+                              </p>
+                            </div>
+
+                            <div className="rounded-3xl border border-slate-200 bg-white p-4">
+                              <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                                Teléfono cliente
+                              </p>
+                              <p className="mt-2 text-sm font-extrabold text-slate-900">
+                                {delivery.clientPhone || "Sin teléfono"}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        {delivery.notes ? (
+                          <div className="lg:col-span-12">
+                            <div className="rounded-3xl border border-amber-200 bg-amber-50 px-4 py-3">
+                              <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">
+                                Observaciones
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-amber-900">
+                                {delivery.notes}
+                              </p>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {delivery.startedAt || delivery.finishedAt ? (
+                          <div className="lg:col-span-12">
+                            <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                              {delivery.startedAt ? (
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                  <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                                    Inicio
+                                  </p>
+                                  <p className="mt-1 text-sm font-bold text-slate-800">
+                                    {new Date(delivery.startedAt).toLocaleString()}
+                                  </p>
+                                </div>
+                              ) : null}
+
+                              {delivery.finishedAt ? (
+                                <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                                  <p className="text-xs font-extrabold uppercase tracking-wide text-slate-500">
+                                    Finalizó
+                                  </p>
+                                  <p className="mt-1 text-sm font-bold text-slate-800">
+                                    {new Date(delivery.finishedAt).toLocaleString()}
+                                  </p>
+                                </div>
+                              ) : null}
+                            </div>
+                          </div>
+                        ) : null}
+
+                        <div className="lg:col-span-12">
+                          <div className="flex flex-wrap items-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+                            <span
+                              className={`h-3 w-3 rounded-full ${getStatusDotClass(
+                                delivery.status
+                              )}`}
+                            />
+                            <span className="text-sm font-extrabold text-slate-800">
+                              {delivery.status === "Pendiente"
+                                ? "Esta entrega está lista para iniciar."
+                                : delivery.status === "En curso"
+                                ? "Esta entrega está activa en tu ruta."
+                                : "Esta entrega ya fue finalizada."}
                             </span>
-                          </>
-                        )}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
