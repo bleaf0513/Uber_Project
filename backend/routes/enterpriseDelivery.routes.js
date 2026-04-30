@@ -15,6 +15,8 @@ const {
     getPendingRouteDeliveries,
     optimizeEnterpriseRoutes,
     assignOptimizedRoute,
+    addDeliveryToOptimizedRoute,
+    recalculateOptimizedRoute,
 } = require('../controllers/enterpriseDelivery.controller');
 
 router.get('/', authEnterprise, getEnterpriseDeliveries);
@@ -29,15 +31,45 @@ router.get('/me', authEnterpriseDriver, getMyEnterpriseDeliveries);
  *
  * Importante:
  * Estas rutas deben ir ANTES de /:id/status
- * para evitar que Express confunda "pending-routes" con un id.
+ * para evitar que Express confunda rutas especiales con un id.
  */
 router.get('/pending-routes', authEnterprise, getPendingRouteDeliveries);
 router.post('/optimize-routes', authEnterprise, optimizeEnterpriseRoutes);
 router.post('/assign-route', authEnterprise, assignOptimizedRoute);
 
 /**
+ * Agregar una entrega/parada a una ruta inteligente ya optimizada.
+ *
+ * Body:
+ * {
+ *   routeGroupId,
+ *   deliveryId
+ * }
+ */
+router.post(
+    '/optimized-routes/add-delivery',
+    authEnterprise,
+    addDeliveryToOptimizedRoute
+);
+
+/**
+ * Recalcular una ruta inteligente existente.
+ *
+ * Body:
+ * {
+ *   routeGroupId,
+ *   baseLocation opcional
+ * }
+ */
+router.post(
+    '/optimized-routes/recalculate',
+    authEnterprise,
+    recalculateOptimizedRoute
+);
+
+/**
  * Crear entrega.
- * Ahora puede venir con:
+ * Puede venir con:
  * - assignedDriverId = ID real del conductor
  * - assignedDriverId = "PENDING_ROUTE"
  */
