@@ -557,12 +557,6 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
         const selectedOffer = currentOffers[offerIndex];
 
-        /*
-          CORRECCIÓN:
-          Antes se rechazaba la oferta apenas el reloj la marcaba como vencida.
-          Eso causaba falsos mensajes de "Esta oferta ya expiró" cuando el usuario
-          tocaba aceptar justo en el límite. Dejamos 10 segundos de tolerancia.
-        */
         const OFFER_ACCEPT_GRACE_MS = 10000;
 
         const offerExpiresAtMs = selectedOffer?.expiresAt
@@ -740,6 +734,11 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
 
 module.exports.getMyActiveRide = async (req, res) => {
     try {
+        const ACTIVE_USER_RIDE_MAX_AGE_HOURS = 6;
+        const activeSince = new Date(
+            Date.now() - ACTIVE_USER_RIDE_MAX_AGE_HOURS * 60 * 60 * 1000
+        );
+
         let ride = await rideModel
             .findOne({
                 user: req.user._id,
@@ -748,8 +747,11 @@ module.exports.getMyActiveRide = async (req, res) => {
                 },
                 cancelledAt: null,
                 cancelledBy: null,
+                updatedAt: {
+                    $gte: activeSince,
+                },
             })
-            .sort({ createdAt: -1 })
+            .sort({ updatedAt: -1 })
             .populate("captain")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
 
@@ -773,11 +775,6 @@ module.exports.getMyActiveRide = async (req, res) => {
     }
 };
 
-/*
-  NUEVO:
-  Permite que el conductor recupere su carrera activa si actualiza la página
-  o entra directamente a /captain-riding.
-*/
 module.exports.getCaptainActiveRide = async (req, res) => {
     try {
         const captainId = req.captain?._id;
@@ -788,14 +785,28 @@ module.exports.getCaptainActiveRide = async (req, res) => {
             });
         }
 
+        /*
+          CORRECCIÓN:
+          Solo recupera carreras realmente activas y recientes.
+          No debe traer completed ni viajes viejos de pruebas anteriores.
+        */
+        const ACTIVE_RIDE_MAX_AGE_HOURS = 4;
+
+        const activeSince = new Date(
+            Date.now() - ACTIVE_RIDE_MAX_AGE_HOURS * 60 * 60 * 1000
+        );
+
         const ride = await rideModel
             .findOne({
                 captain: captainId,
                 status: {
-                    $in: ["accepted", "arrived", "ongoing", "completed"],
+                    $in: ["accepted", "arrived", "ongoing"],
                 },
                 cancelledAt: null,
                 cancelledBy: null,
+                updatedAt: {
+                    $gte: activeSince,
+                },
             })
             .sort({ updatedAt: -1 })
             .populate("user")
@@ -1399,13 +1410,6 @@ module.exports.userAtPickup = async (req, res) => {
 
         let captainNotified = false;
 
-        /*
-          CORRECCIÓN:
-          Conservamos el evento viejo user-confirmed-at-pickup
-          y enviamos también user-confirmed-pickup + ride-updated.
-          Así el conductor tiene más probabilidad de recibir el estado aunque
-          haya reconectado o el frontend escuche otro nombre de evento.
-        */
         if (updatedRide?.captain?.socketId) {
             const payload = {
                 rideId: updatedRide._id,
