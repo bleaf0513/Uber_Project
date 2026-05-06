@@ -147,6 +147,26 @@ function cleanComment(value) {
     return String(value || "").trim().slice(0, 500);
 }
 
+function parseRouteStops(rawStops) {
+    if (!rawStops) return [];
+
+    if (Array.isArray(rawStops)) {
+        return rawStops
+            .map((stop) => String(stop || "").trim())
+            .filter(Boolean);
+    }
+
+    return String(rawStops)
+        .split("|")
+        .map((stop) => stop.trim())
+        .filter(Boolean);
+}
+
+function roundToHundred(value) {
+    const number = Number(value) || 0;
+    return Math.ceil(number / 100) * 100;
+}
+
 module.exports.createRide = async (req, res) => {
     const errors = validationResult(req);
 
@@ -154,13 +174,14 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { pickup, destination, vehicle, offeredFare } = req.body;
+    const { pickup, destination, routeStops, vehicle, offeredFare } = req.body;
 
     try {
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
             destination,
+            routeStops,
             vehicle,
             offeredFare,
         });
@@ -261,7 +282,8 @@ module.exports.createRide = async (req, res) => {
 
         const rideWithUser = await rideModel
             .findOne({ _id: ride._id })
-            .populate("user");
+            .populate("user")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
 
         if (!rideWithUser) {
             return res.status(500).json({
@@ -343,10 +365,11 @@ module.exports.getFare = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { pickup, destination } = req.query;
+    const { pickup, destination, stops } = req.query;
+    const routeStops = parseRouteStops(stops);
 
     try {
-        const fare = await rideService.getFare(pickup, destination);
+        const fare = await rideService.getFare(pickup, destination, routeStops);
         return res.status(200).json(fare);
     } catch (err) {
         const status =
@@ -358,6 +381,152 @@ module.exports.getFare = async (req, res) => {
 
         return res.status(500).json({
             message: err.message || "Error interno del servidor",
+        });
+    }
+};
+
+module.exports.updateUserOfferedFare = async (req, res) => {
+    const { rideId, offeredFare } = req.body;
+
+    try {
+        if (!rideId) {
+            return res.status(400).json({
+                message: "Falta rideId.",
+            });
+        }
+
+        const nextFare = roundToHundred(offeredFare);
+
+        if (!Number.isFinite(nextFare) || nextFare <= 0) {
+            return res.status(400).json({
+                message: "La nueva oferta no es válida.",
+            });
+        }
+
+        let ride = await rideModel
+            .findOne({
+                _id: rideId,
+                user: req.user._id,
+                status: { $in: ["pending", "negotiating"] },
+                negotiationStatus: "open",
+                cancelledAt: null,
+                cancelledBy: null,
+                captain: null,
+            })
+            .populate("user", "fullname email socketId phone")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        if (!ride) {
+            return res.status(404).json({
+                message:
+                    "No se encontró la solicitud activa o ya no permite cambiar la oferta.",
+            });
+        }
+
+        const currentFare = Number(
+            ride.offeredFare || ride.fare || ride.suggestedFare || 0
+        );
+
+        if (nextFare <= currentFare) {
+            return res.status(400).json({
+                message: `La nueva oferta debe ser mayor a la actual (${currentFare}).`,
+            });
+        }
+
+        ride.offeredFare = nextFare;
+        ride.fare = nextFare;
+
+        if (ride.status === "pending") {
+            ride.status = "negotiating";
+        }
+
+        await ride.save();
+
+        const updatedRide = await rideModel
+            .findById(ride._id)
+            .populate("user", "fullname email socketId phone")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        const payload = ridePayloadWithActiveOffers(updatedRide);
+
+        emitToUser(updatedRide.user, {
+            event: "ride-offer-updated",
+            data: payload,
+        });
+
+        emitToUser(updatedRide.user, {
+            event: "ride-updated",
+            data: payload,
+        });
+
+        for (const offer of updatedRide.driverOffers || []) {
+            if (offer?.captain) {
+                emitToCaptain(offer.captain, {
+                    event: "ride-user-offer-updated",
+                    data: payload,
+                });
+
+                emitToCaptain(offer.captain, {
+                    event: "ride-updated",
+                    data: payload,
+                });
+            }
+        }
+
+        try {
+            const pickupCoordinates = await mapService.getAddressCoordinates(
+                updatedRide.pickup
+            );
+
+            if (
+                pickupCoordinates &&
+                Number.isFinite(pickupCoordinates.ltd) &&
+                Number.isFinite(pickupCoordinates.lng)
+            ) {
+                const SEARCH_RADIUS_KM = 15;
+
+                const captainsInRadius = await mapService.getCaptainsInTheRadius(
+                    pickupCoordinates.ltd,
+                    pickupCoordinates.lng,
+                    SEARCH_RADIUS_KM
+                );
+
+                for (const captain of captainsInRadius || []) {
+                    const socketId = captain?.socketId || null;
+                    if (!socketId) continue;
+
+                    sendMessageToSocketId(socketId, {
+                        event: "new-ride",
+                        data: updatedRide,
+                    });
+
+                    sendMessageToSocketId(socketId, {
+                        event: "ride-user-offer-updated",
+                        data: payload,
+                    });
+
+                    sendMessageToSocketId(socketId, {
+                        event: "ride-updated",
+                        data: payload,
+                    });
+                }
+            }
+        } catch (notifyError) {
+            console.warn(
+                "[updateUserOfferedFare] No se pudo reenviar a conductores cercanos:",
+                notifyError?.message
+            );
+        }
+
+        return res.status(200).json({
+            message: "Oferta actualizada correctamente.",
+            ride: payload,
+        });
+    } catch (err) {
+        console.error("[updateUserOfferedFare] error:", err);
+
+        return res.status(500).json({
+            message: err.message || "Error actualizando la oferta.",
         });
     }
 };
@@ -785,11 +954,6 @@ module.exports.getCaptainActiveRide = async (req, res) => {
             });
         }
 
-        /*
-          CORRECCIÓN:
-          Solo recupera carreras realmente activas y recientes.
-          No debe traer completed ni viajes viejos de pruebas anteriores.
-        */
         const ACTIVE_RIDE_MAX_AGE_HOURS = 4;
 
         const activeSince = new Date(

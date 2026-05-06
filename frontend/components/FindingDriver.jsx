@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import axios from "axios";
 import { getApiBaseUrl } from "../src/apiBase";
 
@@ -7,31 +7,47 @@ const VEHICLE_META = {
     label: "Moto",
     image: "moto",
     description: "Rápida y económica",
+    accent: "from-purple-600 to-purple-950",
   },
   car: {
     label: "Carro",
     image: "car",
     description: "Cómodo y espacioso",
+    accent: "from-purple-700 to-purple-950",
   },
   light_cargo: {
     label: "Carga liviana",
     image: "auto",
     description: "Ideal para paquetes y bultos pequeños",
+    accent: "from-violet-700 to-purple-950",
   },
   van: {
     label: "Furgón / Camioneta",
     image: "van",
     description: "Más espacio para mercancía y mudanzas pequeñas",
+    accent: "from-purple-800 to-slate-950",
   },
   truck: {
     label: "Camión",
     image: "truck",
     description: "Para carga pesada y trayectos logísticos",
+    accent: "from-purple-950 to-black",
   },
+};
+
+const OFFER_STEPS = [500, 1000, 2000];
+
+const roundToHundred = (value) => {
+  const number = Number(value) || 0;
+  return Math.ceil(number / 100) * 100;
 };
 
 const FindingDriver = (props) => {
   const [cancelling, setCancelling] = useState(false);
+  const [updatingFare, setUpdatingFare] = useState(false);
+  const [localFare, setLocalFare] = useState(0);
+  const [lastSavedFare, setLastSavedFare] = useState(0);
+  const [fareMessage, setFareMessage] = useState("");
 
   const formatAddress = (address = "") => {
     const safeAddress = String(address || "").trim();
@@ -54,12 +70,47 @@ const FindingDriver = (props) => {
 
   const formatCOP = (value) => {
     const number = Number(value) || 0;
+
     return new Intl.NumberFormat("es-CO", {
       style: "currency",
       currency: "COP",
       maximumFractionDigits: 0,
     }).format(Math.ceil(number));
   };
+
+  const selectedVehicleKey = VEHICLE_META[props?.selectedVehicle]
+    ? props.selectedVehicle
+    : "car";
+
+  const selectedVehicle = VEHICLE_META[selectedVehicleKey];
+  const vehicleImg = `${import.meta.env.BASE_URL}vehicles/${selectedVehicle.image}.png`;
+
+  const serverFare = useMemo(() => {
+    return Number(
+      props?.ride?.offeredFare ??
+        props?.ride?.fare ??
+        props?.selectedPrice ??
+        0
+    );
+  }, [props?.ride?.offeredFare, props?.ride?.fare, props?.selectedPrice]);
+
+  useEffect(() => {
+    const normalizedFare = roundToHundred(serverFare);
+
+    setLocalFare(normalizedFare);
+    setLastSavedFare(normalizedFare);
+  }, [serverFare]);
+
+  const hasFareChanged = Number(localFare) > Number(lastSavedFare);
+
+  const { firstPart, secondPart } = formatAddress(props?.pickup);
+  const { firstPart: destFirstPart, secondPart: destSecondPart } = formatAddress(
+    props?.destination
+  );
+
+  const routeStops = Array.isArray(props.routeStops)
+    ? props.routeStops.filter(Boolean)
+    : [];
 
   const closePanelsSafely = () => {
     if (typeof props.setVehicleFound === "function") {
@@ -76,6 +127,7 @@ const FindingDriver = (props) => {
 
     try {
       setCancelling(true);
+
       const token = localStorage.getItem("token");
 
       if (!props?.ride?._id) {
@@ -96,6 +148,7 @@ const FindingDriver = (props) => {
       closePanelsSafely();
     } catch (error) {
       console.error("Error cancelando solicitud:", error);
+
       alert(
         error?.response?.data?.message ||
           error?.message ||
@@ -106,43 +159,107 @@ const FindingDriver = (props) => {
     }
   };
 
-  const { firstPart, secondPart } = formatAddress(props?.pickup);
-  const { firstPart: destFirstPart } = formatAddress(props?.destination);
+  const increaseLocalFare = (amount) => {
+    setFareMessage("");
 
-  const selectedVehicleKey = VEHICLE_META[props?.selectedVehicle]
-    ? props.selectedVehicle
-    : "car";
+    setLocalFare((prev) => {
+      const base = Number(prev) || Number(lastSavedFare) || 0;
+      return roundToHundred(base + Number(amount || 0));
+    });
+  };
 
-  const selectedVehicle = VEHICLE_META[selectedVehicleKey];
-  const vehicleImg = `${import.meta.env.BASE_URL}vehicles/${selectedVehicle.image}.png`;
+  const resetFare = () => {
+    setLocalFare(lastSavedFare);
+    setFareMessage("");
+  };
 
-  const displayedFare =
-    props?.ride?.offeredFare ??
-    props?.ride?.fare ??
-    props?.selectedPrice ??
-    0;
+  const updateOfferFare = async () => {
+    if (updatingFare) return;
+
+    if (!props?.ride?._id) {
+      alert("No se encontró la solicitud activa.");
+      return;
+    }
+
+    const nextFare = roundToHundred(localFare);
+
+    if (!nextFare || nextFare <= lastSavedFare) {
+      setFareMessage("Sube tu oferta para atraer más conductores.");
+      return;
+    }
+
+    try {
+      setUpdatingFare(true);
+      setFareMessage("");
+
+      const token = localStorage.getItem("token");
+
+      const response = await axios.patch(
+        `${getApiBaseUrl()}/rides/update-offer`,
+        {
+          rideId: props.ride._id,
+          offeredFare: nextFare,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const updatedRide = response?.data?.ride || response?.data || null;
+
+      setLastSavedFare(nextFare);
+      setLocalFare(nextFare);
+      setFareMessage("Oferta actualizada. Los conductores verán el nuevo valor.");
+
+      /*
+       * Si luego quieres que Home actualice el objeto ride en vivo,
+       * podemos pasar una prop setRide desde Home.
+       * Por ahora el backend será la fuente real para conductores.
+       */
+      if (typeof props.onRideUpdated === "function" && updatedRide?._id) {
+        props.onRideUpdated(updatedRide);
+      }
+    } catch (error) {
+      console.error("Error actualizando oferta:", error);
+
+      alert(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo actualizar la oferta."
+      );
+    } finally {
+      setUpdatingFare(false);
+    }
+  };
 
   return (
-    <div className="bg-white rounded-t-[24px] h-full flex flex-col">
+    <div className="bg-[#f7f3fb] rounded-t-[26px] h-full flex flex-col overflow-hidden">
       <div className="flex items-center justify-center pt-3 pb-2">
-        <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+        <div className="w-14 h-1.5 rounded-full bg-purple-200"></div>
       </div>
 
       <div className="px-4 pb-3">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-xs font-semibold text-blue-700">
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-xs font-black uppercase tracking-[0.14em] text-purple-700">
               Buscando transportador
             </p>
-            <h2 className="text-xl font-bold text-gray-900">
+
+            <h2 className="text-[22px] font-black text-gray-950 leading-tight">
               Buscando conductores
             </h2>
+
+            <p className="text-xs text-gray-500 mt-0.5">
+              Puedes mejorar tu oferta mientras esperas.
+            </p>
           </div>
 
-          <div role="status">
+          <div className="w-11 h-11 rounded-full bg-white border border-purple-100 shadow-sm flex items-center justify-center shrink-0">
             <svg
               aria-hidden="true"
-              className="inline w-6 h-6 text-gray-200 animate-spin fill-blue-600"
+              className="w-6 h-6 text-purple-100 animate-spin fill-purple-700"
               viewBox="0 0 100 101"
               fill="none"
               xmlns="http://www.w3.org/2000/svg"
@@ -156,76 +273,183 @@ const FindingDriver = (props) => {
                 fill="currentFill"
               />
             </svg>
-            <span className="sr-only">Cargando...</span>
           </div>
         </div>
       </div>
 
       <div className="px-4 pb-3">
-        <div className="rounded-2xl border border-gray-200 bg-gray-50 px-3 py-3 flex items-center gap-3">
-          <img
-            src={vehicleImg}
-            alt={selectedVehicle.label}
-            className="w-20 h-14 object-contain"
-          />
+        <div className="rounded-[24px] overflow-hidden bg-white border border-purple-100 shadow-[0_10px_28px_rgba(76,29,149,0.10)]">
+          <div
+            className={`h-1.5 bg-gradient-to-r ${selectedVehicle.accent}`}
+          ></div>
 
-          <div className="flex-1 min-w-0">
-            <h3 className="text-lg font-bold text-gray-900">
-              {selectedVehicle.label}
-            </h3>
-            <p className="text-sm text-gray-600 truncate">
-              {firstPart || "Origen"} → {destFirstPart || "Destino"}
-            </p>
-            <p className="text-sm font-semibold text-gray-900 mt-1">
-              {formatCOP(displayedFare)}
-            </p>
+          <div className="px-3 py-3 flex items-center gap-3">
+            <div className="w-[86px] h-[66px] rounded-2xl bg-gradient-to-br from-purple-50 to-white border border-purple-100 flex items-center justify-center overflow-hidden shrink-0">
+              <img
+                src={vehicleImg}
+                alt={selectedVehicle.label}
+                className="w-full h-full object-contain p-1.5"
+              />
+            </div>
+
+            <div className="flex-1 min-w-0">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-lg font-black text-gray-950">
+                  {selectedVehicle.label}
+                </h3>
+
+                <span className="rounded-full bg-purple-50 text-purple-900 px-2.5 py-1 text-xs font-black">
+                  {formatCOP(lastSavedFare)}
+                </span>
+              </div>
+
+              <p className="text-sm text-gray-600 truncate mt-0.5">
+                {firstPart || "Origen"} → {destFirstPart || "Destino"}
+              </p>
+
+              <p className="text-xs text-gray-400 mt-1">
+                {selectedVehicle.description}
+              </p>
+            </div>
           </div>
         </div>
       </div>
 
+      <div className="px-4 pb-3">
+        <div className="rounded-[24px] bg-gradient-to-br from-purple-700 via-purple-800 to-purple-950 text-white shadow-[0_14px_34px_rgba(76,29,149,0.24)] p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-purple-100">
+                Mejorar mi oferta
+              </p>
+
+              <h3 className="text-2xl font-black mt-1">
+                {formatCOP(localFare)}
+              </h3>
+
+              <p className="text-xs text-white/75 mt-1">
+                Subir la oferta puede ayudarte a recibir respuestas más rápido.
+              </p>
+            </div>
+
+            {hasFareChanged ? (
+              <button
+                type="button"
+                onClick={resetFare}
+                disabled={updatingFare}
+                className="rounded-full bg-white/15 px-3 py-2 text-xs font-black text-white disabled:opacity-60"
+              >
+                Deshacer
+              </button>
+            ) : (
+              <span className="rounded-full bg-white/15 px-3 py-2 text-xs font-black text-white">
+                Actual
+              </span>
+            )}
+          </div>
+
+          <div className="grid grid-cols-3 gap-2 mt-4">
+            {OFFER_STEPS.map((step) => (
+              <button
+                key={step}
+                type="button"
+                onClick={() => increaseLocalFare(step)}
+                disabled={updatingFare}
+                className="rounded-2xl bg-white text-purple-900 py-2.5 text-sm font-black shadow-sm disabled:opacity-60"
+              >
+                +{formatCOP(step)}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={updateOfferFare}
+            disabled={!hasFareChanged || updatingFare}
+            className="w-full mt-3 rounded-2xl bg-black text-white py-3 text-sm font-black shadow-lg disabled:opacity-45"
+          >
+            {updatingFare ? "Actualizando oferta..." : "Actualizar oferta"}
+          </button>
+
+          {fareMessage ? (
+            <p className="text-xs font-semibold text-white/85 mt-3">
+              {fareMessage}
+            </p>
+          ) : null}
+        </div>
+      </div>
+
       <div className="px-4 flex-1 overflow-auto">
-        <div className="space-y-3">
+        <div className="rounded-[22px] bg-white border border-purple-100 p-4 space-y-3">
           <div className="flex items-start gap-3">
-            <i className="ri-map-pin-range-fill ri-lg mt-1"></i>
+            <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center shrink-0">
+              <i className="ri-map-pin-user-fill text-xl text-purple-800"></i>
+            </div>
+
             <div className="min-w-0">
-              <p className="text-base font-semibold text-gray-900">
+              <p className="text-base font-black text-gray-950">
                 {firstPart || "Origen"}
               </p>
+
               <p className="text-sm text-gray-600 truncate">
                 {secondPart || "Punto de recogida"}
               </p>
             </div>
           </div>
 
+          {routeStops.length > 0 &&
+            routeStops.map((stop, index) => (
+              <div key={`${stop}-${index}`} className="flex items-start gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
+                  <span className="text-sm font-black text-purple-900">
+                    {index + 1}
+                  </span>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-purple-900">
+                    Parada {index + 1}
+                  </p>
+
+                  <p className="text-sm text-gray-700 truncate">{stop}</p>
+                </div>
+              </div>
+            ))}
+
           <div className="flex items-start gap-3">
-            <i className="ri-square-fill ri-lg mt-1"></i>
+            <div className="w-10 h-10 rounded-2xl bg-gray-100 flex items-center justify-center shrink-0">
+              <i className="ri-flag-2-fill text-xl text-gray-900"></i>
+            </div>
+
             <div className="min-w-0">
-              <p className="text-base font-semibold text-gray-900">
+              <p className="text-base font-black text-gray-950">
                 {destFirstPart || "Destino"}
               </p>
-              <p className="text-sm text-gray-600">
-                Servicio {selectedVehicle.label.toLowerCase()}
+
+              <p className="text-sm text-gray-600 truncate">
+                {destSecondPart || `Servicio ${selectedVehicle.label.toLowerCase()}`}
               </p>
             </div>
           </div>
 
-          <div className="rounded-2xl border border-dashed border-gray-300 bg-gray-50 p-4 mt-2">
-            <p className="text-sm font-semibold text-gray-800">
-              Esperando tu decisión
+          <div className="rounded-2xl border border-dashed border-purple-200 bg-purple-50 p-3">
+            <p className="text-sm font-black text-purple-900">
+              Esperando respuestas
             </p>
-            <p className="text-xs text-gray-600 mt-1">
-              Las ofertas activas aparecen arriba del mapa. Puedes aceptarlas o rechazarlas desde allí.
+
+            <p className="text-xs text-purple-800 mt-1">
+              Las contraofertas aparecerán arriba del mapa. Puedes aceptar la mejor opción.
             </p>
           </div>
         </div>
       </div>
 
-      <div className="px-4 pt-3 pb-4 border-t border-gray-100">
+      <div className="px-4 pt-3 pb-4 border-t border-purple-100 bg-white">
         <button
           type="button"
           onClick={cancelRideRequest}
-          disabled={cancelling}
-          className="w-full py-3 text-white text-base font-semibold rounded-2xl disabled:opacity-60"
+          disabled={cancelling || updatingFare}
+          className="w-full py-3.5 text-white text-base font-black rounded-2xl disabled:opacity-60 shadow-lg"
           style={{
             background: "linear-gradient(to right, #cb2d3e, #ef473a)",
           }}

@@ -29,6 +29,19 @@ router.post(
         .notEmpty()
         .isLength({ min: 3 })
         .withMessage("Invalid Destination Address"),
+    body("routeStops")
+        .optional()
+        .custom((value) => {
+            if (Array.isArray(value)) {
+                return value.every((stop) => typeof stop === "string");
+            }
+
+            if (typeof value === "string") {
+                return true;
+            }
+
+            throw new Error("Invalid route stops");
+        }),
     body("vehicle")
         .isString()
         .notEmpty()
@@ -54,6 +67,10 @@ router.get(
         .notEmpty()
         .isLength({ min: 3 })
         .withMessage("Invalid Destination Address"),
+    query("stops")
+        .optional()
+        .isString()
+        .withMessage("Invalid stops"),
     rideController.getFare
 );
 
@@ -89,6 +106,16 @@ router.post(
     rideController.userRespondToCaptainOffer
 );
 
+router.patch(
+    "/update-offer",
+    authMiddleware.authUser,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    body("offeredFare")
+        .isNumeric()
+        .withMessage("Invalid offered fare"),
+    rideController.updateUserOfferedFare
+);
+
 router.get(
     "/my-active",
     authMiddleware.authUser,
@@ -96,7 +123,6 @@ router.get(
 );
 
 /*
-  NUEVO:
   Esta ruta permite que el conductor recupere la carrera activa
   si actualiza la página o si entra directo a /captain-riding.
 */
