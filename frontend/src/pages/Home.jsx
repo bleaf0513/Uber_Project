@@ -1847,9 +1847,9 @@ function Home() {
       </div>
 
       <div
-        ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[40%] shadow-2xl"
-      >
+  ref={vehicleFoundRef}
+  className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[26px] bg-white overflow-hidden h-[58%] max-h-[620px] shadow-2xl"
+>
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
           setVehicleFound={setVehicleFound}
