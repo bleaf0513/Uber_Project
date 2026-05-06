@@ -1,6 +1,52 @@
-const mongoose = require('mongoose');
-const jwt = require('jsonwebtoken');
-const bcrypt = require('bcrypt');
+const mongoose = require("mongoose");
+const jwt = require("jsonwebtoken");
+const bcrypt = require("bcrypt");
+
+const fcmTokenSchema = new mongoose.Schema(
+    {
+        token: {
+            type: String,
+            required: true,
+            trim: true,
+        },
+
+        platform: {
+            type: String,
+            enum: ["web", "android", "ios", "unknown"],
+            default: "unknown",
+        },
+
+        deviceId: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+
+        userAgent: {
+            type: String,
+            trim: true,
+            default: "",
+        },
+
+        active: {
+            type: Boolean,
+            default: true,
+        },
+
+        lastUsedAt: {
+            type: Date,
+            default: Date.now,
+        },
+
+        createdAt: {
+            type: Date,
+            default: Date.now,
+        },
+    },
+    {
+        _id: false,
+    }
+);
 
 const captainSchema = new mongoose.Schema(
     {
@@ -8,12 +54,12 @@ const captainSchema = new mongoose.Schema(
             firstname: {
                 type: String,
                 required: true,
-                minlength: [3, 'First name must be at least 3 characters long'],
+                minlength: [3, "First name must be at least 3 characters long"],
                 trim: true,
             },
             lastname: {
                 type: String,
-                minlength: [3, 'Last name must be at least 3 characters long'],
+                minlength: [3, "Last name must be at least 3 characters long"],
                 trim: true,
             },
         },
@@ -24,8 +70,8 @@ const captainSchema = new mongoose.Schema(
             unique: true,
             lowercase: true,
             trim: true,
-            match: [/\S+@\S+\.\S+/, 'Please enter a valid email'],
-            minlength: [6, 'Email must be at least 6 characters long'],
+            match: [/\S+@\S+\.\S+/, "Please enter a valid email"],
+            minlength: [6, "Email must be at least 6 characters long"],
         },
 
         password: {
@@ -41,38 +87,41 @@ const captainSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ['active', 'inactive'],
-            default: 'active',
+            enum: ["active", "inactive"],
+            default: "active",
         },
 
         vehicle: {
             color: {
                 type: String,
                 required: true,
-                minlength: [3, 'Color must be at least 3 characters long'],
+                minlength: [3, "Color must be at least 3 characters long"],
                 trim: true,
             },
             plate: {
                 type: String,
                 required: true,
-                minlength: [3, 'Plate must be at least 3 characters long'],
+                minlength: [3, "Plate must be at least 3 characters long"],
                 uppercase: true,
                 trim: true,
             },
             capacity: {
                 type: Number,
                 required: true,
-                min: [1, 'Capacity must be at least 1'],
+                min: [1, "Capacity must be at least 1"],
             },
             vehicleType: {
                 type: String,
                 required: true,
                 enum: [
-                    'motorcycle',
-                    'car',
-                    'light_cargo',
-                    'van',
-                    'truck',
+                    "motorcycle",
+                    "car",
+                    "light_cargo",
+                    "van",
+                    "truck",
+                    "motocarro",
+                    "pickup",
+                    "moving",
                 ],
             },
         },
@@ -88,14 +137,12 @@ const captainSchema = new mongoose.Schema(
             },
         },
 
-        // Foto real del conductor
         profileImage: {
             type: String,
-            default: '',
+            default: "",
             trim: true,
         },
 
-        // Calificación real
         rating: {
             type: Number,
             default: 5,
@@ -103,7 +150,6 @@ const captainSchema = new mongoose.Schema(
             max: 5,
         },
 
-        // Control opcional de sesión activa
         onlineSession: {
             isOnline: {
                 type: Boolean,
@@ -113,13 +159,16 @@ const captainSchema = new mongoose.Schema(
                 type: Date,
                 default: null,
             },
+            startedAt: {
+                type: Date,
+                default: null,
+            },
             lastSeenAt: {
                 type: Date,
                 default: null,
             },
         },
 
-        // Estadísticas acumuladas del conductor
         stats: {
             hoursOnline: {
                 type: Number,
@@ -157,6 +206,17 @@ const captainSchema = new mongoose.Schema(
                 min: 0,
             },
         },
+
+        /*
+         * Tokens de notificaciones push.
+         * Aquí guardamos los dispositivos/navegadores del conductor
+         * para avisarle cuando reciba ofertas de mercancía, espacio, cupos
+         * o eventos importantes cuando esté fuera de la app.
+         */
+        fcmTokens: {
+            type: [fcmTokenSchema],
+            default: [],
+        },
     },
     {
         timestamps: true,
@@ -165,10 +225,15 @@ const captainSchema = new mongoose.Schema(
 
 captainSchema.methods.generateAuthToken = function () {
     const token = jwt.sign(
-        { _id: this._id },
+        {
+            _id: this._id,
+        },
         process.env.JWT_SECRET,
-        { expiresIn: '24h' }
+        {
+            expiresIn: "24h",
+        }
     );
+
     return token;
 };
 
@@ -180,6 +245,10 @@ captainSchema.statics.hashPassword = async function (password) {
     return await bcrypt.hash(password, 10);
 };
 
-const captainModel = mongoose.model('captain', captainSchema);
+captainSchema.index({ email: 1 });
+captainSchema.index({ status: 1 });
+captainSchema.index({ "fcmTokens.token": 1 });
+
+const captainModel = mongoose.model("captain", captainSchema);
 
 module.exports = captainModel;
