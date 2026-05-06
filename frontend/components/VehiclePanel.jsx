@@ -4,15 +4,15 @@ function VehicleThumb({ name, label }) {
   const src = `${import.meta.env.BASE_URL}vehicles/${name}.png`;
 
   return (
-    <div className="h-[92px] w-[120px] rounded-2xl bg-white shadow-sm border border-gray-100 flex items-center justify-center overflow-hidden shrink-0">
+    <div className="w-[78px] h-[58px] rounded-2xl bg-gradient-to-br from-purple-50 to-white border border-purple-100 flex items-center justify-center overflow-hidden shrink-0">
       <img
         src={src}
         alt={label}
-        className="h-full w-full object-contain object-center p-2"
+        className="w-full h-full object-contain p-1.5"
         loading="lazy"
         decoding="async"
-        width={160}
-        height={92}
+        width={120}
+        height={80}
       />
     </div>
   );
@@ -70,13 +70,13 @@ const VehiclePanel = (props) => {
 
   if (props.pricingError) {
     return (
-      <div className="w-full min-h-[45vw] flex flex-col justify-center items-center gap-4 px-6 py-8 bg-white rounded-t-[28px]">
-        <div className="w-14 h-14 rounded-full bg-red-50 flex items-center justify-center">
-          <i className="ri-error-warning-line text-3xl text-red-600"></i>
+      <div className="w-full min-h-[230px] flex flex-col justify-center items-center gap-4 px-6 py-7 bg-white rounded-t-[26px]">
+        <div className="w-12 h-12 rounded-2xl bg-red-50 flex items-center justify-center">
+          <i className="ri-error-warning-line text-2xl text-red-600"></i>
         </div>
 
         <div className="text-center">
-          <p className="text-lg font-black text-gray-900">
+          <p className="text-base font-black text-gray-900">
             No pudimos calcular la tarifa
           </p>
           <p className="text-sm text-red-600 mt-1">{props.pricingError}</p>
@@ -85,7 +85,7 @@ const VehiclePanel = (props) => {
         <button
           type="button"
           onClick={closePanel}
-          className="rounded-full bg-gradient-to-r from-purple-700 to-purple-950 text-white text-sm font-bold px-6 py-3"
+          className="rounded-full bg-purple-800 text-white text-sm font-bold px-6 py-2.5"
         >
           Volver
         </button>
@@ -95,11 +95,11 @@ const VehiclePanel = (props) => {
 
   if (props.distance?.status !== "OK") {
     return (
-      <div className="w-full h-[70vw] flex flex-col justify-center items-center bg-white rounded-t-[28px]">
+      <div className="w-full h-[260px] flex flex-col justify-center items-center bg-white rounded-t-[26px]">
         <div role="status">
           <svg
             aria-hidden="true"
-            className="w-9 h-9 text-gray-200 animate-spin fill-purple-700"
+            className="w-8 h-8 text-gray-200 animate-spin fill-purple-700"
             viewBox="0 0 100 101"
             fill="none"
             xmlns="http://www.w3.org/2000/svg"
@@ -116,8 +116,8 @@ const VehiclePanel = (props) => {
           <span className="sr-only">Cargando...</span>
         </div>
 
-        <p className="mt-4 text-sm font-semibold text-gray-600">
-          Calculando ruta y tarifas...
+        <p className="mt-3 text-sm font-semibold text-gray-600">
+          Calculando servicios...
         </p>
       </div>
     );
@@ -130,15 +130,9 @@ const VehiclePanel = (props) => {
   const routeDistanceText = formatDistance(baseDistance);
 
   const resolvedPrices = {
-    motorcycle: normalizePrice(
-      props.prices?.motorcycle,
-      props.prices?.moto
-    ),
+    motorcycle: normalizePrice(props.prices?.motorcycle, props.prices?.moto),
     car: normalizePrice(props.prices?.car),
-    light_cargo: normalizePrice(
-      props.prices?.light_cargo,
-      props.prices?.auto
-    ),
+    light_cargo: normalizePrice(props.prices?.light_cargo, props.prices?.auto),
     van: normalizePrice(props.prices?.van),
     truck: normalizePrice(props.prices?.truck),
   };
@@ -150,10 +144,9 @@ const VehiclePanel = (props) => {
       title: "Carro",
       seats: "4",
       subtitle: "Cómodo y espacioso",
-      description: "Ideal para viajes urbanos y trayectos familiares.",
       price: resolvedPrices.car,
       enabled: Number(resolvedPrices.car) > 0,
-      accent: "from-purple-700 to-purple-950",
+      badge: "Popular",
     },
     {
       key: "motorcycle",
@@ -161,10 +154,9 @@ const VehiclePanel = (props) => {
       title: "Moto",
       seats: "1",
       subtitle: "Rápida y económica",
-      description: "Buena opción para llegar más ágil en ciudad.",
       price: resolvedPrices.motorcycle,
       enabled: Number(resolvedPrices.motorcycle) > 0,
-      accent: "from-violet-600 to-purple-900",
+      badge: "Ágil",
     },
     {
       key: "light_cargo",
@@ -172,10 +164,9 @@ const VehiclePanel = (props) => {
       title: "Carga liviana",
       seats: "Carga",
       subtitle: "Paquetes y bultos pequeños",
-      description: "Pensado para entregas rápidas de bajo volumen.",
       price: resolvedPrices.light_cargo,
       enabled: Number(resolvedPrices.light_cargo) > 0,
-      accent: "from-purple-800 to-indigo-950",
+      badge: "Carga",
     },
     {
       key: "van",
@@ -183,10 +174,9 @@ const VehiclePanel = (props) => {
       title: "Furgón / Camioneta",
       seats: "Carga",
       subtitle: "Más espacio para mercancía",
-      description: "Útil para pedidos grandes o mudanzas pequeñas.",
       price: resolvedPrices.van,
       enabled: Number(resolvedPrices.van) > 0,
-      accent: "from-purple-700 to-slate-950",
+      badge: "Grande",
     },
     {
       key: "truck",
@@ -194,10 +184,9 @@ const VehiclePanel = (props) => {
       title: "Camión",
       seats: "Carga",
       subtitle: "Carga pesada y logística",
-      description: "Para operaciones de mayor volumen.",
       price: resolvedPrices.truck,
       enabled: Number(resolvedPrices.truck) > 0,
-      accent: "from-purple-950 to-black",
+      badge: "Pesado",
     },
   ];
 
@@ -211,45 +200,48 @@ const VehiclePanel = (props) => {
   };
 
   return (
-    <div className="bg-white rounded-t-[28px] overflow-hidden">
-      <div className="sticky top-0 z-10 bg-white/95 backdrop-blur border-b border-gray-100">
-        <div className="flex justify-center pt-3 pb-2">
+    <div className="bg-[#f6f3fa] rounded-t-[26px] overflow-hidden max-h-[58vh]">
+      <div className="sticky top-0 z-10 bg-[#f6f3fa]/95 backdrop-blur border-b border-purple-100">
+        <div className="flex justify-center pt-2 pb-1">
           <button
             type="button"
             onClick={closePanel}
-            className="w-12 h-1.5 rounded-full bg-gray-300"
+            className="w-12 h-1.5 rounded-full bg-purple-200"
             aria-label="Cerrar panel"
           />
         </div>
 
-        <div className="px-5 pb-4 flex items-center justify-between gap-3">
+        <div className="px-4 pb-3 flex items-center justify-between gap-3">
           <div>
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-purple-700">
-              Central Go
-            </p>
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-purple-700"></span>
+              <p className="text-xs font-black uppercase tracking-[0.14em] text-purple-800">
+                Servicios disponibles
+              </p>
+            </div>
 
-            <h2 className="text-2xl font-black text-gray-950 leading-tight">
-              Elige tu servicio
+            <h2 className="text-xl font-black text-gray-950 leading-tight mt-1">
+              Elige cómo quieres viajar
             </h2>
 
-            <p className="text-sm text-gray-500 mt-1">
-              {routeDurationText}
-              {routeDistanceText ? ` · ${routeDistanceText}` : ""} de ruta estimada
+            <p className="text-xs text-gray-500 mt-0.5">
+              Ruta estimada: {routeDurationText}
+              {routeDistanceText ? ` · ${routeDistanceText}` : ""}
             </p>
           </div>
 
           <button
             type="button"
             onClick={closePanel}
-            className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center shrink-0"
+            className="w-10 h-10 rounded-full bg-white shadow-sm border border-purple-100 flex items-center justify-center shrink-0"
             aria-label="Volver"
           >
-            <i className="ri-arrow-down-s-line text-3xl text-gray-900"></i>
+            <i className="ri-arrow-down-s-line text-2xl text-purple-900"></i>
           </button>
         </div>
       </div>
 
-      <div className="px-4 pt-4 pb-6 space-y-3">
+      <div className="px-3 pt-3 pb-5 space-y-2.5 overflow-y-auto max-h-[calc(58vh-92px)]">
         {vehicleOptions.map((vehicle) => {
           return (
             <button
@@ -257,79 +249,68 @@ const VehiclePanel = (props) => {
               type="button"
               onClick={() => handleSelectVehicle(vehicle)}
               disabled={!vehicle.enabled}
-              className={`w-full text-left rounded-[24px] border transition-all ${
+              className={`w-full text-left rounded-[22px] border overflow-hidden transition-all ${
                 vehicle.enabled
-                  ? "bg-white border-gray-100 shadow-[0_10px_30px_rgba(15,23,42,0.08)] active:scale-[0.99]"
-                  : "bg-gray-50 border-gray-200 opacity-60"
+                  ? "bg-white border-purple-100 shadow-[0_8px_22px_rgba(76,29,149,0.10)] active:scale-[0.99]"
+                  : "bg-gray-100 border-gray-200 opacity-60"
               }`}
             >
-              <div className="p-3 flex items-center gap-4">
+              <div className="flex items-center gap-3 p-2.5">
                 <VehicleThumb name={vehicle.image} label={vehicle.title} />
 
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="text-xl font-black text-gray-950">
-                          {vehicle.title}
-                        </h3>
+                  <div className="flex items-center gap-2 min-w-0">
+                    <h3 className="text-[17px] font-black text-gray-950 truncate">
+                      {vehicle.title}
+                    </h3>
 
-                        <span className="inline-flex items-center gap-1 rounded-full bg-purple-50 text-purple-900 px-2.5 py-1 text-xs font-black">
-                          <i className="ri-user-fill text-sm"></i>
-                          {vehicle.seats}
-                        </span>
-                      </div>
+                    <span className="shrink-0 rounded-full bg-purple-100 text-purple-900 px-2 py-0.5 text-[10px] font-black">
+                      {vehicle.badge}
+                    </span>
+                  </div>
 
-                      <p className="text-sm font-semibold text-gray-600 mt-1">
-                        {vehicle.subtitle}
+                  <div className="flex items-center gap-2 mt-0.5 text-[12px] text-gray-500">
+                    <span className="inline-flex items-center gap-1">
+                      <i className="ri-user-fill text-purple-700"></i>
+                      {vehicle.seats}
+                    </span>
+
+                    <span className="w-1 h-1 rounded-full bg-gray-300"></span>
+
+                    <span className="truncate">{vehicle.subtitle}</span>
+                  </div>
+
+                  <div className="mt-1.5 inline-flex items-center gap-1.5 rounded-full bg-[#f4ecff] text-purple-900 px-2.5 py-1 text-[11px] font-bold">
+                    <i className="ri-route-line text-sm"></i>
+                    {routeDurationText}
+                    {routeDistanceText ? ` · ${routeDistanceText}` : ""}
+                  </div>
+                </div>
+
+                <div className="shrink-0 text-right pr-1">
+                  {vehicle.enabled ? (
+                    <>
+                      <p className="text-[10px] font-bold text-purple-500">
+                        Sugerida
                       </p>
-                    </div>
-
-                    <div className="text-right shrink-0">
-                      {vehicle.enabled ? (
-                        <>
-                          <p className="text-xs font-bold text-gray-400">
-                            Sugerida
-                          </p>
-                          <p className="text-xl font-black text-gray-950">
-                            {formatCOP(vehicle.price)}
-                          </p>
-                        </>
-                      ) : (
-                        <p className="text-sm font-bold text-gray-500">
-                          Sin tarifa
-                        </p>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-sm text-gray-500">
-                      <i className="ri-route-line text-purple-700 text-lg"></i>
-                      <span>
-                        {routeDurationText}
-                        {routeDistanceText ? ` · ${routeDistanceText}` : ""}
-                      </span>
-                    </div>
-
-                    {vehicle.enabled ? (
-                      <span
-                        className={`rounded-full bg-gradient-to-r ${vehicle.accent} text-white px-3 py-1.5 text-xs font-black shadow-sm`}
-                      >
-                        Seleccionar
-                      </span>
-                    ) : (
-                      <span className="rounded-full bg-gray-200 text-gray-600 px-3 py-1.5 text-xs font-black">
-                        Próximamente
-                      </span>
-                    )}
-                  </div>
-
-                  <p className="text-xs text-gray-400 mt-2 leading-relaxed">
-                    {vehicle.description}
-                  </p>
+                      <p className="text-[18px] leading-tight font-black text-gray-950">
+                        {formatCOP(vehicle.price)}
+                      </p>
+                      <p className="text-[10px] text-gray-400 mt-0.5">
+                        Toca para elegir
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-xs font-bold text-gray-500">
+                      Sin tarifa
+                    </p>
+                  )}
                 </div>
               </div>
+
+              {vehicle.enabled && (
+                <div className="h-1 w-full bg-gradient-to-r from-purple-700 via-fuchsia-600 to-purple-950"></div>
+              )}
             </button>
           );
         })}
