@@ -54,6 +54,11 @@ function Home() {
     distanceText: "",
   });
 
+  const [gpsStatus, setGpsStatus] = useState("idle");
+  const [gpsError, setGpsError] = useState("");
+  const [userCoords, setUserCoords] = useState(null);
+  const [pickupDetected, setPickupDetected] = useState(false);
+
   const panelRef = useRef(null);
   const titleRef = useRef(null);
   const searchRef = useRef(null);
@@ -64,6 +69,7 @@ function Home() {
   const confirmRidePanelRef = useRef(null);
   const suggestionTimerRef = useRef(null);
   const suggestionSeqRef = useRef(0);
+  const watchLocationRef = useRef(null);
 
   const { socket } = useContext(SocketContext);
   const { user } = useContext(UserDataContext);
@@ -73,6 +79,178 @@ function Home() {
   const normalizeSocketRide = useCallback((payload) => {
     return payload?.data?.ride || payload?.ride || payload?.data || payload || null;
   }, []);
+
+  const formatAddressFromGeocoder = (result) => {
+    if (!result) return "";
+
+    const formatted = result.formatted_address || "";
+
+    if (!formatted) return "";
+
+    return formatted
+      .replace(/, Colombia$/i, "")
+      .replace(/, Antioquia$/i, ", Antioquia")
+      .trim();
+  };
+
+  const reverseGeocodeCoords = useCallback(
+    async (lat, lng) => {
+      if (!lat || !lng) return "";
+
+      if (mapsApiLoaded && window.google?.maps?.Geocoder) {
+        try {
+          const geocoder = new window.google.maps.Geocoder();
+
+          const result = await new Promise((resolve, reject) => {
+            geocoder.geocode(
+              {
+                location: {
+                  lat: Number(lat),
+                  lng: Number(lng),
+                },
+              },
+              (results, status) => {
+                if (status === "OK" && Array.isArray(results) && results[0]) {
+                  resolve(results[0]);
+                } else {
+                  reject(new Error(status || "No se pudo detectar dirección"));
+                }
+              }
+            );
+          });
+
+          const address = formatAddressFromGeocoder(result);
+
+          if (address) return address;
+        } catch (error) {
+          console.warn("No se pudo convertir GPS en dirección:", error);
+        }
+      }
+
+      return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+    },
+    [mapsApiLoaded]
+  );
+
+  const emitUserLocation = useCallback(
+    (lat, lng) => {
+      if (!socket || !user?._id || !lat || !lng) return;
+
+      socket.emit("update-location-user", {
+        userId: user._id,
+        location: {
+          ltd: Number(lat),
+          lng: Number(lng),
+        },
+      });
+    },
+    [socket, user?._id]
+  );
+
+  const requestGpsLocation = useCallback(async () => {
+    if (!navigator.geolocation) {
+      setGpsStatus("denied");
+      setGpsError("Este dispositivo o navegador no permite usar GPS.");
+      return null;
+    }
+
+    setGpsStatus("loading");
+    setGpsError("");
+
+    return new Promise((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          const lat = position.coords.latitude;
+          const lng = position.coords.longitude;
+
+          setUserCoords({ lat, lng });
+          emitUserLocation(lat, lng);
+
+          const detectedAddress = await reverseGeocodeCoords(lat, lng);
+
+          if (detectedAddress) {
+            setPickup(detectedAddress);
+            setPickupDetected(true);
+          }
+
+          setGpsStatus("granted");
+          resolve({
+            lat,
+            lng,
+            address: detectedAddress,
+          });
+        },
+        (error) => {
+          console.warn("GPS no autorizado o no disponible:", error);
+
+          let message =
+            "No pudimos activar tu ubicación. Puedes escribir tu punto de recogida manualmente.";
+
+          if (error?.code === 1) {
+            message =
+              "Permiso de ubicación rechazado. Actívalo en el navegador para detectar tu punto de recogida.";
+          }
+
+          if (error?.code === 2) {
+            message =
+              "No pudimos detectar tu ubicación actual. Revisa el GPS o intenta escribir la dirección.";
+          }
+
+          if (error?.code === 3) {
+            message =
+              "La ubicación tardó demasiado. Intenta de nuevo o escribe la dirección manualmente.";
+          }
+
+          setGpsStatus("denied");
+          setGpsError(message);
+          resolve(null);
+        },
+        {
+          enableHighAccuracy: true,
+          maximumAge: 5000,
+          timeout: 18000,
+        }
+      );
+    });
+  }, [emitUserLocation, reverseGeocodeCoords]);
+
+  const startGpsWatch = useCallback(() => {
+    if (!user?._id || !navigator.geolocation || !socket) return;
+
+    if (watchLocationRef.current) {
+      navigator.geolocation.clearWatch(watchLocationRef.current);
+      watchLocationRef.current = null;
+    }
+
+    watchLocationRef.current = navigator.geolocation.watchPosition(
+      (position) => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        setUserCoords({ lat, lng });
+        emitUserLocation(lat, lng);
+      },
+      (error) => {
+        console.warn("No se pudo actualizar la ubicación del usuario:", error);
+      },
+      {
+        enableHighAccuracy: true,
+        maximumAge: 10000,
+        timeout: 20000,
+      }
+    );
+  }, [emitUserLocation, socket, user?._id]);
+
+  useEffect(() => {
+    if (!user?._id || !socket) return;
+
+    return () => {
+      if (watchLocationRef.current && navigator.geolocation) {
+        navigator.geolocation.clearWatch(watchLocationRef.current);
+        watchLocationRef.current = null;
+      }
+    };
+  }, [socket, user?._id]);
 
   const syncRideState = useCallback(
     (rideData) => {
@@ -371,7 +549,7 @@ function Home() {
 
       if (mapsApiLoaded && window.google?.maps) {
         try {
-          const { AutocompleteSuggestion } = await google.maps.importLibrary(
+          const { AutocompleteSuggestion } = await window.google.maps.importLibrary(
             "places"
           );
 
@@ -555,6 +733,7 @@ function Home() {
 
     if (activeInput === "pickup") {
       setPickup(selectedText);
+      setPickupDetected(false);
     } else {
       setDestination(selectedText);
     }
@@ -569,6 +748,30 @@ function Home() {
     if (nextPickup && nextDestination) {
       setVehiclePanel(true);
     }
+  };
+
+  const handleFindDriver = async () => {
+    if (!pickup) {
+      const gpsResult = await requestGpsLocation();
+
+      if (!gpsResult?.address && !gpsResult?.lat) {
+        alert(
+          "Primero activa tu ubicación GPS o escribe manualmente el punto de recogida."
+        );
+        return;
+      }
+    }
+
+    if (!destination || destination.trim().length < 3) {
+      setPanelOpen(true);
+      setActiveInput("destination");
+      alert("Ingresa tu destino para encontrar un conductor.");
+      return;
+    }
+
+    setPanelOpen(false);
+    setSuggestions([]);
+    setVehiclePanel(true);
   };
 
   const createRide = async (offeredFare) => {
@@ -934,36 +1137,19 @@ function Home() {
   }, [panelOpen]);
 
   useEffect(() => {
-    if (!user?._id || !navigator.geolocation || !socket) return;
+    if (gpsStatus === "granted") {
+      startGpsWatch();
+    }
+  }, [gpsStatus, startGpsWatch]);
 
-    const watchId = navigator.geolocation.watchPosition(
-      (position) => {
-        socket.emit("update-location-user", {
-          userId: user._id,
-          location: {
-            ltd: position.coords.latitude,
-            lng: position.coords.longitude,
-          },
-        });
-      },
-      (error) => {
-        console.warn("No se pudo obtener la ubicación del usuario:", error);
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 10000,
-        timeout: 20000,
-      }
-    );
-
-    return () => navigator.geolocation.clearWatch(watchId);
-  }, [user?._id, socket]);
+  const isFindDisabled =
+    gpsStatus === "loading" || !destination || destination.trim().length < 3;
 
   return (
-    <div className="h-screen position-relative w-screen">
+    <div className="h-screen relative w-screen overflow-hidden bg-slate-950">
       <div>
         <img
-          className="absolute w-20 ml-7 pt-7 z-30"
+          className="absolute w-20 ml-7 pt-7 z-30 drop-shadow-xl"
           src="/logo-centralgo.png"
           alt="Central Go"
         />
@@ -971,7 +1157,7 @@ function Home() {
 
       <Link
         onClick={logoutUser}
-        className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black flex items-center justify-center z-50"
+        className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black/85 backdrop-blur flex items-center justify-center z-50 shadow-xl"
       >
         <i
           style={{ color: "white" }}
@@ -994,6 +1180,27 @@ function Home() {
           showRouteToPickup={driverSelected}
           onEtaUpdate={setEtaInfo}
         />
+      </div>
+
+      <div className="absolute top-28 left-4 right-4 z-30 pointer-events-none">
+        <div className="inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur px-4 py-2 shadow-xl border border-white/70">
+          <span
+            className={`w-2.5 h-2.5 rounded-full ${
+              gpsStatus === "granted"
+                ? "bg-emerald-500"
+                : gpsStatus === "loading"
+                ? "bg-yellow-500"
+                : "bg-red-500"
+            }`}
+          ></span>
+          <span className="text-xs font-bold text-gray-800">
+            {gpsStatus === "granted"
+              ? "GPS activo"
+              : gpsStatus === "loading"
+              ? "Detectando ubicación..."
+              : "Activa tu ubicación"}
+          </span>
+        </div>
       </div>
 
       {vehicleFound && liveOffers.length > 0 && (
@@ -1127,74 +1334,176 @@ function Home() {
 
       <div
         ref={searchRef}
-        className="absolute flex flex-col justify-end top-0 h-screen w-full rounded-t-lg"
+        className="absolute flex flex-col justify-end top-0 h-screen w-full rounded-t-lg z-40 pointer-events-none"
       >
-        <div className="h-[40%] bg-white p-5 flex flex-col justify-around z-50">
-          <div>
-            <h4 ref={titleRef} className="text-3xl font-semibold ml-1">
-              Buscar un servicio
-            </h4>
+        <div className="px-4 pb-4 pointer-events-auto">
+          <div className="bg-white rounded-[32px] p-5 shadow-2xl border border-white/70">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-bold text-purple-700 uppercase tracking-[0.18em]">
+                  Central Go
+                </p>
 
-            <i
-              onClick={() => {
-                setPanelOpen(false);
-              }}
-              ref={arrowRef}
-              className="ri-arrow-down-s-line text-2xl hidden"
-            ></i>
-          </div>
+                <h4 ref={titleRef} className="text-3xl font-black text-gray-950 mt-1 leading-tight">
+                  ¿A dónde vamos?
+                </h4>
 
-          <form className="relative mt-2" onSubmit={submitHandler}>
-            <div className="line absolute self-center h-[51%] w-1 bottom-1/4 ml-8 bg-black rounded-3xl">
-              <div className="circle absolute h-3 w-3 bg-black rounded-full top-0 ml-[-4px]"></div>
-              <div className="circle absolute h-3 w-3 bg-black rounded-full bottom-0 ml-[-4px]"></div>
+                <p className="text-sm text-gray-500 mt-1">
+                  Activa tu GPS, confirma tu recogida y encuentra un conductor.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  setPanelOpen(false);
+                }}
+                ref={arrowRef}
+                className="hidden w-10 h-10 rounded-full bg-gray-100 items-center justify-center"
+              >
+                <i className="ri-arrow-down-s-line text-2xl text-gray-900"></i>
+              </button>
             </div>
 
-            <input
-              value={pickup}
-              onClick={() => {
-                setPanelOpen(true);
-                setActiveInput("pickup");
-              }}
-              onChange={(e) => {
-                setPickup(e.target.value);
-                fetchSuggestions(e.target.value);
-              }}
-              className="bg-[#eee] rounded-lg px-3 py-3 text-lg w-full mt-2 mb-2 pl-16"
-              type="text"
-              placeholder="Agregar punto de recogida"
-            />
+            {gpsStatus !== "granted" && (
+              <div className="mt-4 rounded-[24px] bg-gradient-to-br from-purple-700 to-slate-950 p-4 text-white shadow-xl">
+                <div className="flex items-start gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+                    <i className="ri-map-pin-user-fill text-2xl"></i>
+                  </div>
 
-            <input
-              value={destination}
-              onClick={() => {
-                setPanelOpen(true);
-                setActiveInput("destination");
-              }}
-              onChange={(e) => {
-                setDestination(e.target.value);
-                fetchSuggestions(e.target.value);
-              }}
-              className="bg-[#eee] rounded-lg px-3 py-3 text-lg w-full mt-2 mb-2 pl-16"
-              type="text"
-              placeholder="Ingresa tu destino"
-            />
-          </form>
+                  <div className="flex-1">
+                    <p className="text-base font-black">
+                      Activa tu ubicación GPS
+                    </p>
+                    <p className="text-xs text-white/80 mt-1 leading-relaxed">
+                      Así llenamos automáticamente tu punto de recogida y los
+                      conductores podrán encontrarte mejor.
+                    </p>
 
-          <div className="mt-3">
+                    {gpsError && (
+                      <p className="text-xs text-red-100 mt-2 font-semibold">
+                        {gpsError}
+                      </p>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={requestGpsLocation}
+                      disabled={gpsStatus === "loading"}
+                      className="mt-3 w-full rounded-2xl bg-white text-purple-800 py-3 font-black text-sm disabled:opacity-70"
+                    >
+                      {gpsStatus === "loading"
+                        ? "Detectando ubicación..."
+                        : "Activar ubicación"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {gpsStatus === "granted" && pickupDetected && (
+              <div className="mt-4 rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
+                  <i className="ri-check-line text-white text-xl"></i>
+                </div>
+
+                <div className="min-w-0">
+                  <p className="text-sm font-black text-emerald-900">
+                    Ubicación detectada
+                  </p>
+                  <p className="text-xs text-emerald-700 truncate">
+                    {pickup}
+                  </p>
+                </div>
+              </div>
+            )}
+
+            <form className="relative mt-4" onSubmit={submitHandler}>
+              <div className="absolute left-5 top-[31px] bottom-[31px] w-[3px] bg-gray-200 rounded-full">
+                <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-3.5 w-3.5 bg-purple-700 rounded-full border-2 border-white shadow"></div>
+                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-3.5 w-3.5 bg-slate-950 rounded-full border-2 border-white shadow"></div>
+              </div>
+
+              <div className="relative">
+                <i className="ri-map-pin-user-fill absolute left-11 top-1/2 -translate-y-1/2 text-purple-700 text-xl"></i>
+
+                <input
+                  value={pickup}
+                  onClick={() => {
+                    setPanelOpen(true);
+                    setActiveInput("pickup");
+                  }}
+                  onChange={(e) => {
+                    setPickup(e.target.value);
+                    setPickupDetected(false);
+                    fetchSuggestions(e.target.value);
+                  }}
+                  className="bg-gray-100 border border-gray-200 rounded-2xl px-3 py-4 text-base w-full mt-2 mb-2 pl-[76px] pr-4 font-semibold text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  type="text"
+                  placeholder={
+                    gpsStatus === "loading"
+                      ? "Detectando tu punto de recogida..."
+                      : "Agregar punto de recogida"
+                  }
+                />
+              </div>
+
+              <div className="relative">
+                <i className="ri-flag-2-fill absolute left-11 top-1/2 -translate-y-1/2 text-slate-950 text-xl"></i>
+
+                <input
+                  value={destination}
+                  onClick={() => {
+                    setPanelOpen(true);
+                    setActiveInput("destination");
+                  }}
+                  onChange={(e) => {
+                    setDestination(e.target.value);
+                    fetchSuggestions(e.target.value);
+                  }}
+                  className="bg-gray-100 border border-gray-200 rounded-2xl px-3 py-4 text-base w-full mt-2 mb-2 pl-[76px] pr-4 font-semibold text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  type="text"
+                  placeholder="¿Para dónde vas?"
+                />
+              </div>
+            </form>
+
             <button
               type="button"
-              onClick={goToAvailableOffers}
-              className="w-full rounded-[24px] bg-black text-white px-4 py-4 flex items-center justify-between shadow-lg"
+              onClick={handleFindDriver}
+              disabled={gpsStatus === "loading"}
+              className="mt-3 w-full rounded-[24px] bg-gradient-to-r from-purple-700 via-purple-800 to-slate-950 text-white px-4 py-4 flex items-center justify-between shadow-xl disabled:opacity-70"
             >
               <div className="flex items-center gap-3">
                 <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
+                  <i className="ri-steering-2-fill text-xl"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-base font-black">Encontrar conductor</p>
+                  <p className="text-xs text-white/80">
+                    Mira precios y vehículos disponibles
+                  </p>
+                </div>
+              </div>
+
+              <i className="ri-arrow-right-line text-2xl"></i>
+            </button>
+
+            <button
+              type="button"
+              onClick={goToAvailableOffers}
+              className="mt-3 w-full rounded-[22px] bg-gray-950 text-white px-4 py-3 flex items-center justify-between shadow-lg"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center">
                   <i className="ri-fire-line text-xl"></i>
                 </div>
 
                 <div className="text-left">
-                  <p className="text-base font-bold">Ofertas disponibles</p>
-                  <p className="text-xs text-white/80">
+                  <p className="text-sm font-black">Ofertas disponibles</p>
+                  <p className="text-xs text-white/70">
                     Mercancía, espacio y cupos en ruta
                   </p>
                 </div>
@@ -1207,7 +1516,7 @@ function Home() {
 
         <div
           ref={panelRef}
-          className="opacity-0 bg-white flex flex-col justify-start pl-5 pr-2 z-50"
+          className="opacity-0 bg-white flex flex-col justify-start pl-5 pr-2 z-50 pointer-events-auto rounded-t-[28px] shadow-2xl"
         >
           <LocationSearchPanel
             vehiclePanel={vehiclePanel}
@@ -1223,7 +1532,7 @@ function Home() {
 
       <div
         ref={vehicleRef}
-        className="fixed min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-lg bg-white overflow-auto z-50"
+        className="fixed min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-[28px] bg-white overflow-auto z-50 shadow-2xl"
       >
         <VehiclePanel
           setVehiclePanel={setVehiclePanel}
@@ -1238,7 +1547,7 @@ function Home() {
 
       <div
         ref={confirmRidePanelRef}
-        className="fixed bottom-0 w-screen translate-y-full rounded-t-lg bg-white overflow-hidden z-50"
+        className="fixed bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-hidden z-50 shadow-2xl"
       >
         <ConfirmedRide
           setConfirmRidePanel={setConfirmRidePanel}
@@ -1254,7 +1563,7 @@ function Home() {
 
       <div
         ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[40%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-hidden h-[40%] shadow-2xl"
       >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
@@ -1270,7 +1579,7 @@ function Home() {
 
       <div
         ref={driverSelectedRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto max-h-[72%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-auto max-h-[72%] shadow-2xl"
       >
         <DriverSelected
           ride={ride}

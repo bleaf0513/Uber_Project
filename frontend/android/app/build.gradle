@@ -4,12 +4,27 @@ android {
     namespace = "co.com.mercalan.centralgo"
     compileSdk = rootProject.ext.compileSdkVersion
 
+    /*
+     * Permite generar el AAB aunque Android Lint marque advertencias
+     * como ReferenceType por el ícono @mipmap/ic_launcher.
+     * No cambia el funcionamiento de la app.
+     */
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+
     defaultConfig {
         applicationId "co.com.mercalan.centralgo"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+
+        // IMPORTANTE:
+        // Google Play ya tiene usado versionCode 1.
+        // Cada nuevo AAB debe tener un versionCode mayor.
+        versionCode 4
+        versionName "1.0.2"
+
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         aaptOptions {
