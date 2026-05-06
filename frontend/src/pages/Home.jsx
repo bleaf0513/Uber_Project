@@ -86,6 +86,9 @@ function Home() {
   const suggestionSeqRef = useRef(0);
   const watchLocationRef = useRef(null);
 
+  const restoringRideRef = useRef(false);
+  const activeRideRestoredRef = useRef(false);
+
   const { socket } = useContext(SocketContext);
   const { user } = useContext(UserDataContext);
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
@@ -300,10 +303,58 @@ function Home() {
         routeStops: rideData?.routeStops || prev?.routeStops || cleanRouteStops,
       }));
 
+      if (rideData?.pickup) {
+        setPickup(rideData.pickup);
+      }
+
+      if (rideData?.destination) {
+        setDestination(rideData.destination);
+      }
+
+      if (Array.isArray(rideData?.routeStops)) {
+        setRouteStops(rideData.routeStops);
+      }
+
+      const nextVehicle =
+        rideData?.vehicleType ||
+        rideData?.vehicle ||
+        rideData?.selectedVehicle ||
+        selectedVehicle ||
+        null;
+
+      if (nextVehicle) {
+        setSelectedVehicle(nextVehicle);
+      }
+
+      const nextFare = Number(
+        rideData?.offeredFare ||
+          rideData?.fare ||
+          rideData?.suggestedFare ||
+          selectedPrice ||
+          0
+      );
+
+      if (nextFare > 0) {
+        setSelectedPrice(nextFare);
+        setOfferedPrice(nextFare);
+      }
+
+      if (rideData?.status === "pending" || rideData?.status === "negotiating") {
+        setVehicleFound(true);
+        setConfirmRidePanel(false);
+        setVehiclePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
+        setDriverSelected(false);
+        setCaptainArrived(false);
+      }
+
       if (rideData?.status === "accepted") {
         setVehicleFound(false);
         setConfirmRidePanel(false);
         setVehiclePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
         setDriverSelected(true);
         setCaptainArrived(false);
       }
@@ -312,6 +363,8 @@ function Home() {
         setVehicleFound(false);
         setConfirmRidePanel(false);
         setVehiclePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
         setDriverSelected(true);
         setCaptainArrived(true);
       }
@@ -322,6 +375,8 @@ function Home() {
         setVehicleFound(false);
         setConfirmRidePanel(false);
         setVehiclePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
 
         navigate("/riding", {
           state: {
@@ -330,8 +385,110 @@ function Home() {
         });
       }
     },
-    [pickup, destination, cleanRouteStops, navigate]
+    [
+      pickup,
+      destination,
+      cleanRouteStops,
+      navigate,
+      selectedPrice,
+      selectedVehicle,
+    ]
   );
+
+  const restoreActiveRideFromServer = useCallback(async () => {
+    if (activeRideRestoredRef.current) return;
+
+    try {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+
+      activeRideRestoredRef.current = true;
+      restoringRideRef.current = true;
+
+      const response = await axios.get(`${getApiBaseUrl()}/rides/my-active`, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      const activeRide = response?.data?.ride || null;
+
+      if (!activeRide?._id) {
+        restoringRideRef.current = false;
+        return;
+      }
+
+      const restoredPickup = activeRide.pickup || "";
+      const restoredDestination = activeRide.destination || "";
+      const restoredStops = Array.isArray(activeRide.routeStops)
+        ? activeRide.routeStops
+        : [];
+
+      const restoredVehicle =
+        activeRide.vehicleType || activeRide.vehicle || selectedVehicle || "car";
+
+      const restoredFare = Number(
+        activeRide.offeredFare ||
+          activeRide.fare ||
+          activeRide.suggestedFare ||
+          selectedPrice ||
+          0
+      );
+
+      setRide(activeRide);
+      setPickup(restoredPickup);
+      setDestination(restoredDestination);
+      setRouteStops(restoredStops);
+      setSelectedVehicle(restoredVehicle);
+      setSelectedPrice(restoredFare);
+      setOfferedPrice(restoredFare);
+
+      setPanelOpen(false);
+      setStopsPanelOpen(false);
+      setVehiclePanel(false);
+      setConfirmRidePanel(false);
+      setSuggestions([]);
+
+      if (
+        activeRide.status === "pending" ||
+        activeRide.status === "negotiating"
+      ) {
+        setVehicleFound(true);
+        setDriverSelected(false);
+        setCaptainArrived(false);
+      } else if (
+        activeRide.status === "accepted" ||
+        activeRide.status === "arrived"
+      ) {
+        setVehicleFound(false);
+        setDriverSelected(true);
+        setCaptainArrived(
+          activeRide.status === "arrived" || Boolean(activeRide.arrivedAtPickup)
+        );
+      } else if (activeRide.status === "ongoing") {
+        navigate("/riding", {
+          state: {
+            ride: activeRide,
+          },
+        });
+      }
+
+      setTimeout(() => {
+        restoringRideRef.current = false;
+      }, 600);
+    } catch (error) {
+      restoringRideRef.current = false;
+
+      console.warn(
+        "No se pudo restaurar la solicitud activa:",
+        error?.response?.data?.message || error?.message
+      );
+    }
+  }, [navigate, selectedPrice, selectedVehicle]);
+
+  useEffect(() => {
+    restoreActiveRideFromServer();
+  }, [restoreActiveRideFromServer]);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -410,6 +567,8 @@ function Home() {
       setVehicleFound(false);
       setConfirmRidePanel(false);
       setVehiclePanel(false);
+      setPanelOpen(false);
+      setStopsPanelOpen(false);
       setDriverSelected(true);
       setRide(rideData);
     };
@@ -427,12 +586,23 @@ function Home() {
         routeStops: nextRide?.routeStops || prev?.routeStops || cleanRouteStops,
       }));
 
+      const nextFare = Number(
+        nextRide?.offeredFare || nextRide?.fare || nextRide?.suggestedFare || 0
+      );
+
+      if (nextFare > 0) {
+        setSelectedPrice(nextFare);
+        setOfferedPrice(nextFare);
+      }
+
       if (
         nextRide?.status === "pending" ||
         nextRide?.status === "negotiating"
       ) {
         setVehiclePanel(false);
         setConfirmRidePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
         setDriverSelected(false);
         setVehicleFound(true);
       }
@@ -504,6 +674,8 @@ function Home() {
       setRide(null);
       setDriverSelected(false);
       setVehicleFound(false);
+      setPanelOpen(false);
+      setStopsPanelOpen(false);
 
       const reasonText = payload?.reason ? `\nMotivo: ${payload.reason}` : "";
 
@@ -649,19 +821,21 @@ function Home() {
   }, []);
 
   useEffect(() => {
+    if (restoringRideRef.current) return;
+    if (ride?._id) return;
+
     setPrices(null);
     setDistance(null);
     setPricingError(null);
     setSelectedVehicle(null);
     setSelectedPrice(null);
     setOfferedPrice(null);
-    setRide(null);
     setVehicleFound(false);
     setDriverSelected(false);
     setConfirmRidePanel(false);
     setCaptainArrived(false);
     setEtaInfo({ etaText: "", distanceText: "" });
-  }, [pickup, destination, cleanRouteStops.length]);
+  }, [pickup, destination, cleanRouteStops.length, ride?._id]);
 
   useEffect(() => {
     if (!vehiclePanel || !pickup || !destination || prices != null) return;
@@ -764,8 +938,6 @@ function Home() {
       setDestination(selectedText);
       saveRecentPlace(selectedText);
 
-      // No cerramos el panel.
-      // Así la ruta se ve en el mapa y el usuario puede darle "Encontrar conductor".
       setSuggestions([]);
       setPanelOpen(true);
       setStopsPanelOpen(false);
@@ -821,6 +993,27 @@ function Home() {
 
   const handleFindDriver = async (forcedDestination = null) => {
     const finalDestination = String(forcedDestination || destination || "").trim();
+
+    if (ride?._id) {
+      if (ride.status === "pending" || ride.status === "negotiating") {
+        setVehicleFound(true);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
+        setVehiclePanel(false);
+        setConfirmRidePanel(false);
+        return;
+      }
+
+      if (ride.status === "accepted" || ride.status === "arrived") {
+        setDriverSelected(true);
+        setVehicleFound(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
+        setVehiclePanel(false);
+        setConfirmRidePanel(false);
+        return;
+      }
+    }
 
     if (!pickup || pickup.trim().length < 3) {
       const gpsResult = await requestGpsLocation();
@@ -888,7 +1081,6 @@ function Home() {
     setDestination(clean);
     saveRecentPlace(clean);
 
-    // No cerramos el panel cuando se selecciona destino reciente desde el panel abierto.
     setSuggestions([]);
     setPanelOpen(true);
     setStopsPanelOpen(false);
@@ -937,6 +1129,8 @@ function Home() {
       setOfferedPrice(finalOfferedFare);
       setRide(rideData);
 
+      setPanelOpen(false);
+      setStopsPanelOpen(false);
       setVehiclePanel(false);
       setConfirmRidePanel(false);
       setDriverSelected(false);
@@ -946,6 +1140,14 @@ function Home() {
       return rideData;
     } catch (error) {
       console.error("Error creating ride:", error);
+
+      const activeRide = error?.response?.data?.ride || null;
+      const activeCode = error?.response?.data?.code || "";
+
+      if (activeRide?._id && activeCode === "ACTIVE_RIDE_EXISTS") {
+        syncRideState(activeRide);
+        return activeRide;
+      }
 
       alert(
         error?.response?.data?.message ||
@@ -1109,6 +1311,8 @@ function Home() {
         setVehicleFound(false);
         setConfirmRidePanel(false);
         setVehiclePanel(false);
+        setPanelOpen(false);
+        setStopsPanelOpen(false);
         setDriverSelected(true);
         setCaptainArrived(false);
         return;
@@ -1147,6 +1351,8 @@ function Home() {
             setVehicleFound(false);
             setConfirmRidePanel(false);
             setVehiclePanel(false);
+            setPanelOpen(false);
+            setStopsPanelOpen(false);
             setDriverSelected(true);
             setCaptainArrived(false);
             return;
@@ -1233,7 +1439,11 @@ function Home() {
         <LiveTracking
           pickup={driverSelected ? ride?.pickup || pickup : pickup}
           destination={driverSelected ? ride?.destination || destination : destination}
-          routeStops={driverSelected ? ride?.routeStops || cleanRouteStops : cleanRouteStops}
+          routeStops={
+            driverSelected
+              ? ride?.routeStops || cleanRouteStops
+              : cleanRouteStops
+          }
           nearbyDrivers={nearbyDrivers}
           showPickupRadar={vehicleFound && !driverSelected}
           selectedCaptainId={ride?.captain?._id || null}
@@ -1257,7 +1467,7 @@ function Home() {
         <i className="ri-logout-box-line text-xl text-gray-900"></i>
       </Link>
 
-      {gpsStatus !== "granted" && (
+      {gpsStatus !== "granted" && !vehicleFound && !driverSelected && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-r from-purple-800 via-purple-900 to-purple-950 text-white shadow-xl">
           <div className="px-4 pt-3 pb-4">
             <p className="text-[15px] font-extrabold leading-tight">
@@ -1289,60 +1499,68 @@ function Home() {
         </div>
       )}
 
-      {pickup && destination && !panelOpen && !stopsPanelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
-        <div className="absolute top-20 left-4 right-4 z-40">
-          <div className="rounded-[24px] bg-white/95 backdrop-blur shadow-xl border border-gray-200 overflow-hidden">
-            <button
-              type="button"
-              onClick={() => {
-                setPanelOpen(true);
-                setActiveInput("pickup");
-              }}
-              className="w-full flex items-center gap-3 px-4 py-3 border-b border-gray-100 text-left"
-            >
-              <i className="ri-map-pin-user-fill text-2xl text-purple-800 shrink-0"></i>
+      {pickup &&
+        destination &&
+        !panelOpen &&
+        !stopsPanelOpen &&
+        !vehiclePanel &&
+        !vehicleFound &&
+        !driverSelected && (
+          <div className="absolute top-20 left-4 right-4 z-40">
+            <div className="rounded-[24px] bg-white/95 backdrop-blur shadow-xl border border-gray-200 overflow-hidden">
+              <button
+                type="button"
+                onClick={() => {
+                  setPanelOpen(true);
+                  setActiveInput("pickup");
+                }}
+                className="w-full flex items-center gap-3 px-4 py-3 border-b border-gray-100 text-left"
+              >
+                <i className="ri-map-pin-user-fill text-2xl text-purple-800 shrink-0"></i>
 
-              <div className="min-w-0 flex-1">
-                <p className="text-xs font-semibold text-gray-500">De</p>
-                <p className="text-[16px] font-bold text-gray-900 truncate">
-                  {pickup}
-                </p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold text-gray-500">De</p>
+                  <p className="text-[16px] font-bold text-gray-900 truncate">
+                    {pickup}
+                  </p>
+                </div>
+
+                <span className="rounded-full bg-purple-50 text-purple-900 text-xs font-bold px-3 py-1">
+                  Actual
+                </span>
+              </button>
+
+              <div className="w-full flex items-center gap-3 px-4 py-3">
+                <i className="ri-flag-2-fill text-2xl text-gray-900 shrink-0"></i>
+
+                <button
+                  type="button"
+                  onClick={openStopsManager}
+                  className="min-w-0 flex-1 text-left"
+                >
+                  <p className="text-xs font-semibold text-gray-500">
+                    {routeStopsCount > 0
+                      ? `${routeStopsCount} parada(s) de ruta`
+                      : "A"}
+                  </p>
+
+                  <p className="text-[16px] font-bold text-gray-900 truncate">
+                    {destination}
+                  </p>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={addEmptyStop}
+                  className="h-9 rounded-full bg-purple-700 text-white flex items-center gap-1 px-3 shadow-lg"
+                >
+                  <i className="ri-add-line text-lg"></i>
+                  <span className="text-xs font-black">Parada</span>
+                </button>
               </div>
-
-              <span className="rounded-full bg-purple-50 text-purple-900 text-xs font-bold px-3 py-1">
-                Actual
-              </span>
-            </button>
-
-            <div className="w-full flex items-center gap-3 px-4 py-3">
-              <i className="ri-flag-2-fill text-2xl text-gray-900 shrink-0"></i>
-
-              <button
-                type="button"
-                onClick={openStopsManager}
-                className="min-w-0 flex-1 text-left"
-              >
-                <p className="text-xs font-semibold text-gray-500">
-                  {routeStopsCount > 0 ? `${routeStopsCount} parada(s) de ruta` : "A"}
-                </p>
-
-                <p className="text-[16px] font-bold text-gray-900 truncate">
-                  {destination}
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={addEmptyStop}
-                className="h-9 rounded-full bg-purple-700 text-white flex items-center gap-1 px-3 shadow-lg"
-              >
-                <i className="ri-add-line text-lg"></i>
-                <span className="text-xs font-black">Parada</span>
-              </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {vehicleFound && liveOffers.length > 0 && (
         <div className="absolute top-24 left-0 right-0 z-40 px-3">
@@ -1469,69 +1687,73 @@ function Home() {
           </div>
         )}
 
-      {!panelOpen && !stopsPanelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
-        <div className="fixed bottom-0 left-0 right-0 z-40">
-          <div className="bg-white rounded-t-[32px] shadow-[0_-8px_40px_rgba(0,0,0,0.14)] px-5 pt-3 pb-6">
-            <div className="mx-auto w-12 h-1.5 rounded-full bg-gray-300 mb-5"></div>
+      {!panelOpen &&
+        !stopsPanelOpen &&
+        !vehiclePanel &&
+        !vehicleFound &&
+        !driverSelected && (
+          <div className="fixed bottom-0 left-0 right-0 z-40">
+            <div className="bg-white rounded-t-[32px] shadow-[0_-8px_40px_rgba(0,0,0,0.14)] px-5 pt-3 pb-6">
+              <div className="mx-auto w-12 h-1.5 rounded-full bg-gray-300 mb-5"></div>
 
-            <button
-              type="button"
-              onClick={() => {
-                setPanelOpen(true);
-                setActiveInput("destination");
-              }}
-              className="w-full rounded-[22px] bg-[#f2f2f2] px-4 py-4 flex items-center justify-between border border-gray-200"
-            >
-              <div className="flex items-center gap-3">
-                <i className="ri-search-line text-3xl text-gray-900"></i>
-
-                <span className="text-[18px] font-semibold text-gray-900">
-                  ¿A dónde vamos?
-                </span>
-              </div>
-
-              <i className="ri-arrow-right-s-line text-2xl text-gray-700"></i>
-            </button>
-
-            {recentPlaces.length > 0 && (
-              <div className="mt-5 space-y-4">
-                {recentPlaces.slice(0, 2).map((place, index) => (
-                  <button
-                    key={`${place}-${index}`}
-                    type="button"
-                    onClick={() => selectRecentDestination(place)}
-                    className="w-full flex items-start gap-3 text-left"
-                  >
-                    <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
-                      <i className="ri-history-line text-xl text-gray-700"></i>
-                    </div>
-
-                    <div className="min-w-0 flex-1">
-                      <p className="text-[16px] font-bold text-gray-900 truncate">
-                        {place}
-                      </p>
-
-                      <p className="text-sm text-gray-500 truncate">
-                        Destino reciente
-                      </p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-6">
               <button
                 type="button"
-                onClick={goToAvailableOffers}
-                className="w-full rounded-[22px] bg-gradient-to-r from-purple-700 via-purple-800 to-purple-950 text-white py-4 px-4 font-extrabold text-base shadow-lg"
+                onClick={() => {
+                  setPanelOpen(true);
+                  setActiveInput("destination");
+                }}
+                className="w-full rounded-[22px] bg-[#f2f2f2] px-4 py-4 flex items-center justify-between border border-gray-200"
               >
-                Entregas / Ofertas
+                <div className="flex items-center gap-3">
+                  <i className="ri-search-line text-3xl text-gray-900"></i>
+
+                  <span className="text-[18px] font-semibold text-gray-900">
+                    ¿A dónde vamos?
+                  </span>
+                </div>
+
+                <i className="ri-arrow-right-s-line text-2xl text-gray-700"></i>
               </button>
+
+              {recentPlaces.length > 0 && (
+                <div className="mt-5 space-y-4">
+                  {recentPlaces.slice(0, 2).map((place, index) => (
+                    <button
+                      key={`${place}-${index}`}
+                      type="button"
+                      onClick={() => selectRecentDestination(place)}
+                      className="w-full flex items-start gap-3 text-left"
+                    >
+                      <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
+                        <i className="ri-history-line text-xl text-gray-700"></i>
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="text-[16px] font-bold text-gray-900 truncate">
+                          {place}
+                        </p>
+
+                        <p className="text-sm text-gray-500 truncate">
+                          Destino reciente
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              <div className="mt-6">
+                <button
+                  type="button"
+                  onClick={goToAvailableOffers}
+                  className="w-full rounded-[22px] bg-gradient-to-r from-purple-700 via-purple-800 to-purple-950 text-white py-4 px-4 font-extrabold text-base shadow-lg"
+                >
+                  Entregas / Ofertas
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       {panelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
         <>
@@ -1847,9 +2069,9 @@ function Home() {
       </div>
 
       <div
-  ref={vehicleFoundRef}
-  className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[26px] bg-white overflow-hidden h-[58%] max-h-[620px] shadow-2xl"
->
+        ref={vehicleFoundRef}
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[26px] bg-white overflow-hidden h-[58%] max-h-[620px] shadow-2xl"
+      >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
           setVehicleFound={setVehicleFound}
@@ -1860,6 +2082,23 @@ function Home() {
           pickup={pickup}
           routeStops={cleanRouteStops}
           ride={ride}
+          onRideUpdated={(updatedRide) => {
+            if (!updatedRide?._id) return;
+
+            const nextFare = Number(
+              updatedRide.offeredFare ||
+                updatedRide.fare ||
+                updatedRide.suggestedFare ||
+                0
+            );
+
+            setRide(updatedRide);
+
+            if (nextFare > 0) {
+              setSelectedPrice(nextFare);
+              setOfferedPrice(nextFare);
+            }
+          }}
         />
       </div>
 
