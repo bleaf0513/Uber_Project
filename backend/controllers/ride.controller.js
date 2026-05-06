@@ -177,6 +177,72 @@ module.exports.createRide = async (req, res) => {
     const { pickup, destination, routeStops, vehicle, offeredFare } = req.body;
 
     try {
+        /*
+         * BLOQUEO ANTI-DUPLICADOS:
+         * Si el usuario refresca la página o pierde el estado del frontend,
+         * el backend no debe permitir crear otra solicitud mientras tenga una viva.
+         */
+        const ACTIVE_USER_RIDE_MAX_AGE_HOURS = 6;
+        const activeSince = new Date(
+            Date.now() - ACTIVE_USER_RIDE_MAX_AGE_HOURS * 60 * 60 * 1000
+        );
+
+        let existingActiveRide = await rideModel
+            .findOne({
+                user: req.user._id,
+                status: {
+                    $in: [
+                        "pending",
+                        "negotiating",
+                        "accepted",
+                        "arrived",
+                        "ongoing",
+                    ],
+                },
+                cancelledAt: null,
+                cancelledBy: null,
+                updatedAt: {
+                    $gte: activeSince,
+                },
+            })
+            .sort({ updatedAt: -1 })
+            .populate("user")
+            .populate("captain")
+            .populate("driverOffers.captain", "fullname email vehicle socketId");
+
+        if (existingActiveRide) {
+            await rideService.expirePendingOffers(existingActiveRide);
+
+            existingActiveRide = await rideModel
+                .findById(existingActiveRide._id)
+                .populate("user")
+                .populate("captain")
+                .populate(
+                    "driverOffers.captain",
+                    "fullname email vehicle socketId"
+                );
+
+            if (
+                existingActiveRide &&
+                [
+                    "pending",
+                    "negotiating",
+                    "accepted",
+                    "arrived",
+                    "ongoing",
+                ].includes(existingActiveRide.status) &&
+                !existingActiveRide.cancelledAt &&
+                !existingActiveRide.cancelledBy
+            ) {
+                return res.status(409).json({
+                    message:
+                        "Ya tienes una solicitud activa. Continúa con esa solicitud o cancélala antes de crear otra.",
+                    code: "ACTIVE_RIDE_EXISTS",
+                    ride: ridePayloadWithActiveOffers(existingActiveRide),
+                });
+            }
+        }
+
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
@@ -209,6 +275,20 @@ module.exports.createRide = async (req, res) => {
             !Number.isFinite(pickupCoordinates.ltd) ||
             !Number.isFinite(pickupCoordinates.lng)
         ) {
+            await rideModel.updateOne(
+                { _id: ride._id },
+                {
+                    $set: {
+                        status: "cancelled",
+                        negotiationStatus: "closed",
+                        cancelledBy: "system",
+                        cancelReason:
+                            "No se pudo determinar la ubicación de recogida.",
+                        cancelledAt: new Date(),
+                    },
+                }
+            );
+
             return res.status(500).json({
                 message: "No se pudo determinar la ubicación de recogida.",
             });
@@ -320,10 +400,21 @@ module.exports.createRide = async (req, res) => {
             if (sent) emittedCount += 1;
         }
 
+        /*
+         * IMPORTANTE:
+         * Ya NO devolvemos 404 si no hay conductores cerca.
+         * La solicitud queda viva en "Buscando conductores" para que:
+         * - el usuario pueda cancelar,
+         * - pueda subir la oferta,
+         * - y si un conductor aparece/consulta disponibles, la vea.
+         */
         if ((captainsInRadius || []).length === 0) {
-            return res.status(404).json({
-                message: "No hay conductores disponibles cerca en este momento.",
-                code: "NO_CAPTAINS_AVAILABLE",
+            return res.status(201).json({
+                ...rideWithUser.toObject(),
+                warning:
+                    "Solicitud creada. No hay conductores cerca en este momento, pero la búsqueda sigue activa.",
+                code: "NO_CAPTAINS_NEARBY_BUT_RIDE_ACTIVE",
+                emittedCount: 0,
                 pickupCoordinates,
                 radiusKm: SEARCH_RADIUS_KM,
                 activeCaptainsDiagnostic: allActiveDiagnostic,
