@@ -21,6 +21,26 @@ function safeNumber(value, fallback = 0) {
     return Number.isFinite(num) ? num : fallback;
 }
 
+function roundToHundred(value) {
+    const number = Number(value) || 0;
+    return Math.ceil(number / 100) * 100;
+}
+
+function normalizeRouteStops(routeStops) {
+    if (!routeStops) return [];
+
+    if (Array.isArray(routeStops)) {
+        return routeStops
+            .map((stop) => String(stop || "").trim())
+            .filter(Boolean);
+    }
+
+    return String(routeStops)
+        .split("|")
+        .map((stop) => stop.trim())
+        .filter(Boolean);
+}
+
 function getOfferExpiresAt(offer) {
     if (offer?.expiresAt) {
         const expiresAt = new Date(offer.expiresAt).getTime();
@@ -56,12 +76,6 @@ function normalizeDistanceToKm(value) {
         return 0;
     }
 
-    /*
-      Si distance viene como 2517, normalmente son metros.
-      2517 metros = 2.52 km.
-
-      Si viene como 2.5, asumimos que ya viene en kilómetros.
-    */
     if (number > 300) {
         return Number((number / 1000).toFixed(2));
     }
@@ -125,14 +139,84 @@ async function expirePendingOffers(ride, now = Date.now()) {
     return true;
 }
 
-const getFare = async (pickup, destination) => {
+/**
+ * Tarifas base realistas para Medellín / área metropolitana.
+ *
+ * Fórmula:
+ * tarifa = base + (km * precioPorKm) + (minutos * precioPorMin)
+ *
+ * Luego:
+ * - se aplica mínimo
+ * - se redondea a centenas
+ */
+const FARE_RULES = {
+    motorcycle: {
+        base: 3200,
+        perKm: 850,
+        perMin: 70,
+        minimum: 5500,
+    },
+    car: {
+        base: 4800,
+        perKm: 1150,
+        perMin: 105,
+        minimum: 7500,
+    },
+    light_cargo: {
+        base: 6200,
+        perKm: 1350,
+        perMin: 125,
+        minimum: 9500,
+    },
+    van: {
+        base: 11000,
+        perKm: 2100,
+        perMin: 170,
+        minimum: 18000,
+    },
+    truck: {
+        base: 18000,
+        perKm: 3100,
+        perMin: 240,
+        minimum: 30000,
+    },
+    motocarro: {
+        base: 4500,
+        perKm: 1100,
+        perMin: 95,
+        minimum: 7000,
+    },
+    pickup: {
+        base: 9000,
+        perKm: 1900,
+        perMin: 160,
+        minimum: 16000,
+    },
+    moving: {
+        base: 22000,
+        perKm: 3400,
+        perMin: 280,
+        minimum: 38000,
+    },
+};
+
+const getFare = async (pickup, destination, routeStops = []) => {
     if (!pickup || !destination) {
         throw new Error("pickup and destination are required");
     }
 
-    const distanceTime = await mapService.getDistance(pickup, destination);
-    const meters = distanceTime?.distance?.value;
-    const seconds = distanceTime?.duration?.value;
+    const stops = normalizeRouteStops(routeStops);
+
+    /*
+      IMPORTANTE:
+      Este tercer parámetro funciona correctamente cuando maps.service.js
+      también reciba stops y los mande como waypoints a Google Distance Matrix
+      o Directions API.
+    */
+    const distanceTime = await mapService.getDistance(pickup, destination, stops);
+
+    const meters = Number(distanceTime?.distance?.value);
+    const seconds = Number(distanceTime?.duration?.value);
 
     if (!Number.isFinite(meters) || !Number.isFinite(seconds)) {
         throw new Error("Could not compute fare for this route");
@@ -141,64 +225,27 @@ const getFare = async (pickup, destination) => {
     const distanceKm = meters / 1000;
     const durationMin = seconds / 60;
 
-    const baseFare = {
-        motorcycle: 2200,
-        car: 3500,
-        light_cargo: 2800,
-        van: 5500,
-        truck: 9000,
-        motocarro: 3200,
-        pickup: 5000,
-        moving: 9000,
-    };
-
-    const perKmRate = {
-        motorcycle: 700,
-        car: 1200,
-        light_cargo: 900,
-        van: 1800,
-        truck: 2800,
-        motocarro: 1000,
-        pickup: 1700,
-        moving: 2800,
-    };
-
-    const perMinuteRate = {
-        motorcycle: 100,
-        car: 180,
-        light_cargo: 130,
-        van: 220,
-        truck: 320,
-        motocarro: 150,
-        pickup: 210,
-        moving: 320,
-    };
-
-    const minimumFare = {
-        motorcycle: 3000,
-        car: 5500,
-        light_cargo: 4000,
-        van: 8000,
-        truck: 15000,
-        motocarro: 5000,
-        pickup: 8000,
-        moving: 15000,
-    };
-
     const fares = {};
 
-    Object.keys(baseFare).forEach((vehicleType) => {
-        const calculatedFare = Math.round(
-            baseFare[vehicleType] +
-                perKmRate[vehicleType] * distanceKm +
-                perMinuteRate[vehicleType] * durationMin
-        );
+    Object.entries(FARE_RULES).forEach(([vehicleType, rule]) => {
+        const calculatedFare =
+            rule.base +
+            rule.perKm * distanceKm +
+            rule.perMin * durationMin;
 
-        fares[vehicleType] = Math.max(
-            calculatedFare,
-            minimumFare[vehicleType]
-        );
+        const finalFare = Math.max(calculatedFare, rule.minimum);
+
+        fares[vehicleType] = roundToHundred(finalFare);
     });
+
+    fares.meta = {
+        distanceMeters: meters,
+        durationSeconds: seconds,
+        distanceKm: Number(distanceKm.toFixed(2)),
+        durationMin: Math.max(1, Math.round(durationMin)),
+        stopsCount: stops.length,
+        formula: "base + km + minutes",
+    };
 
     return fares;
 };
@@ -218,13 +265,22 @@ const getMinOfferByVehicle = (vehicle, suggestedFare) => {
     };
 
     const factor = factors[vehicle] ?? 0.85;
-    return Math.max(1, Math.ceil(safeSuggested * factor));
+    return roundToHundred(Math.max(1, safeSuggested * factor));
 };
 
-const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) => {
+const createRide = async ({
+    user,
+    pickup,
+    destination,
+    routeStops = [],
+    vehicle,
+    offeredFare,
+}) => {
     if (!user || !pickup || !destination || !vehicle) {
         throw new Error("All fields are required");
     }
+
+    const stops = normalizeRouteStops(routeStops);
 
     const latestUser = await userModel.findById(user._id || user);
 
@@ -232,7 +288,7 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         throw new Error("User not found");
     }
 
-    const fares = await getFare(pickup, destination);
+    const fares = await getFare(pickup, destination, stops);
 
     if (!Object.prototype.hasOwnProperty.call(fares, vehicle)) {
         throw new Error("Invalid vehicle type");
@@ -254,14 +310,14 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
             throw new Error(`La oferta mínima para este servicio es ${minOffer}`);
         }
 
-        finalFare = Math.ceil(parsedOffer);
+        finalFare = roundToHundred(parsedOffer);
     }
 
-    const distanceTime = await mapService.getDistance(pickup, destination);
-    const meters = distanceTime?.distance?.value;
-    const seconds = distanceTime?.duration?.value;
+    const distanceTime = await mapService.getDistance(pickup, destination, stops);
+    const meters = Number(distanceTime?.distance?.value);
+    const seconds = Number(distanceTime?.duration?.value);
 
-    const ride = await rideModel.create({
+    const ridePayload = {
         user: latestUser._id,
         pickup,
         destination,
@@ -282,15 +338,22 @@ const createRide = async ({ user, pickup, destination, vehicle, offeredFare }) =
         cancelNotes: "",
         cancelledAt: null,
 
-        /*
-          Estos campos se usan si existen en el modelo.
-          Si el schema todavía no los tiene, luego los agregamos en ride.model.js.
-        */
         completedAt: null,
         startedAt: null,
         userRating: null,
         captainRating: null,
-    });
+    };
+
+    /*
+      Si ride.model.js ya tiene routeStops en el schema, se guarda.
+      Si todavía no lo tiene, Mongoose lo puede ignorar según strict mode.
+      Después revisamos ride.model.js para dejarlo perfecto.
+    */
+    if (stops.length > 0) {
+        ridePayload.routeStops = stops;
+    }
+
+    const ride = await rideModel.create(ridePayload);
 
     return ride;
 };
@@ -335,11 +398,6 @@ const startRide = async ({ rideId, otp, captain }) => {
         throw new Error("rideId is required");
     }
 
-    /*
-      Tu flujo actual ya casi no usa OTP.
-      Si mandas OTP, lo validamos.
-      Si no mandas OTP, permitimos iniciar desde accepted/arrived.
-    */
     const query = {
         _id: rideId,
         captain: captain._id,
@@ -379,17 +437,6 @@ const endRide = async ({ rideId, captain }) => {
         throw new Error("rideId is required");
     }
 
-    /*
-      CORRECCIÓN IMPORTANTE:
-      Antes solo permitía status: "ongoing".
-      En tu flujo real el viaje puede estar en:
-      - accepted
-      - arrived
-      - ongoing
-
-      Por eso salía:
-      "Ride not found or is not ongoing"
-    */
     const updatedRide = await rideModel
         .findOneAndUpdate(
             {

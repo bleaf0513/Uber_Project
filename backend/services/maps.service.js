@@ -42,6 +42,21 @@ function normalizeLooseText(value) {
         .trim();
 }
 
+function normalizeStops(value) {
+    if (!value) return [];
+
+    if (Array.isArray(value)) {
+        return value
+            .map((stop) => normalizeAddressQuery(stop))
+            .filter(Boolean);
+    }
+
+    return String(value)
+        .split('|')
+        .map((stop) => normalizeAddressQuery(stop))
+        .filter(Boolean);
+}
+
 function serverMapsKey() {
     return process.env.GOOGLE_MAPS_SERVER_API || process.env.GOOGLE_MAPS_API || '';
 }
@@ -64,19 +79,29 @@ function isValidLatLng(lat, lng) {
 }
 
 function isColombiaCoordinate(lat, lng) {
-    return isValidLatLng(lat, lng) && lat >= -4.5 && lat <= 16.5 && lng >= -81.9 && lng <= -66.0;
+    return (
+        isValidLatLng(lat, lng) &&
+        lat >= -4.5 &&
+        lat <= 16.5 &&
+        lng >= -81.9 &&
+        lng <= -66.0
+    );
 }
 
 async function googleGet(apiPath, params = {}, timeout = 20000) {
     const key = serverMapsKey();
+
     if (!key) {
         throw new Error('Google Maps API key is not configured');
     }
 
-    const { data } = await axios.get(`https://maps.googleapis.com/maps/api/${apiPath}`, {
-        params: { ...params, key },
-        timeout,
-    });
+    const { data } = await axios.get(
+        `https://maps.googleapis.com/maps/api/${apiPath}`,
+        {
+            params: { ...params, key },
+            timeout,
+        }
+    );
 
     return data;
 }
@@ -99,29 +124,57 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
     return R * c;
 }
 
-function approxDistanceElement(straightLineMeters) {
-    const straight = Math.max(Number(straightLineMeters) || 0, 75);
-    const roadMeters = Math.max(Math.round(straight * 1.25), 100);
-    const avgSpeedKmh = 38;
-    const durationSeconds = Math.round((roadMeters / 1000 / avgSpeedKmh) * 3600);
+function formatDistanceText(meters) {
+    const safeMeters = Math.max(Number(meters) || 0, 0);
+    const km = safeMeters / 1000;
 
-    const h = Math.floor(durationSeconds / 3600);
-    const m = Math.round((durationSeconds % 3600) / 60);
+    if (km >= 10) return `${km.toFixed(0)} km`;
+    return `${km.toFixed(1)} km`;
+}
 
-    const durationText =
-        h <= 0 ? `${m} mins` : `${h} hour${h !== 1 ? 's' : ''} ${m} mins`;
+function formatDurationText(seconds) {
+    const safeSeconds = Math.max(Number(seconds) || 0, 0);
+    const totalMinutes = Math.max(1, Math.round(safeSeconds / 60));
+
+    if (totalMinutes < 60) {
+        return `${totalMinutes} min`;
+    }
+
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+
+    if (minutes <= 0) return `${hours} h`;
+    return `${hours} h ${minutes} min`;
+}
+
+function buildDistanceElement(meters, seconds, extra = {}) {
+    const safeMeters = Math.max(Math.round(Number(meters) || 0), 1);
+    const safeSeconds = Math.max(Math.round(Number(seconds) || 0), 60);
 
     return {
         status: 'OK',
         distance: {
-            value: roadMeters,
-            text: `${(roadMeters / 1000).toFixed(1)} km (est.)`,
+            value: safeMeters,
+            text: formatDistanceText(safeMeters),
         },
         duration: {
-            value: durationSeconds,
-            text: durationText,
+            value: safeSeconds,
+            text: formatDurationText(safeSeconds),
         },
+        ...extra,
     };
+}
+
+function approxDistanceElement(straightLineMeters) {
+    const straight = Math.max(Number(straightLineMeters) || 0, 75);
+    const roadMeters = Math.max(Math.round(straight * 1.25), 100);
+    const avgSpeedKmh = 32;
+    const durationSeconds = Math.round((roadMeters / 1000 / avgSpeedKmh) * 3600);
+
+    return buildDistanceElement(roadMeters, durationSeconds, {
+        estimated: true,
+        source: 'local_approximation',
+    });
 }
 
 function roughCoordsForColombia(address) {
@@ -307,6 +360,7 @@ function expandColombianStreetFormats(input) {
     let m = t.match(
         /^(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\s+(\d+)\s*([a-zA-Z])?\s+(\d+)\s+(\d+)\s*$/i
     );
+
     if (m) {
         const via = m[1];
         const n1 = m[2];
@@ -322,6 +376,7 @@ function expandColombianStreetFormats(input) {
     m = t.match(
         /^(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\s+(\d+)\s*([a-zA-Z])?\s*#?\s*(\d+)\s*-?\s*(\d+)\s*$/i
     );
+
     if (m) {
         const via = m[1];
         const n1 = m[2];
@@ -410,6 +465,7 @@ function pushUniqueSuggestion(results, seen, item) {
     if (seen.has(key)) return;
 
     seen.add(key);
+
     results.push({
         description,
         place_id: placeId,
@@ -430,6 +486,7 @@ function isRelevantSuggestion(row, originalQuery) {
     const queryNumbers = extractNumbers(originalQuery);
 
     let matchedParts = 0;
+
     for (const part of queryParts) {
         if (text.includes(part)) matchedParts += 1;
     }
@@ -473,6 +530,7 @@ function rankSuggestions(rows, originalQuery) {
         if (text.includes(nq)) value += 80;
 
         let matched = 0;
+
         for (const part of parts) {
             if (text.includes(part)) {
                 matched += 1;
@@ -580,8 +638,140 @@ async function findPlaceSearch(variant) {
     }));
 }
 
+async function getDirectionsDistance(origin, destination, stops = []) {
+    const cleanStops = normalizeStops(stops);
+
+    const params = {
+        origin,
+        destination,
+        mode: 'driving',
+        language: 'es',
+        region: 'co',
+        alternatives: false,
+    };
+
+    if (cleanStops.length > 0) {
+        params.waypoints = cleanStops.join('|');
+    }
+
+    const data = await googleGet('directions/json', params, 25000);
+
+    console.log('[maps][directions]', {
+        status: data?.status,
+        error_message: data?.error_message || '',
+        origin,
+        destination,
+        stopsCount: cleanStops.length,
+        routes: Array.isArray(data?.routes) ? data.routes.length : 0,
+    });
+
+    if (data?.status !== 'OK' || !Array.isArray(data?.routes) || !data.routes[0]) {
+        throw new Error(data?.error_message || `Directions API failed: ${data?.status || 'UNKNOWN'}`);
+    }
+
+    const legs = Array.isArray(data.routes[0].legs) ? data.routes[0].legs : [];
+
+    if (legs.length === 0) {
+        throw new Error('Directions API returned no route legs');
+    }
+
+    const distanceValue = legs.reduce((sum, leg) => {
+        return sum + Number(leg?.distance?.value || 0);
+    }, 0);
+
+    const durationValue = legs.reduce((sum, leg) => {
+        return sum + Number(leg?.duration?.value || 0);
+    }, 0);
+
+    if (!Number.isFinite(distanceValue) || distanceValue <= 0) {
+        throw new Error('Directions API returned invalid distance');
+    }
+
+    if (!Number.isFinite(durationValue) || durationValue <= 0) {
+        throw new Error('Directions API returned invalid duration');
+    }
+
+    return buildDistanceElement(distanceValue, durationValue, {
+        source: 'google_directions',
+        stopsCount: cleanStops.length,
+        legs: legs.map((leg, index) => ({
+            index,
+            start_address: leg?.start_address || '',
+            end_address: leg?.end_address || '',
+            distance: leg?.distance || null,
+            duration: leg?.duration || null,
+        })),
+    });
+}
+
+async function getDistanceMatrixDistance(origin, destination) {
+    const data = await googleGet('distancematrix/json', {
+        origins: origin,
+        destinations: destination,
+        language: 'es',
+        region: 'co',
+        mode: 'driving',
+    });
+
+    const element = data?.rows?.[0]?.elements?.[0];
+
+    console.log('[maps][distancematrix]', {
+        status: data?.status,
+        elementStatus: element?.status,
+        error_message: data?.error_message || '',
+        origin,
+        destination,
+    });
+
+    if (
+        data?.status === 'OK' &&
+        element?.status === 'OK' &&
+        element?.distance?.value != null &&
+        element?.duration?.value != null
+    ) {
+        return {
+            ...element,
+            source: 'google_distancematrix',
+            stopsCount: 0,
+        };
+    }
+
+    throw new Error(data?.error_message || `Distance Matrix failed: ${element?.status || data?.status || 'UNKNOWN'}`);
+}
+
+async function getApproxRouteDistance(origin, destination, stops = []) {
+    const points = [origin, ...normalizeStops(stops), destination];
+
+    const coords = [];
+
+    for (const point of points) {
+        const coord = await module.exports.getAddressCoordinates(point);
+        coords.push(coord);
+    }
+
+    let totalMeters = 0;
+
+    for (let i = 0; i < coords.length - 1; i += 1) {
+        const from = coords[i];
+        const to = coords[i + 1];
+
+        const meters = haversineMeters(from.ltd, from.lng, to.ltd, to.lng);
+
+        if (Number.isFinite(meters)) {
+            totalMeters += meters;
+        }
+    }
+
+    if (!Number.isFinite(totalMeters) || totalMeters <= 0) {
+        throw new Error('Could not compute distance between locations');
+    }
+
+    return approxDistanceElement(totalMeters);
+}
+
 module.exports.getAddressCoordinates = async (address) => {
     const addrRaw = normalizeAddressQuery(address);
+
     if (!addrRaw) {
         throw new Error('Address is required');
     }
@@ -599,6 +789,7 @@ module.exports.getAddressCoordinates = async (address) => {
         try {
             const results = await geocodeSearch(variant);
             const first = results[0];
+
             if (first?.description) {
                 const geoData = await googleGet('geocode/json', {
                     address: first.description,
@@ -621,12 +812,14 @@ module.exports.getAddressCoordinates = async (address) => {
     }
 
     if (rough) return rough;
+
     return geocodeWithoutGoogle(addrRaw);
 };
 
-module.exports.getDistance = async (origin, destination) => {
+module.exports.getDistance = async (origin, destination, stops = []) => {
     const o = normalizeAddressQuery(origin);
     const d = normalizeAddressQuery(destination);
+    const cleanStops = normalizeStops(stops);
 
     if (!o || !d) {
         throw new Error('Origin and destination are required');
@@ -635,41 +828,37 @@ module.exports.getDistance = async (origin, destination) => {
     const key = serverMapsKey();
 
     if (key) {
-        try {
-            const data = await googleGet('distancematrix/json', {
-                origins: o,
-                destinations: d,
-                language: 'es',
-                region: 'co',
-            });
-
-            const element = data?.rows?.[0]?.elements?.[0];
-            if (
-                data?.status === 'OK' &&
-                element?.status === 'OK' &&
-                element?.distance?.value != null &&
-                element?.duration?.value != null
-            ) {
-                return element;
+        /*
+          Si hay paradas, Directions API es obligatorio para calcular la ruta completa.
+          Si no hay paradas, Distance Matrix es más simple y rápido.
+        */
+        if (cleanStops.length > 0) {
+            try {
+                return await getDirectionsDistance(o, d, cleanStops);
+            } catch (error) {
+                console.warn('[maps] directions with stops failed:', error.message);
             }
-        } catch (error) {
-            console.warn('[maps] distancematrix failed:', error.message);
+        } else {
+            try {
+                return await getDistanceMatrixDistance(o, d);
+            } catch (error) {
+                console.warn('[maps] distancematrix failed:', error.message);
+            }
+
+            try {
+                return await getDirectionsDistance(o, d, []);
+            } catch (error) {
+                console.warn('[maps] directions without stops failed:', error.message);
+            }
         }
     }
 
-    const from = await module.exports.getAddressCoordinates(origin);
-    const to = await module.exports.getAddressCoordinates(destination);
-
-    const meters = haversineMeters(from.ltd, from.lng, to.ltd, to.lng);
-    if (!Number.isFinite(meters)) {
-        throw new Error('Could not compute distance between locations');
-    }
-
-    return approxDistanceElement(meters);
+    return getApproxRouteDistance(o, d, cleanStops);
 };
 
 module.exports.getSuggestions = async (address) => {
     const addr = normalizeAddressQuery(address);
+
     if (!addr || addr.length < 3) return [];
 
     const key = serverMapsKey();
@@ -683,6 +872,7 @@ module.exports.getSuggestions = async (address) => {
         for (const variant of variants) {
             try {
                 const rows = await autocompleteSearch(variant);
+
                 for (const row of rows) {
                     pushUniqueSuggestion(results, seen, row);
                 }
@@ -694,6 +884,7 @@ module.exports.getSuggestions = async (address) => {
         for (const variant of variants) {
             try {
                 const rows = await findPlaceSearch(variant);
+
                 for (const row of rows) {
                     pushUniqueSuggestion(results, seen, row);
                 }
@@ -705,6 +896,7 @@ module.exports.getSuggestions = async (address) => {
         for (const variant of variants) {
             try {
                 const rows = await geocodeSearch(variant);
+
                 for (const row of rows) {
                     pushUniqueSuggestion(results, seen, row);
                 }
@@ -724,6 +916,7 @@ module.exports.getSuggestions = async (address) => {
     }
 
     const ranked = rankSuggestions(filtered, addr).slice(0, 8);
+
     console.log('[maps] getSuggestions final count:', ranked.length);
 
     return ranked;
@@ -768,6 +961,7 @@ module.exports.getCaptainsInTheRadius = async (ltd, lng, radiusKm) => {
         if (!isColombiaCoordinate(captainLtd, captainLng)) return false;
 
         const dist = haversineMeters(pickupLtd, pickupLng, captainLtd, captainLng);
+
         return Number.isFinite(dist) && dist <= radiusM;
     });
 
