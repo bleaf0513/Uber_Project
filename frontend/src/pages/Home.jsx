@@ -753,14 +753,23 @@ function Home() {
     if (activeInput === "pickup") {
       setPickup(selectedText);
       setPickupDetected(false);
-      closeRoutePanels();
+      setSuggestions([]);
+      setPanelOpen(true);
+      setStopsPanelOpen(false);
+      setActiveInput("destination");
       return;
     }
 
     if (activeInput === "destination") {
       setDestination(selectedText);
       saveRecentPlace(selectedText);
-      closeRoutePanels();
+
+      // No cerramos el panel.
+      // Así la ruta se ve en el mapa y el usuario puede darle "Encontrar conductor".
+      setSuggestions([]);
+      setPanelOpen(true);
+      setStopsPanelOpen(false);
+      setActiveInput(null);
       return;
     }
 
@@ -776,6 +785,9 @@ function Home() {
       }
 
       setSuggestions([]);
+      setPanelOpen(true);
+      setStopsPanelOpen(false);
+      setActiveInput("destination");
       return;
     }
 
@@ -867,12 +879,20 @@ function Home() {
       }
 
       setSuggestions([]);
+      setPanelOpen(true);
+      setStopsPanelOpen(false);
+      setActiveInput("destination");
       return;
     }
 
     setDestination(clean);
     saveRecentPlace(clean);
-    closeRoutePanels();
+
+    // No cerramos el panel cuando se selecciona destino reciente desde el panel abierto.
+    setSuggestions([]);
+    setPanelOpen(true);
+    setStopsPanelOpen(false);
+    setActiveInput(null);
   };
 
   const createRide = async (offeredFare) => {
@@ -1814,6 +1834,7 @@ function Home() {
       >
         <ConfirmedRide
           setConfirmRidePanel={setConfirmRidePanel}
+          setVehiclePanel={setVehiclePanel}
           setVehicleFound={setVehicleFound}
           vehicleFound={vehicleFound}
           selectedPrice={selectedPrice}
