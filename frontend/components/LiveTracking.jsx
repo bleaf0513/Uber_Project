@@ -777,33 +777,41 @@ const LiveTracking = ({
     };
   };
 
-  const buildCarSvg = (rotation = 0, active = true) => {
+  const buildProCarIcon = (rotation = 0, active = true) => {
     if (!mapsApiLoaded || !window.google?.maps) return undefined;
 
-    const bodyA = active ? "#4c057a" : "#6b7280";
-    const bodyB = active ? "#7c1fd1" : "#9ca3af";
-    const bodyC = active ? "#a855f7" : "#cbd5e1";
-    const glass = "#111827";
-    const light = "#e9d5ff";
-    const stroke = active ? "#2a064f" : "#374151";
+    const bodyTop = active ? "#b36cff" : "#cbd5e1";
+    const bodyMid = active ? "#7c1fd1" : "#9ca3af";
+    const bodyDark = active ? "#3b0764" : "#4b5563";
+    const windowDark = "#0b1020";
+    const windowSoft = "#1f2937";
+    const light = "#f5f3ff";
 
     const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+      <svg xmlns="http://www.w3.org/2000/svg" width="82" height="82" viewBox="0 0 82 82">
         <defs>
-          <linearGradient id="carBody" x1="10" y1="10" x2="62" y2="62" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="${bodyC}"/>
-            <stop offset="0.45" stop-color="${bodyB}"/>
-            <stop offset="1" stop-color="${bodyA}"/>
+          <linearGradient id="body" x1="18" y1="8" x2="64" y2="76" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="${bodyTop}"/>
+            <stop offset="0.42" stop-color="${bodyMid}"/>
+            <stop offset="1" stop-color="${bodyDark}"/>
           </linearGradient>
-          <linearGradient id="glassGrad" x1="20" y1="14" x2="50" y2="42" gradientUnits="userSpaceOnUse">
-            <stop offset="0" stop-color="#0f172a"/>
-            <stop offset="1" stop-color="#020617"/>
+
+          <linearGradient id="side" x1="20" y1="38" x2="62" y2="62" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#9333ea"/>
+            <stop offset="1" stop-color="#2e1065"/>
           </linearGradient>
-          <filter id="shadow" x="-35%" y="-35%" width="170%" height="170%">
-            <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.35"/>
+
+          <linearGradient id="glass" x1="28" y1="13" x2="54" y2="37" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="${windowSoft}"/>
+            <stop offset="1" stop-color="${windowDark}"/>
+          </linearGradient>
+
+          <filter id="shadow" x="-40%" y="-40%" width="180%" height="180%">
+            <feDropShadow dx="0" dy="7" stdDeviation="5" flood-color="#000000" flood-opacity="0.34"/>
           </filter>
-          <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
-            <feGaussianBlur stdDeviation="1.3" result="blur"/>
+
+          <filter id="softGlow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="1.2" result="blur"/>
             <feMerge>
               <feMergeNode in="blur"/>
               <feMergeNode in="SourceGraphic"/>
@@ -811,93 +819,108 @@ const LiveTracking = ({
           </filter>
         </defs>
 
-        <g transform="rotate(${rotation} 36 36)" filter="url(#shadow)">
-          <ellipse cx="36" cy="50" rx="20" ry="7" fill="#000000" opacity="0.22"/>
+        <g transform="rotate(${rotation} 41 41)" filter="url(#shadow)">
+          <ellipse cx="41" cy="63" rx="23" ry="7" fill="#000000" opacity="0.20"/>
 
           <path
-            d="M19 47
-               C15 43 14 35 17 27
-               C19 21 25 15 32 13
-               C39 11 48 14 53 21
-               C59 29 60 39 55 47
-               C48 53 27 54 19 47Z"
-            fill="url(#carBody)"
-            stroke="${stroke}"
-            stroke-width="1.6"
-          />
-
-          <path
-            d="M27 22
-               C32 16 42 17 47 23
-               C43 27 31 28 24 26
-               C24.8 24.5 25.8 23.1 27 22Z"
-            fill="url(#glassGrad)"
-            opacity="0.98"
-          />
-
-          <path
-            d="M23 29
-               C31 32 44 31 51 27
-               C54 34 54 40 51 45
-               C43 48 29 49 21 45
-               C18 40 18 34 23 29Z"
-            fill="url(#carBody)"
-            opacity="0.98"
-          />
-
-          <path
-            d="M24 31
-               C31 34 42 33 49 30"
-            fill="none"
-            stroke="#d8b4fe"
-            stroke-width="1.4"
-            opacity="0.85"
-          />
-
-          <path
-            d="M22 44
-               C29 47 43 47 50 44"
-            fill="none"
+            d="M19 52
+               C15.5 47 15.2 39.5 17.8 32
+               C20.7 23.7 28.4 17.3 37.6 15.1
+               C47.4 12.8 57.6 17.4 63.4 26.8
+               C68.7 35.4 67.5 45.9 62.3 52.4
+               C53.4 59.4 29.2 60.6 19 52Z"
+            fill="url(#body)"
             stroke="#2e1065"
-            stroke-width="1.4"
-            opacity="0.55"
+            stroke-width="1.8"
           />
 
           <path
-            d="M18 35
-               C14 35 12 38 13 42
-               C15 41 17 40 19 38Z"
-            fill="${bodyA}"
+            d="M28.8 24.6
+               C33.4 18.6 45.7 18.2 53.7 25.6
+               C49.8 31.8 35.2 32.7 25.8 28.6
+               C26.3 27 27.2 25.6 28.8 24.6Z"
+            fill="url(#glass)"
+            stroke="#111827"
+            stroke-width="1"
+            opacity="0.98"
           />
 
           <path
-            d="M54 35
-               C58 35 60 38 59 42
-               C57 41 55 40 53 38Z"
-            fill="${bodyA}"
+            d="M22.3 36.3
+               C31.2 40.1 50.6 39.6 60.4 34.2
+               C61.7 40.3 60.1 46.7 55.8 50.2
+               C46.4 54.1 31.7 54.4 23.3 50.1
+               C19.9 46 19.8 41.1 22.3 36.3Z"
+            fill="url(#side)"
+            opacity="0.92"
           />
 
-          <ellipse cx="25" cy="50" rx="5.5" ry="3.5" fill="#020617"/>
-          <ellipse cx="47" cy="50" rx="5.5" ry="3.5" fill="#020617"/>
+          <path
+            d="M23.5 36.4
+               C31.3 39.4 49.5 39.1 58.5 34.9"
+            stroke="#f3e8ff"
+            stroke-width="1.5"
+            opacity="0.65"
+            fill="none"
+          />
 
           <path
-            d="M20 29
-               C22 25 25 22 29 20"
+            d="M24.4 49.2
+               C34.1 53.1 47.9 52.8 56.6 49.2"
+            stroke="#1e1b4b"
+            stroke-width="1.8"
+            opacity="0.45"
+            fill="none"
+          />
+
+          <path
+            d="M19.2 39.5
+               C15.1 39.4 12.9 42.4 13.6 46.3
+               C16.1 45.2 18.5 44.2 20.5 42.3Z"
+            fill="#2e1065"
+            opacity="0.98"
+          />
+
+          <path
+            d="M63.3 39.4
+               C67.4 39.3 69.6 42.4 68.9 46.3
+               C66.4 45.2 64.1 44.2 62.1 42.3Z"
+            fill="#2e1065"
+            opacity="0.98"
+          />
+
+          <ellipse cx="28" cy="56.4" rx="6.1" ry="4.1" fill="#020617"/>
+          <ellipse cx="54" cy="56.4" rx="6.1" ry="4.1" fill="#020617"/>
+          <ellipse cx="28" cy="56.4" rx="2.8" ry="1.8" fill="#cbd5e1"/>
+          <ellipse cx="54" cy="56.4" rx="2.8" ry="1.8" fill="#cbd5e1"/>
+
+          <path
+            d="M24.5 33.5
+               C26.8 28.5 30.2 24.9 35.4 22.2"
             stroke="#ffffff"
             stroke-width="1.4"
             opacity="0.35"
             fill="none"
           />
 
-          <circle cx="22" cy="28" r="2.2" fill="${light}" filter="url(#glow)" opacity="0.95"/>
-          <circle cx="50" cy="28" r="2.2" fill="${light}" filter="url(#glow)" opacity="0.95"/>
+          <circle cx="23.3" cy="35.6" r="2.2" fill="${light}" filter="url(#softGlow)" opacity="0.98"/>
+          <circle cx="59.4" cy="35.5" r="2.2" fill="${light}" filter="url(#softGlow)" opacity="0.98"/>
 
           <path
-            d="M28 14
-               C34 11 43 12 50 19"
+            d="M31.5 18.7
+               C40.6 14.8 51.2 17.9 58.3 27.4"
             stroke="#f5d0fe"
-            stroke-width="1.4"
-            opacity="0.5"
+            stroke-width="1.5"
+            opacity="0.52"
+            fill="none"
+          />
+
+          <path
+            d="M35.4 15.8
+               C41.8 13.9 49.1 15.3 54.9 20.4"
+            stroke="#ffffff"
+            stroke-width="1"
+            opacity="0.28"
             fill="none"
           />
         </g>
@@ -906,8 +929,8 @@ const LiveTracking = ({
 
     return {
       url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-      scaledSize: new window.google.maps.Size(54, 54),
-      anchor: new window.google.maps.Point(27, 27),
+      scaledSize: new window.google.maps.Size(58, 58),
+      anchor: new window.google.maps.Point(29, 29),
     };
   };
 
@@ -1097,7 +1120,7 @@ const LiveTracking = ({
           <Marker
             key={driver.id}
             position={{ lat: driver.lat, lng: driver.lng }}
-            icon={buildCarSvg(driver.rotation, true)}
+            icon={buildProCarIcon(driver.rotation, true)}
             zIndex={40}
             title={driver.name}
           />
@@ -1110,7 +1133,7 @@ const LiveTracking = ({
         window.google?.maps && (
           <Marker
             position={{ lat: routeOrigin.lat, lng: routeOrigin.lng }}
-            icon={buildCarSvg(routeOrigin.rotation, true)}
+            icon={buildProCarIcon(routeOrigin.rotation, true)}
             zIndex={90}
             title="Mi ubicación"
           />
