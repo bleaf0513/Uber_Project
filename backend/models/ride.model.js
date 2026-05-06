@@ -80,6 +80,30 @@ const rideSchema = new mongoose.Schema(
             trim: true,
         },
 
+        /*
+         * Paradas intermedias del recorrido.
+         * Esto es clave para que el conductor vea:
+         * recogida -> parada 1 -> parada 2 -> destino final.
+         */
+        routeStops: {
+            type: [String],
+            default: [],
+            set: (stops) => {
+                if (!stops) return [];
+
+                if (Array.isArray(stops)) {
+                    return stops
+                        .map((stop) => String(stop || "").trim())
+                        .filter(Boolean);
+                }
+
+                return String(stops)
+                    .split("|")
+                    .map((stop) => stop.trim())
+                    .filter(Boolean);
+            },
+        },
+
         status: {
             type: String,
             enum: [
@@ -136,11 +160,19 @@ const rideSchema = new mongoose.Schema(
             min: 0,
         },
 
+        /*
+         * Duración total en segundos.
+         * Debe venir desde Google Maps incluyendo paradas.
+         */
         duration: {
             type: Number,
             default: null,
         },
 
+        /*
+         * Distancia total en metros.
+         * En frontend siempre se debe mostrar como distance / 1000.
+         */
         distance: {
             type: Number,
             default: null,
@@ -241,7 +273,7 @@ const rideSchema = new mongoose.Schema(
 
         cancelledBy: {
             type: String,
-            enum: ["user", "captain", null],
+            enum: ["user", "captain", "system", null],
             default: null,
         },
 
@@ -270,6 +302,7 @@ const rideSchema = new mongoose.Schema(
 rideSchema.index({ captain: 1, status: 1, updatedAt: -1 });
 rideSchema.index({ user: 1, status: 1, updatedAt: -1 });
 rideSchema.index({ status: 1, negotiationStatus: 1, createdAt: -1 });
+rideSchema.index({ user: 1, negotiationStatus: 1, status: 1, updatedAt: -1 });
 
 const rideModel = mongoose.model("Ride", rideSchema);
 
