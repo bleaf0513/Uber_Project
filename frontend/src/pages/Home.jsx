@@ -21,6 +21,10 @@ import { UserDataContext } from "../context/UserContext";
 import LiveTracking from "../../components/LiveTracking";
 import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
+import {
+  requestPushPermissionAndRegister,
+  listenForegroundPushNotifications,
+} from "../services/pushNotifications";
 
 const OFFER_TTL_MS = 60000;
 const RECENT_PLACES_KEY = "centralgo_recent_places";
@@ -93,6 +97,69 @@ function Home() {
   const { user } = useContext(UserDataContext);
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const token = localStorage.getItem("token");
+
+    if (!token || !user?._id) return;
+
+    let unsubscribeForeground = null;
+    let cancelled = false;
+
+    const setupUserPushNotifications = async () => {
+      try {
+        const result = await requestPushPermissionAndRegister("user");
+
+        if (!cancelled) {
+          console.log("[push-user] Resultado registro:", result);
+        }
+
+        unsubscribeForeground = await listenForegroundPushNotifications(
+          (payload) => {
+            const notification = payload?.notification || {};
+            const data = payload?.data || {};
+
+            const title = notification.title || data.title || "Central Go";
+
+            const body =
+              notification.body ||
+              data.body ||
+              "Tienes una nueva notificación.";
+
+            console.log("[push-user] Notificación en primer plano:", {
+              title,
+              body,
+              data,
+            });
+
+            if (document.visibilityState === "visible") {
+              try {
+                const audio = new Audio(
+                  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
+                );
+                audio.volume = 0.25;
+                audio.play().catch(() => {});
+              } catch {
+                // No bloqueamos si el navegador no permite audio.
+              }
+            }
+          }
+        );
+      } catch (error) {
+        console.warn("[push-user] No se pudo activar push:", error);
+      }
+    };
+
+    setupUserPushNotifications();
+
+    return () => {
+      cancelled = true;
+
+      if (typeof unsubscribeForeground === "function") {
+        unsubscribeForeground();
+      }
+    };
+  }, [user?._id]);
 
   const normalizeSocketRide = useCallback((payload) => {
     return payload?.data?.ride || payload?.ride || payload?.data || payload || null;

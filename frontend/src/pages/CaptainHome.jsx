@@ -16,6 +16,10 @@ import { SocketContext } from "../context/SocketContext";
 import axios from "axios";
 import { getApiBaseUrl } from "../apiBase";
 import LiveTracking from "../../components/LiveTracking";
+import {
+  requestPushPermissionAndRegister,
+  listenForegroundPushNotifications,
+} from "../services/pushNotifications";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
@@ -52,6 +56,69 @@ const CaptainHome = () => {
   const [requestingLocation, setRequestingLocation] = useState(false);
   const [showGpsPrompt, setShowGpsPrompt] = useState(false);
 
+  useEffect(() => {
+    const token = localStorage.getItem("captainToken") || localStorage.getItem("token");
+
+    if (!token || !captain?._id) return;
+
+    let unsubscribeForeground = null;
+    let cancelled = false;
+
+    const setupCaptainPushNotifications = async () => {
+      try {
+        const result = await requestPushPermissionAndRegister("captain");
+
+        if (!cancelled) {
+          console.log("[push-captain] Resultado registro:", result);
+        }
+
+        unsubscribeForeground = await listenForegroundPushNotifications(
+          (payload) => {
+            const notification = payload?.notification || {};
+            const data = payload?.data || {};
+
+            const title = notification.title || data.title || "Central Go";
+
+            const body =
+              notification.body ||
+              data.body ||
+              "Tienes una nueva notificación.";
+
+            console.log("[push-captain] Notificación en primer plano:", {
+              title,
+              body,
+              data,
+            });
+
+            if (document.visibilityState === "visible") {
+              try {
+                const audio = new Audio(
+                  "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA="
+                );
+                audio.volume = 0.35;
+                audio.play().catch(() => {});
+              } catch {
+                // No bloqueamos si el navegador no permite audio.
+              }
+            }
+          }
+        );
+      } catch (error) {
+        console.warn("[push-captain] No se pudo activar push:", error);
+      }
+    };
+
+    setupCaptainPushNotifications();
+
+    return () => {
+      cancelled = true;
+
+      if (typeof unsubscribeForeground === "function") {
+        unsubscribeForeground();
+      }
+    };
+  }, [captain?._id]);
+
   const formatCOP = (value) => {
     const number = Number(value) || 0;
 
@@ -77,10 +144,6 @@ const CaptainHome = () => {
       return null;
     }
 
-    /*
-      Si viene mayor a 300 normalmente es porque está en metros.
-      Ejemplo: 11524 metros = 11.5 km.
-    */
     if (number > 300) {
       return number / 1000;
     }

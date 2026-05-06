@@ -209,7 +209,7 @@ const notifyUserBidUpdated = async (bidId, action) => {
                 action,
                 screen: "user_sent_bids",
             },
-            link: `${process.env.FRONTEND_URL || ""}/sent-bids`,
+            link: `${process.env.FRONTEND_URL || ""}/my-sent-bids`,
             requireInteraction: true,
         });
     } catch (error) {
