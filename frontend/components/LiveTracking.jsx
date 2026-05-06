@@ -20,10 +20,14 @@ const DEFAULT_CENTER = {
   lng: -75.5812,
 };
 
+const CENTRAL_GO_PURPLE = "#7c1fd1";
+const CENTRAL_GO_DARK = "#2a064f";
+const CENTRAL_GO_LIGHT = "#a855f7";
+
 const mapStyles = [
   {
     featureType: "poi",
-    stylers: [{ visibility: "off" }],
+    stylers: [{ visibility: "on" }],
   },
   {
     featureType: "transit",
@@ -41,8 +45,30 @@ const roundCoord = (value, digits = 5) => {
   return Number.isFinite(num) ? Number(num.toFixed(digits)) : null;
 };
 
+const normalizeLatLngFromDriver = (driver) => {
+  const lat =
+    toFiniteNumber(driver?.lat) ??
+    toFiniteNumber(driver?.location?.lat) ??
+    toFiniteNumber(driver?.location?.ltd) ??
+    toFiniteNumber(driver?.coordinates?.lat) ??
+    toFiniteNumber(driver?.coords?.lat) ??
+    toFiniteNumber(driver?.coords?.ltd);
+
+  const lng =
+    toFiniteNumber(driver?.lng) ??
+    toFiniteNumber(driver?.location?.lng) ??
+    toFiniteNumber(driver?.coordinates?.lng) ??
+    toFiniteNumber(driver?.coords?.lng);
+
+  if (lat == null || lng == null) return null;
+
+  return { lat, lng };
+};
+
 const LiveTracking = ({
   pickup = "",
+  destination = "",
+  routeStops = [],
   nearbyDrivers = [],
   showPickupRadar = true,
   zoom = 15,
@@ -56,6 +82,9 @@ const LiveTracking = ({
 
   const [currentPosition, setCurrentPosition] = useState(null);
   const [pickupPosition, setPickupPosition] = useState(null);
+  const [destinationPosition, setDestinationPosition] = useState(null);
+  const [stopPositions, setStopPositions] = useState([]);
+
   const [fetchedDrivers, setFetchedDrivers] = useState([]);
   const [error, setError] = useState(null);
   const [isGeolocationAvailable, setIsGeolocationAvailable] = useState(true);
@@ -80,6 +109,19 @@ const LiveTracking = ({
   const lastFocusKeyRef = useRef("");
 
   const apiBase = getApiBaseUrl();
+
+  const safeRouteStops = useMemo(() => {
+    return (Array.isArray(routeStops) ? routeStops : [])
+      .map((stop) => String(stop || "").trim())
+      .filter(Boolean);
+  }, [routeStops]);
+
+  const hasUserRoute = Boolean(
+    pickup &&
+      String(pickup).trim().length >= 3 &&
+      destination &&
+      String(destination).trim().length >= 3
+  );
 
   const mapOptions = useMemo(
     () => ({
@@ -106,21 +148,8 @@ const LiveTracking = ({
   const safeNearbyDrivers = useMemo(() => {
     return (Array.isArray(mergedNearbyDrivers) ? mergedNearbyDrivers : [])
       .map((driver, index) => {
-        const lat =
-          toFiniteNumber(driver?.lat) ??
-          toFiniteNumber(driver?.location?.lat) ??
-          toFiniteNumber(driver?.location?.ltd) ??
-          toFiniteNumber(driver?.coordinates?.lat) ??
-          toFiniteNumber(driver?.coords?.lat) ??
-          toFiniteNumber(driver?.coords?.ltd);
-
-        const lng =
-          toFiniteNumber(driver?.lng) ??
-          toFiniteNumber(driver?.location?.lng) ??
-          toFiniteNumber(driver?.coordinates?.lng) ??
-          toFiniteNumber(driver?.coords?.lng);
-
-        if (lat == null || lng == null) return null;
+        const coords = normalizeLatLngFromDriver(driver);
+        if (!coords) return null;
 
         const id =
           driver?._id ||
@@ -139,8 +168,8 @@ const LiveTracking = ({
 
         return {
           id: String(id),
-          lat,
-          lng,
+          lat: coords.lat,
+          lng: coords.lng,
           rotation:
             toFiniteNumber(driver?.heading) ??
             toFiniteNumber(driver?.rotation) ??
@@ -165,12 +194,6 @@ const LiveTracking = ({
     );
   }, [safeNearbyDrivers, selectedCaptainId]);
 
-  /*
-    CLAVE:
-    - En el mapa del usuario, la ruta usa selectedDriver.
-    - En el mapa del conductor, normalmente no hay selectedDriver.
-      Entonces usamos currentPosition como origen.
-  */
   const routeOrigin = useMemo(() => {
     if (selectedDriver) {
       return {
@@ -205,6 +228,16 @@ const LiveTracking = ({
             lng: roundCoord(pickupPosition.lng),
           }
         : null,
+      destination: destinationPosition
+        ? {
+            lat: roundCoord(destinationPosition.lat),
+            lng: roundCoord(destinationPosition.lng),
+          }
+        : null,
+      stops: stopPositions.map((stop) => ({
+        lat: roundCoord(stop.lat),
+        lng: roundCoord(stop.lng),
+      })),
       routeOrigin: routeOrigin
         ? {
             lat: roundCoord(routeOrigin.lat),
@@ -216,17 +249,22 @@ const LiveTracking = ({
       selectedDriverId: selectedDriver?.id || null,
       mode: showRouteToPickup
         ? "route-to-pickup"
+        : hasUserRoute
+        ? "user-route"
         : showPickupRadar
         ? "searching-driver"
         : "normal",
     });
   }, [
     pickupPosition,
+    destinationPosition,
+    stopPositions,
     routeOrigin,
     selectedCaptainId,
     selectedDriver?.id,
     showRouteToPickup,
     showPickupRadar,
+    hasUserRoute,
   ]);
 
   const markUserInteraction = () => {
@@ -322,34 +360,53 @@ const LiveTracking = ({
     };
   }, []);
 
+  const geocodeAddress = (geocoder, address) => {
+    return new Promise((resolve) => {
+      if (!address || String(address).trim().length < 3) {
+        resolve(null);
+        return;
+      }
+
+      geocoder.geocode({ address }, (results, status) => {
+        if (status === "OK" && results?.[0]?.geometry?.location) {
+          const location = results[0].geometry.location;
+
+          resolve({
+            lat: location.lat(),
+            lng: location.lng(),
+            address,
+          });
+        } else {
+          console.warn("[LiveTracking] No se pudo geocodificar:", address, status);
+          resolve(null);
+        }
+      });
+    });
+  };
+
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps) return;
 
     const currentRequestId = ++geocoderRequestIdRef.current;
-
-    if (!pickup || typeof pickup !== "string" || pickup.trim().length < 3) {
-      setPickupPosition(null);
-      return;
-    }
-
     const geocoder = new window.google.maps.Geocoder();
 
-    geocoder.geocode({ address: pickup }, (results, status) => {
+    const run = async () => {
+      const pickupResult = await geocodeAddress(geocoder, pickup);
+      const destinationResult = await geocodeAddress(geocoder, destination);
+
+      const stopsResult = await Promise.all(
+        safeRouteStops.map((stop) => geocodeAddress(geocoder, stop))
+      );
+
       if (currentRequestId !== geocoderRequestIdRef.current) return;
 
-      if (status === "OK" && results?.[0]?.geometry?.location) {
-        const location = results[0].geometry.location;
+      setPickupPosition(pickupResult);
+      setDestinationPosition(destinationResult);
+      setStopPositions(stopsResult.filter(Boolean));
+    };
 
-        setPickupPosition({
-          lat: location.lat(),
-          lng: location.lng(),
-        });
-      } else {
-        console.warn("No se pudo geocodificar el pickup:", status);
-        setPickupPosition(null);
-      }
-    });
-  }, [pickup, mapsApiLoaded]);
+    run();
+  }, [pickup, destination, safeRouteStops, mapsApiLoaded]);
 
   useEffect(() => {
     if (!showPickupRadar) return;
@@ -414,19 +471,7 @@ const LiveTracking = ({
   ]);
 
   useEffect(() => {
-    if (!mapsApiLoaded || !window.google?.maps || !showRouteToPickup) {
-      setDirections(null);
-      setEtaText("");
-      setDistanceText("");
-
-      if (typeof onEtaUpdate === "function") {
-        onEtaUpdate({ etaText: "", distanceText: "" });
-      }
-
-      return;
-    }
-
-    if (!pickupPosition || !routeOrigin) {
+    if (!mapsApiLoaded || !window.google?.maps) {
       setDirections(null);
       setEtaText("");
       setDistanceText("");
@@ -441,30 +486,124 @@ const LiveTracking = ({
     const currentRequestId = ++directionsRequestIdRef.current;
     const directionsService = new window.google.maps.DirectionsService();
 
+    if (showRouteToPickup) {
+      if (!pickupPosition || !routeOrigin) {
+        setDirections(null);
+        setEtaText("");
+        setDistanceText("");
+
+        if (typeof onEtaUpdate === "function") {
+          onEtaUpdate({ etaText: "", distanceText: "" });
+        }
+
+        return;
+      }
+
+      directionsService.route(
+        {
+          origin: { lat: routeOrigin.lat, lng: routeOrigin.lng },
+          destination: pickupPosition,
+          travelMode: window.google.maps.TravelMode.DRIVING,
+        },
+        (result, status) => {
+          if (currentRequestId !== directionsRequestIdRef.current) return;
+
+          if (status === "OK" && result?.routes?.[0]?.legs?.[0]) {
+            const leg = result.routes[0].legs[0];
+
+            setDirections(result);
+            setEtaText(leg.duration?.text || "");
+            setDistanceText(leg.distance?.text || "");
+
+            if (typeof onEtaUpdate === "function") {
+              onEtaUpdate({
+                etaText: leg.duration?.text || "",
+                distanceText: leg.distance?.text || "",
+              });
+            }
+          } else {
+            console.warn("[LiveTracking] Directions pickup error:", status);
+
+            setDirections(null);
+            setEtaText("");
+            setDistanceText("");
+
+            if (typeof onEtaUpdate === "function") {
+              onEtaUpdate({ etaText: "", distanceText: "" });
+            }
+          }
+        }
+      );
+
+      return;
+    }
+
+    if (!pickupPosition || !destinationPosition) {
+      setDirections(null);
+      setEtaText("");
+      setDistanceText("");
+
+      if (typeof onEtaUpdate === "function") {
+        onEtaUpdate({ etaText: "", distanceText: "" });
+      }
+
+      return;
+    }
+
     directionsService.route(
       {
-        origin: { lat: routeOrigin.lat, lng: routeOrigin.lng },
-        destination: pickupPosition,
+        origin: pickupPosition,
+        destination: destinationPosition,
+        waypoints: stopPositions.map((stop) => ({
+          location: {
+            lat: stop.lat,
+            lng: stop.lng,
+          },
+          stopover: true,
+        })),
+        optimizeWaypoints: false,
         travelMode: window.google.maps.TravelMode.DRIVING,
       },
       (result, status) => {
         if (currentRequestId !== directionsRequestIdRef.current) return;
 
-        if (status === "OK" && result?.routes?.[0]?.legs?.[0]) {
-          const leg = result.routes[0].legs[0];
+        if (status === "OK" && result?.routes?.[0]) {
+          const route = result.routes[0];
+          const legs = Array.isArray(route.legs) ? route.legs : [];
+
+          const totalSeconds = legs.reduce(
+            (sum, leg) => sum + Number(leg?.duration?.value || 0),
+            0
+          );
+
+          const totalMeters = legs.reduce(
+            (sum, leg) => sum + Number(leg?.distance?.value || 0),
+            0
+          );
+
+          const minutes = Math.max(1, Math.round(totalSeconds / 60));
+          const km = totalMeters / 1000;
+
+          const nextEtaText =
+            minutes >= 60
+              ? `${Math.floor(minutes / 60)} h ${minutes % 60} min`
+              : `${minutes} min`;
+
+          const nextDistanceText =
+            km >= 10 ? `${km.toFixed(0)} km` : `${km.toFixed(1)} km`;
 
           setDirections(result);
-          setEtaText(leg.duration?.text || "");
-          setDistanceText(leg.distance?.text || "");
+          setEtaText(nextEtaText);
+          setDistanceText(nextDistanceText);
 
           if (typeof onEtaUpdate === "function") {
             onEtaUpdate({
-              etaText: leg.duration?.text || "",
-              distanceText: leg.distance?.text || "",
+              etaText: nextEtaText,
+              distanceText: nextDistanceText,
             });
           }
         } else {
-          console.warn("[LiveTracking] Directions error:", status);
+          console.warn("[LiveTracking] Directions route error:", status);
 
           setDirections(null);
           setEtaText("");
@@ -479,6 +618,8 @@ const LiveTracking = ({
   }, [
     mapsApiLoaded,
     pickupPosition,
+    destinationPosition,
+    stopPositions,
     routeOrigin?.lat,
     routeOrigin?.lng,
     showRouteToPickup,
@@ -505,6 +646,18 @@ const LiveTracking = ({
         right: 60,
         bottom: 250,
         left: 60,
+      });
+    } else if (pickupPosition && destinationPosition) {
+      bounds.extend(pickupPosition);
+      stopPositions.forEach((stop) => bounds.extend(stop));
+      bounds.extend(destinationPosition);
+      hasPoints = true;
+
+      map.fitBounds(bounds, {
+        top: 130,
+        right: 70,
+        bottom: 360,
+        left: 70,
       });
     } else if (pickupPosition && showPickupRadar) {
       bounds.extend(pickupPosition);
@@ -546,6 +699,8 @@ const LiveTracking = ({
     showPickupRadar,
     routeOrigin,
     pickupPosition,
+    destinationPosition,
+    stopPositions,
     currentPosition,
     safeNearbyDrivers,
     zoom,
@@ -576,36 +731,183 @@ const LiveTracking = ({
       ? {
           path: window.google.maps.SymbolPath.CIRCLE,
           scale: 8,
-          fillColor: "#111111",
+          fillColor: CENTRAL_GO_DARK,
           fillOpacity: 1,
           strokeColor: "#ffffff",
           strokeWeight: 3,
         }
       : undefined;
 
-  const buildCarSvg = (rotation = 0, active = true) => {
-    const fill = active ? "#7c3aed" : "#9ca3af";
-    const topFill = active ? "#8b5cf6" : "#cbd5e1";
+  const destinationDotIcon =
+    mapsApiLoaded && window.google?.maps
+      ? {
+          path: window.google.maps.SymbolPath.CIRCLE,
+          scale: 8,
+          fillColor: CENTRAL_GO_PURPLE,
+          fillOpacity: 1,
+          strokeColor: "#ffffff",
+          strokeWeight: 3,
+        }
+      : undefined;
+
+  const buildStopIcon = (index) => {
+    if (!mapsApiLoaded || !window.google?.maps) return undefined;
+
+    const number = String(index + 1);
 
     const svg = `
-      <svg xmlns="http://www.w3.org/2000/svg" width="56" height="56" viewBox="0 0 56 56">
-        <g transform="rotate(${rotation} 28 28)">
-          <circle cx="28" cy="28" r="24" fill="white" fill-opacity="0.96"/>
-          <circle cx="28" cy="28" r="24" stroke="#d1d5db" stroke-width="1.5" fill="none"/>
-          <rect x="15" y="22" width="26" height="12" rx="5" fill="${fill}"/>
-          <rect x="20" y="18" width="16" height="8" rx="3" fill="${topFill}"/>
-          <circle cx="21" cy="36" r="4" fill="#111827"/>
-          <circle cx="35" cy="36" r="4" fill="#111827"/>
-          <rect x="22" y="20" width="5" height="4" rx="1" fill="#dbeafe"/>
-          <rect x="29" y="20" width="5" height="4" rx="1" fill="#dbeafe"/>
+      <svg xmlns="http://www.w3.org/2000/svg" width="46" height="54" viewBox="0 0 46 54">
+        <defs>
+          <filter id="shadow" x="-30%" y="-30%" width="160%" height="160%">
+            <feDropShadow dx="0" dy="5" stdDeviation="4" flood-color="#000000" flood-opacity="0.28"/>
+          </filter>
+        </defs>
+        <g filter="url(#shadow)">
+          <path d="M23 3C13.6 3 6 10.5 6 19.9C6 32.1 23 51 23 51C23 51 40 32.1 40 19.9C40 10.5 32.4 3 23 3Z" fill="${CENTRAL_GO_PURPLE}"/>
+          <circle cx="23" cy="20" r="11" fill="white"/>
+          <text x="23" y="25" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="900" fill="${CENTRAL_GO_DARK}">${number}</text>
         </g>
       </svg>
     `;
 
     return {
       url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
-      scaledSize: new window.google.maps.Size(42, 42),
-      anchor: new window.google.maps.Point(21, 21),
+      scaledSize: new window.google.maps.Size(40, 47),
+      anchor: new window.google.maps.Point(20, 47),
+    };
+  };
+
+  const buildCarSvg = (rotation = 0, active = true) => {
+    if (!mapsApiLoaded || !window.google?.maps) return undefined;
+
+    const bodyA = active ? "#4c057a" : "#6b7280";
+    const bodyB = active ? "#7c1fd1" : "#9ca3af";
+    const bodyC = active ? "#a855f7" : "#cbd5e1";
+    const glass = "#111827";
+    const light = "#e9d5ff";
+    const stroke = active ? "#2a064f" : "#374151";
+
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" width="72" height="72" viewBox="0 0 72 72">
+        <defs>
+          <linearGradient id="carBody" x1="10" y1="10" x2="62" y2="62" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="${bodyC}"/>
+            <stop offset="0.45" stop-color="${bodyB}"/>
+            <stop offset="1" stop-color="${bodyA}"/>
+          </linearGradient>
+          <linearGradient id="glassGrad" x1="20" y1="14" x2="50" y2="42" gradientUnits="userSpaceOnUse">
+            <stop offset="0" stop-color="#0f172a"/>
+            <stop offset="1" stop-color="#020617"/>
+          </linearGradient>
+          <filter id="shadow" x="-35%" y="-35%" width="170%" height="170%">
+            <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#000000" flood-opacity="0.35"/>
+          </filter>
+          <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+            <feGaussianBlur stdDeviation="1.3" result="blur"/>
+            <feMerge>
+              <feMergeNode in="blur"/>
+              <feMergeNode in="SourceGraphic"/>
+            </feMerge>
+          </filter>
+        </defs>
+
+        <g transform="rotate(${rotation} 36 36)" filter="url(#shadow)">
+          <ellipse cx="36" cy="50" rx="20" ry="7" fill="#000000" opacity="0.22"/>
+
+          <path
+            d="M19 47
+               C15 43 14 35 17 27
+               C19 21 25 15 32 13
+               C39 11 48 14 53 21
+               C59 29 60 39 55 47
+               C48 53 27 54 19 47Z"
+            fill="url(#carBody)"
+            stroke="${stroke}"
+            stroke-width="1.6"
+          />
+
+          <path
+            d="M27 22
+               C32 16 42 17 47 23
+               C43 27 31 28 24 26
+               C24.8 24.5 25.8 23.1 27 22Z"
+            fill="url(#glassGrad)"
+            opacity="0.98"
+          />
+
+          <path
+            d="M23 29
+               C31 32 44 31 51 27
+               C54 34 54 40 51 45
+               C43 48 29 49 21 45
+               C18 40 18 34 23 29Z"
+            fill="url(#carBody)"
+            opacity="0.98"
+          />
+
+          <path
+            d="M24 31
+               C31 34 42 33 49 30"
+            fill="none"
+            stroke="#d8b4fe"
+            stroke-width="1.4"
+            opacity="0.85"
+          />
+
+          <path
+            d="M22 44
+               C29 47 43 47 50 44"
+            fill="none"
+            stroke="#2e1065"
+            stroke-width="1.4"
+            opacity="0.55"
+          />
+
+          <path
+            d="M18 35
+               C14 35 12 38 13 42
+               C15 41 17 40 19 38Z"
+            fill="${bodyA}"
+          />
+
+          <path
+            d="M54 35
+               C58 35 60 38 59 42
+               C57 41 55 40 53 38Z"
+            fill="${bodyA}"
+          />
+
+          <ellipse cx="25" cy="50" rx="5.5" ry="3.5" fill="#020617"/>
+          <ellipse cx="47" cy="50" rx="5.5" ry="3.5" fill="#020617"/>
+
+          <path
+            d="M20 29
+               C22 25 25 22 29 20"
+            stroke="#ffffff"
+            stroke-width="1.4"
+            opacity="0.35"
+            fill="none"
+          />
+
+          <circle cx="22" cy="28" r="2.2" fill="${light}" filter="url(#glow)" opacity="0.95"/>
+          <circle cx="50" cy="28" r="2.2" fill="${light}" filter="url(#glow)" opacity="0.95"/>
+
+          <path
+            d="M28 14
+               C34 11 43 12 50 19"
+            stroke="#f5d0fe"
+            stroke-width="1.4"
+            opacity="0.5"
+            fill="none"
+          />
+        </g>
+      </svg>
+    `;
+
+    return {
+      url: `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`,
+      scaledSize: new window.google.maps.Size(54, 54),
+      anchor: new window.google.maps.Point(27, 27),
     };
   };
 
@@ -643,15 +945,15 @@ const LiveTracking = ({
       onClick={markUserInteraction}
       options={mapOptions}
     >
-      {directions && showRouteToPickup && (
+      {directions && (
         <DirectionsRenderer
           directions={directions}
           options={{
             suppressMarkers: true,
             preserveViewport: true,
             polylineOptions: {
-              strokeColor: "#7c3aed",
-              strokeOpacity: 0.9,
+              strokeColor: CENTRAL_GO_PURPLE,
+              strokeOpacity: 0.92,
               strokeWeight: 7,
             },
           }}
@@ -680,15 +982,15 @@ const LiveTracking = ({
 
       {pickupPosition && (
         <>
-          {showPickupRadar && (
+          {showPickupRadar && !hasUserRoute && (
             <>
               <Circle
                 center={pickupPosition}
                 radius={pulseRadiusA}
                 options={{
-                  fillColor: "#7c3aed",
+                  fillColor: CENTRAL_GO_PURPLE,
                   fillOpacity: 0.08,
-                  strokeColor: "#7c3aed",
+                  strokeColor: CENTRAL_GO_PURPLE,
                   strokeOpacity: 0.16,
                   strokeWeight: 1,
                   clickable: false,
@@ -699,9 +1001,9 @@ const LiveTracking = ({
                 center={pickupPosition}
                 radius={pulseRadiusB}
                 options={{
-                  fillColor: "#7c3aed",
+                  fillColor: CENTRAL_GO_PURPLE,
                   fillOpacity: 0.04,
-                  strokeColor: "#7c3aed",
+                  strokeColor: CENTRAL_GO_PURPLE,
                   strokeOpacity: 0.1,
                   strokeWeight: 1,
                   clickable: false,
@@ -714,14 +1016,14 @@ const LiveTracking = ({
             center={pickupPosition}
             radius={70}
             options={{
-              fillColor: "#111111",
+              fillColor: CENTRAL_GO_DARK,
               fillOpacity: 0.12,
               strokeOpacity: 0,
               clickable: false,
             }}
           />
 
-          <Marker position={pickupPosition} icon={pickupDotIcon} zIndex={60} />
+          <Marker position={pickupPosition} icon={pickupDotIcon} zIndex={80} />
 
           <OverlayView
             position={pickupPosition}
@@ -730,17 +1032,60 @@ const LiveTracking = ({
             <div
               style={{
                 transform: "translate(-50%, -115%)",
-                background: "#111827",
+                background: CENTRAL_GO_DARK,
                 color: "#fff",
                 padding: "6px 10px",
                 borderRadius: "999px",
                 fontSize: "12px",
-                fontWeight: 600,
+                fontWeight: 700,
                 boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
                 whiteSpace: "nowrap",
               }}
             >
               Punto de recogida
+            </div>
+          </OverlayView>
+        </>
+      )}
+
+      {stopPositions.map((stop, index) => (
+        <Marker
+          key={`stop-${index}-${stop.lat}-${stop.lng}`}
+          position={{ lat: stop.lat, lng: stop.lng }}
+          icon={buildStopIcon(index)}
+          zIndex={85}
+          title={`Parada ${index + 1}`}
+        />
+      ))}
+
+      {destinationPosition && (
+        <>
+          <Marker
+            position={destinationPosition}
+            icon={destinationDotIcon}
+            zIndex={82}
+            title="Destino final"
+          />
+
+          <OverlayView
+            position={destinationPosition}
+            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+          >
+            <div
+              style={{
+                transform: "translate(-50%, 16px)",
+                background: "rgba(255,255,255,0.97)",
+                color: CENTRAL_GO_DARK,
+                padding: "8px 12px",
+                borderRadius: "999px",
+                fontSize: "12px",
+                fontWeight: 800,
+                boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+                whiteSpace: "nowrap",
+                border: "1px solid #ede9fe",
+              }}
+            >
+              Destino final
             </div>
           </OverlayView>
         </>
@@ -766,39 +1111,38 @@ const LiveTracking = ({
           <Marker
             position={{ lat: routeOrigin.lat, lng: routeOrigin.lng }}
             icon={buildCarSvg(routeOrigin.rotation, true)}
-            zIndex={70}
+            zIndex={90}
             title="Mi ubicación"
           />
         )}
 
-      {showRouteToPickup &&
-        routeOrigin &&
-        pickupPosition &&
-        (etaText || distanceText) && (
-          <OverlayView
-            position={pickupPosition}
-            mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+      {directions && (etaText || distanceText) && pickupPosition && (
+        <OverlayView
+          position={showRouteToPickup ? pickupPosition : destinationPosition || pickupPosition}
+          mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
+        >
+          <div
+            style={{
+              transform: showRouteToPickup
+                ? "translate(-50%, 18px)"
+                : "translate(-50%, -115%)",
+              background: "rgba(255,255,255,0.97)",
+              color: "#111827",
+              padding: "10px 14px",
+              borderRadius: "16px",
+              fontSize: "12px",
+              fontWeight: 800,
+              boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
+              whiteSpace: "nowrap",
+              border: "1px solid #e5e7eb",
+            }}
           >
-            <div
-              style={{
-                transform: "translate(-50%, 18px)",
-                background: "rgba(255,255,255,0.96)",
-                color: "#111827",
-                padding: "10px 14px",
-                borderRadius: "16px",
-                fontSize: "12px",
-                fontWeight: 700,
-                boxShadow: "0 8px 24px rgba(0,0,0,0.15)",
-                whiteSpace: "nowrap",
-                border: "1px solid #e5e7eb",
-              }}
-            >
-              {etaText ? `Llega en ${etaText}` : ""}
-              {etaText && distanceText ? " · " : ""}
-              {distanceText || ""}
-            </div>
-          </OverlayView>
-        )}
+            {etaText ? `${etaText}` : ""}
+            {etaText && distanceText ? " · " : ""}
+            {distanceText || ""}
+          </div>
+        </OverlayView>
+      )}
     </GoogleMap>
   );
 };

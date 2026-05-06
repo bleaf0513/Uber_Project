@@ -124,7 +124,6 @@ function Home() {
     if (!result) return "";
 
     const formatted = result.formatted_address || "";
-
     if (!formatted) return "";
 
     return formatted.replace(/, Colombia$/i, "").trim();
@@ -157,7 +156,6 @@ function Home() {
           });
 
           const address = formatAddressFromGeocoder(result);
-
           if (address) return address;
         } catch (error) {
           console.warn("No se pudo geocodificar el GPS:", error);
@@ -406,7 +404,6 @@ function Home() {
 
     const onRideConfirmed = (payload) => {
       const rideData = normalizeSocketRide(payload);
-
       if (!rideData?._id) return;
 
       setCaptainArrived(false);
@@ -419,7 +416,6 @@ function Home() {
 
     const onRideOfferUpdated = (payload) => {
       const nextRide = normalizeSocketRide(payload);
-
       if (!nextRide?._id) return;
 
       setRide((prev) => ({
@@ -448,9 +444,7 @@ function Home() {
 
     const onRideUpdated = (payload) => {
       const nextRide = normalizeSocketRide(payload);
-
       if (!nextRide?._id) return;
-
       syncRideState(nextRide);
     };
 
@@ -626,7 +620,7 @@ function Home() {
   );
 
   const fetchSuggestions = (query) => {
-    if (query.length < 3) {
+    if (!query || query.length < 3) {
       if (suggestionTimerRef.current) {
         clearTimeout(suggestionTimerRef.current);
         suggestionTimerRef.current = null;
@@ -673,7 +667,6 @@ function Home() {
     if (!vehiclePanel || !pickup || !destination || prices != null) return;
 
     const token = localStorage.getItem("token");
-
     if (!token) return;
 
     let cancelled = false;
@@ -743,6 +736,12 @@ function Home() {
     }
   };
 
+  const closeRoutePanels = () => {
+    setPanelOpen(false);
+    setStopsPanelOpen(false);
+    setSuggestions([]);
+  };
+
   const handleSuggestionSelect = (suggestion) => {
     const selectedText =
       typeof suggestion === "string"
@@ -754,10 +753,18 @@ function Home() {
     if (activeInput === "pickup") {
       setPickup(selectedText);
       setPickupDetected(false);
-    } else if (activeInput === "destination") {
+      closeRoutePanels();
+      return;
+    }
+
+    if (activeInput === "destination") {
       setDestination(selectedText);
       saveRecentPlace(selectedText);
-    } else if (String(activeInput || "").startsWith("stop-")) {
+      closeRoutePanels();
+      return;
+    }
+
+    if (String(activeInput || "").startsWith("stop-")) {
       const index = Number(String(activeInput).replace("stop-", ""));
 
       if (Number.isInteger(index) && index >= 0) {
@@ -767,24 +774,23 @@ function Home() {
           return next;
         });
       }
+
+      setSuggestions([]);
+      return;
     }
 
     setSuggestions([]);
-
-    const nextPickup = activeInput === "pickup" ? selectedText : pickup;
-    const nextDestination =
-      activeInput === "destination" ? selectedText : destination;
-
-    if (nextPickup && nextDestination && activeInput === "destination") {
-      setPanelOpen(false);
-      setVehiclePanel(true);
-    }
   };
 
   const addEmptyStop = () => {
-    setRouteStops((prev) => [...prev, ""]);
-    setPanelOpen(true);
+    setRouteStops((prev) => {
+      const next = [...prev, ""];
+      return next;
+    });
+
     setStopsPanelOpen(false);
+    setPanelOpen(true);
+    setSuggestions([]);
 
     setTimeout(() => {
       setActiveInput(`stop-${routeStops.length}`);
@@ -801,7 +807,9 @@ function Home() {
     setSuggestions([]);
   };
 
-  const handleFindDriver = async () => {
+  const handleFindDriver = async (forcedDestination = null) => {
+    const finalDestination = String(forcedDestination || destination || "").trim();
+
     if (!pickup || pickup.trim().length < 3) {
       const gpsResult = await requestGpsLocation();
 
@@ -813,18 +821,58 @@ function Home() {
       }
     }
 
-    if (!destination || destination.trim().length < 3) {
+    if (!finalDestination || finalDestination.length < 3) {
       setPanelOpen(true);
       setActiveInput("destination");
-      alert("Ingresa tu destino para encontrar conductor.");
       return;
     }
 
-    saveRecentPlace(destination);
+    if (forcedDestination) {
+      setDestination(finalDestination);
+    }
+
+    saveRecentPlace(finalDestination);
     setPanelOpen(false);
     setStopsPanelOpen(false);
     setSuggestions([]);
     setVehiclePanel(true);
+  };
+
+  const selectRecentDestination = (place) => {
+    const clean = String(place || "").trim();
+
+    if (!clean) return;
+
+    setDestination(clean);
+    saveRecentPlace(clean);
+    setPanelOpen(false);
+    setStopsPanelOpen(false);
+    setSuggestions([]);
+  };
+
+  const selectRecentForActiveInput = (place) => {
+    const clean = String(place || "").trim();
+
+    if (!clean) return;
+
+    if (String(activeInput || "").startsWith("stop-")) {
+      const stopIndex = Number(String(activeInput).replace("stop-", ""));
+
+      if (Number.isInteger(stopIndex) && stopIndex >= 0) {
+        setRouteStops((prev) => {
+          const next = [...prev];
+          next[stopIndex] = clean;
+          return next;
+        });
+      }
+
+      setSuggestions([]);
+      return;
+    }
+
+    setDestination(clean);
+    saveRecentPlace(clean);
+    closeRoutePanels();
   };
 
   const createRide = async (offeredFare) => {
@@ -1257,6 +1305,7 @@ function Home() {
                 <p className="text-xs font-semibold text-gray-500">
                   {routeStopsCount > 0 ? `${routeStopsCount} parada(s) de ruta` : "A"}
                 </p>
+
                 <p className="text-[16px] font-bold text-gray-900 truncate">
                   {destination}
                 </p>
@@ -1265,9 +1314,10 @@ function Home() {
               <button
                 type="button"
                 onClick={addEmptyStop}
-                className="w-11 h-11 rounded-full bg-purple-700 text-white flex items-center justify-center shadow-lg"
+                className="h-9 rounded-full bg-purple-700 text-white flex items-center gap-1 px-3 shadow-lg"
               >
-                <i className="ri-add-line text-2xl"></i>
+                <i className="ri-add-line text-lg"></i>
+                <span className="text-xs font-black">Parada</span>
               </button>
             </div>
           </div>
@@ -1429,14 +1479,7 @@ function Home() {
                   <button
                     key={`${place}-${index}`}
                     type="button"
-                    onClick={() => {
-                      setDestination(place);
-                      saveRecentPlace(place);
-                      setPanelOpen(false);
-                      setTimeout(() => {
-                        handleFindDriver();
-                      }, 100);
-                    }}
+                    onClick={() => selectRecentDestination(place)}
                     className="w-full flex items-start gap-3 text-left"
                   >
                     <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
@@ -1571,15 +1614,16 @@ function Home() {
                       }}
                       type="text"
                       placeholder="A"
-                      className="w-full rounded-[18px] bg-[#f2f2f2] border-[2px] border-gray-800 pl-14 pr-14 py-4 text-[18px] font-medium text-gray-900 outline-none"
+                      className="w-full rounded-[18px] bg-[#f2f2f2] border-[2px] border-gray-800 pl-14 pr-[115px] py-4 text-[18px] font-medium text-gray-900 outline-none"
                     />
 
                     <button
                       type="button"
                       onClick={addEmptyStop}
-                      className="absolute right-3 top-1/2 -translate-y-1/2 w-9 h-9 rounded-full bg-purple-700 text-white flex items-center justify-center"
+                      className="absolute right-3 top-1/2 -translate-y-1/2 h-9 rounded-full bg-purple-700 text-white flex items-center gap-1 px-3"
                     >
-                      <i className="ri-add-line text-xl"></i>
+                      <i className="ri-add-line text-lg"></i>
+                      <span className="text-xs font-black">Parada</span>
                     </button>
                   </div>
                 </div>
@@ -1604,29 +1648,7 @@ function Home() {
                       <button
                         key={`${place}-${index}`}
                         type="button"
-                        onClick={() => {
-                          if (String(activeInput || "").startsWith("stop-")) {
-                            const stopIndex = Number(
-                              String(activeInput).replace("stop-", "")
-                            );
-
-                            setRouteStops((prev) => {
-                              const next = [...prev];
-                              next[stopIndex] = place;
-                              return next;
-                            });
-                          } else {
-                            setDestination(place);
-                          }
-
-                          saveRecentPlace(place);
-                          setPanelOpen(false);
-                          setSuggestions([]);
-
-                          setTimeout(() => {
-                            handleFindDriver();
-                          }, 100);
-                        }}
+                        onClick={() => selectRecentForActiveInput(place)}
                         className="w-full flex items-start gap-3 text-left"
                       >
                         <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
@@ -1656,7 +1678,7 @@ function Home() {
             <div className="px-5 pb-5 pt-3 border-t border-gray-100">
               <button
                 type="button"
-                onClick={handleFindDriver}
+                onClick={() => handleFindDriver()}
                 className="w-full rounded-[22px] bg-gradient-to-r from-purple-700 via-purple-800 to-purple-950 text-white py-4 font-extrabold text-[18px] shadow-lg"
               >
                 Encontrar conductor
@@ -1691,36 +1713,46 @@ function Home() {
                 <button
                   type="button"
                   onClick={addEmptyStop}
-                  className="w-11 h-11 rounded-full bg-purple-700 text-white flex items-center justify-center"
+                  className="h-10 rounded-full bg-purple-700 text-white flex items-center gap-1 px-3"
                 >
-                  <i className="ri-add-line text-2xl"></i>
+                  <i className="ri-add-line text-lg"></i>
+                  <span className="text-xs font-black">Parada</span>
                 </button>
               </div>
             </div>
 
             <div className="px-5 py-5 space-y-5">
-              {cleanRouteStops.map((stop, index) => (
-                <div key={`${stop}-${index}`} className="flex items-center gap-4">
-                  <div className="w-8 text-center text-lg font-black text-gray-900">
-                    {index + 1}
-                  </div>
+              {cleanRouteStops.length > 0 ? (
+                cleanRouteStops.map((stop, index) => (
+                  <div key={`${stop}-${index}`} className="flex items-center gap-4">
+                    <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-900 flex items-center justify-center text-sm font-black">
+                      {index + 1}
+                    </div>
 
-                  <div className="min-w-0 flex-1">
-                    <p className="text-lg font-bold text-gray-900 truncate">
-                      {stop}
-                    </p>
-                    <p className="text-sm text-gray-500">Parada de ruta</p>
-                  </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-lg font-bold text-gray-900 truncate">
+                        {stop}
+                      </p>
+                      <p className="text-sm text-gray-500">Parada de ruta</p>
+                    </div>
 
-                  <button
-                    type="button"
-                    onClick={() => removeStop(index)}
-                    className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
-                  >
-                    <i className="ri-close-line text-2xl text-gray-900"></i>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => removeStop(index)}
+                      className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
+                    >
+                      <i className="ri-close-line text-2xl text-gray-900"></i>
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="rounded-2xl bg-purple-50 border border-purple-100 p-4 text-purple-900">
+                  <p className="text-sm font-bold">No tienes paradas agregadas.</p>
+                  <p className="text-xs mt-1">
+                    Agrega una parada para que la ruta se organice antes del destino final.
+                  </p>
                 </div>
-              ))}
+              )}
 
               <div className="flex items-center gap-4">
                 <div className="w-8 flex justify-center">
