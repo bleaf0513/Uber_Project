@@ -23,6 +23,7 @@ import { useGoogleMapsScript } from "../context/GoogleMapsLoadContext";
 import { getApiBaseUrl } from "../apiBase";
 
 const OFFER_TTL_MS = 60000;
+const RECENT_PLACES_KEY = "centralgo_recent_places";
 
 function Home() {
   const submitHandler = (e) => {
@@ -54,16 +55,21 @@ function Home() {
     distanceText: "",
   });
 
-  const [gpsStatus, setGpsStatus] = useState("idle");
+  const [gpsStatus, setGpsStatus] = useState("idle"); // idle | loading | granted | denied
   const [gpsError, setGpsError] = useState("");
   const [userCoords, setUserCoords] = useState(null);
   const [pickupDetected, setPickupDetected] = useState(false);
+  const [recentPlaces, setRecentPlaces] = useState(() => {
+    try {
+      const raw = localStorage.getItem(RECENT_PLACES_KEY);
+      const parsed = JSON.parse(raw || "[]");
+      return Array.isArray(parsed) ? parsed : [];
+    } catch {
+      return [];
+    }
+  });
 
-  const panelRef = useRef(null);
-  const titleRef = useRef(null);
-  const searchRef = useRef(null);
   const vehicleRef = useRef(null);
-  const arrowRef = useRef(null);
   const vehicleFoundRef = useRef(null);
   const driverSelectedRef = useRef(null);
   const confirmRidePanelRef = useRef(null);
@@ -80,17 +86,28 @@ function Home() {
     return payload?.data?.ride || payload?.ride || payload?.data || payload || null;
   }, []);
 
+  const saveRecentPlace = useCallback((placeText) => {
+    const clean = String(placeText || "").trim();
+    if (!clean) return;
+
+    setRecentPlaces((prev) => {
+      const next = [clean, ...(prev || []).filter((p) => p !== clean)].slice(0, 5);
+      try {
+        localStorage.setItem(RECENT_PLACES_KEY, JSON.stringify(next));
+      } catch (error) {
+        console.warn("No se pudo guardar historial reciente:", error);
+      }
+      return next;
+    });
+  }, []);
+
   const formatAddressFromGeocoder = (result) => {
     if (!result) return "";
 
     const formatted = result.formatted_address || "";
-
     if (!formatted) return "";
 
-    return formatted
-      .replace(/, Colombia$/i, "")
-      .replace(/, Antioquia$/i, ", Antioquia")
-      .trim();
+    return formatted.replace(/, Colombia$/i, "").trim();
   };
 
   const reverseGeocodeCoords = useCallback(
@@ -120,10 +137,9 @@ function Home() {
           });
 
           const address = formatAddressFromGeocoder(result);
-
           if (address) return address;
         } catch (error) {
-          console.warn("No se pudo convertir GPS en dirección:", error);
+          console.warn("No se pudo geocodificar el GPS:", error);
         }
       }
 
@@ -150,7 +166,7 @@ function Home() {
   const requestGpsLocation = useCallback(async () => {
     if (!navigator.geolocation) {
       setGpsStatus("denied");
-      setGpsError("Este dispositivo o navegador no permite usar GPS.");
+      setGpsError("Este dispositivo no permite usar la ubicación.");
       return null;
     }
 
@@ -181,24 +197,20 @@ function Home() {
           });
         },
         (error) => {
-          console.warn("GPS no autorizado o no disponible:", error);
+          console.warn("No se pudo activar el GPS:", error);
 
           let message =
-            "No pudimos activar tu ubicación. Puedes escribir tu punto de recogida manualmente.";
+            "No pudimos acceder a tu ubicación. Puedes escribir el punto de recogida manualmente.";
 
           if (error?.code === 1) {
             message =
-              "Permiso de ubicación rechazado. Actívalo en el navegador para detectar tu punto de recogida.";
-          }
-
-          if (error?.code === 2) {
+              "Permiso de ubicación rechazado. Actívalo para detectar automáticamente tu punto de recogida.";
+          } else if (error?.code === 2) {
             message =
-              "No pudimos detectar tu ubicación actual. Revisa el GPS o intenta escribir la dirección.";
-          }
-
-          if (error?.code === 3) {
+              "No pudimos encontrar tu ubicación. Verifica que el GPS del dispositivo esté activo.";
+          } else if (error?.code === 3) {
             message =
-              "La ubicación tardó demasiado. Intenta de nuevo o escribe la dirección manualmente.";
+              "La ubicación tardó demasiado. Inténtalo de nuevo.";
           }
 
           setGpsStatus("denied");
@@ -208,7 +220,7 @@ function Home() {
         {
           enableHighAccuracy: true,
           maximumAge: 5000,
-          timeout: 18000,
+          timeout: 15000,
         }
       );
     });
@@ -242,15 +254,19 @@ function Home() {
   }, [emitUserLocation, socket, user?._id]);
 
   useEffect(() => {
-    if (!user?._id || !socket) return;
-
     return () => {
       if (watchLocationRef.current && navigator.geolocation) {
         navigator.geolocation.clearWatch(watchLocationRef.current);
         watchLocationRef.current = null;
       }
     };
-  }, [socket, user?._id]);
+  }, []);
+
+  useEffect(() => {
+    if (gpsStatus === "granted") {
+      startGpsWatch();
+    }
+  }, [gpsStatus, startGpsWatch]);
 
   const syncRideState = useCallback(
     (rideData) => {
@@ -280,21 +296,7 @@ function Home() {
         setCaptainArrived(true);
       }
 
-      if (rideData?.status === "ongoing") {
-        setCaptainArrived(false);
-        setDriverSelected(false);
-        setVehicleFound(false);
-        setConfirmRidePanel(false);
-        setVehiclePanel(false);
-
-        navigate("/riding", {
-          state: {
-            ride: rideData,
-          },
-        });
-      }
-
-      if (rideData?.status === "completed") {
+      if (rideData?.status === "ongoing" || rideData?.status === "completed") {
         setCaptainArrived(false);
         setDriverSelected(false);
         setVehicleFound(false);
@@ -340,17 +342,11 @@ function Home() {
     };
 
     const onConnect = () => {
-      console.log("[user socket] connected:", socket.id);
       emitJoin();
     };
 
     const onReconnect = () => {
-      console.log("[user socket] reconnected:", socket.id);
       emitJoin();
-    };
-
-    const onSocketJoined = (payload) => {
-      console.log("[user socket] socket-joined:", payload);
     };
 
     if (socket.connected) {
@@ -359,12 +355,10 @@ function Home() {
 
     socket.on("connect", onConnect);
     socket.io?.on?.("reconnect", onReconnect);
-    socket.on("socket-joined", onSocketJoined);
 
     return () => {
       socket.off("connect", onConnect);
       socket.io?.off?.("reconnect", onReconnect);
-      socket.off("socket-joined", onSocketJoined);
     };
   }, [socket, user?._id, ride?._id]);
 
@@ -375,7 +369,6 @@ function Home() {
       const nextRide = normalizeSocketRide(payload) || ride;
 
       if (!nextRide?._id) {
-        console.error("[user socket] ride-started sin ride válido:", payload);
         alert("El viaje inició, pero no se pudo cargar la información completa.");
         return;
       }
@@ -391,7 +384,6 @@ function Home() {
 
     const onRideConfirmed = (payload) => {
       const rideData = normalizeSocketRide(payload);
-
       if (!rideData?._id) return;
 
       setCaptainArrived(false);
@@ -404,7 +396,6 @@ function Home() {
 
     const onRideOfferUpdated = (payload) => {
       const nextRide = normalizeSocketRide(payload);
-
       if (!nextRide?._id) return;
 
       setRide((prev) => ({
@@ -432,9 +423,7 @@ function Home() {
 
     const onRideUpdated = (payload) => {
       const nextRide = normalizeSocketRide(payload);
-
       if (!nextRide?._id) return;
-
       syncRideState(nextRide);
     };
 
@@ -477,11 +466,9 @@ function Home() {
     };
 
     const onCaptainArrived = (payload) => {
-      console.log("[user socket] captain-arrived:", payload);
       setCaptainArrived(true);
 
       const nextRide = normalizeSocketRide(payload);
-
       if (nextRide?._id) {
         setRide(nextRide);
       }
@@ -490,7 +477,6 @@ function Home() {
     };
 
     const onRideCancelledByCaptain = (payload) => {
-      console.log("[user socket] ride-cancelled-by-captain:", payload);
       setCaptainArrived(false);
       setRide(null);
       setDriverSelected(false);
@@ -582,10 +568,7 @@ function Home() {
             return;
           }
         } catch (error) {
-          console.warn(
-            "Places autocomplete failed, using server fallback:",
-            error?.message || error
-          );
+          console.warn("Fallback de suggestions:", error?.message || error);
         }
       }
 
@@ -656,9 +639,7 @@ function Home() {
   }, [pickup, destination]);
 
   useEffect(() => {
-    if (!vehiclePanel || !pickup || !destination || prices != null) {
-      return;
-    }
+    if (!vehiclePanel || !pickup || !destination || prices != null) return;
 
     const token = localStorage.getItem("token");
     if (!token) return;
@@ -736,27 +717,28 @@ function Home() {
       setPickupDetected(false);
     } else {
       setDestination(selectedText);
+      saveRecentPlace(selectedText);
     }
 
     setSuggestions([]);
-    setPanelOpen(false);
 
     const nextPickup = activeInput === "pickup" ? selectedText : pickup;
     const nextDestination =
       activeInput === "destination" ? selectedText : destination;
 
     if (nextPickup && nextDestination) {
+      setPanelOpen(false);
       setVehiclePanel(true);
     }
   };
 
   const handleFindDriver = async () => {
-    if (!pickup) {
+    if (!pickup || pickup.trim().length < 3) {
       const gpsResult = await requestGpsLocation();
 
       if (!gpsResult?.address && !gpsResult?.lat) {
         alert(
-          "Primero activa tu ubicación GPS o escribe manualmente el punto de recogida."
+          "Primero activa tu ubicación o escribe manualmente tu punto de recogida."
         );
         return;
       }
@@ -765,10 +747,11 @@ function Home() {
     if (!destination || destination.trim().length < 3) {
       setPanelOpen(true);
       setActiveInput("destination");
-      alert("Ingresa tu destino para encontrar un conductor.");
+      alert("Ingresa tu destino para encontrar conductor.");
       return;
     }
 
+    saveRecentPlace(destination);
     setPanelOpen(false);
     setSuggestions([]);
     setVehiclePanel(true);
@@ -1100,78 +1083,10 @@ function Home() {
     }
   }, [confirmRidePanel]);
 
-  useGSAP(() => {
-    if (panelOpen) {
-      gsap.to(titleRef.current, { display: "none", duration: 0.3 });
-
-      gsap.to(panelRef.current, {
-        height: "68%",
-        display: "flex",
-        duration: 0.5,
-        delay: 0.2,
-        opacity: 1,
-      });
-
-      gsap.to(arrowRef.current, {
-        display: "block",
-        duration: 0.5,
-        delay: 0.5,
-      });
-    } else {
-      gsap.to(arrowRef.current, { display: "none", duration: 0.3 });
-
-      gsap.to(panelRef.current, {
-        height: "0%",
-        display: "none",
-        duration: 0.5,
-        delay: 0.2,
-        opacity: 0,
-      });
-
-      gsap.to(titleRef.current, {
-        display: "block",
-        duration: 0.5,
-        delay: 0.3,
-      });
-    }
-  }, [panelOpen]);
-
-  useEffect(() => {
-    if (gpsStatus === "granted") {
-      startGpsWatch();
-    }
-  }, [gpsStatus, startGpsWatch]);
-
-  const isFindDisabled =
-    gpsStatus === "loading" || !destination || destination.trim().length < 3;
-
   return (
-    <div className="h-screen relative w-screen overflow-hidden bg-slate-950">
-      <div>
-        <img
-          className="absolute w-20 ml-7 pt-7 z-30 drop-shadow-xl"
-          src="/logo-centralgo.png"
-          alt="Central Go"
-        />
-      </div>
-
-      <Link
-        onClick={logoutUser}
-        className="absolute top-3 right-3 w-12 h-12 rounded-full bg-black/85 backdrop-blur flex items-center justify-center z-50 shadow-xl"
-      >
-        <i
-          style={{ color: "white" }}
-          className="ri-logout-box-line ri-xl mb mr-0.5"
-        ></i>
-      </Link>
-
-      <div
-        className="absolute w-screen h-[100%] top-0 z-20"
-        onClick={() => {
-          setPanelOpen(false);
-          setSuggestions([]);
-        }}
-      >
+    <div className="h-screen relative w-screen overflow-hidden bg-white">
+      {/* MAPA */}
+      <div className="absolute inset-0 z-10">
         <LiveTracking
           pickup={driverSelected ? ride?.pickup || pickup : pickup}
           nearbyDrivers={nearbyDrivers}
@@ -1182,27 +1097,82 @@ function Home() {
         />
       </div>
 
-      <div className="absolute top-28 left-4 right-4 z-30 pointer-events-none">
-        <div className="inline-flex items-center gap-2 rounded-full bg-white/90 backdrop-blur px-4 py-2 shadow-xl border border-white/70">
-          <span
-            className={`w-2.5 h-2.5 rounded-full ${
-              gpsStatus === "granted"
-                ? "bg-emerald-500"
-                : gpsStatus === "loading"
-                ? "bg-yellow-500"
-                : "bg-red-500"
-            }`}
-          ></span>
-          <span className="text-xs font-bold text-gray-800">
-            {gpsStatus === "granted"
-              ? "GPS activo"
-              : gpsStatus === "loading"
-              ? "Detectando ubicación..."
-              : "Activa tu ubicación"}
-          </span>
-        </div>
+      {/* LOGO */}
+      <div className="absolute top-5 left-4 z-40">
+        <img
+          className="w-16 drop-shadow-xl"
+          src="/logo-centralgo.png"
+          alt="Central Go"
+        />
       </div>
 
+      {/* LOGOUT */}
+      <Link
+        onClick={logoutUser}
+        className="absolute top-5 right-4 w-11 h-11 rounded-full bg-white/95 flex items-center justify-center z-40 shadow-lg border border-gray-200"
+      >
+        <i className="ri-logout-box-line text-xl text-gray-900"></i>
+      </Link>
+
+      {/* BANNER GPS ARRIBA */}
+      {gpsStatus !== "granted" && (
+        <div className="absolute top-0 left-0 right-0 z-50 bg-[#be9228] text-white shadow-xl">
+          <div className="px-4 pt-3 pb-4">
+            <p className="text-[15px] font-extrabold leading-tight">
+              {gpsStatus === "loading"
+                ? "Detectando tu ubicación..."
+                : "No pudimos encontrarte"}
+            </p>
+            <p className="text-sm mt-1 text-white/95">
+              {gpsStatus === "loading"
+                ? "Espera un momento mientras accedemos a tu ubicación."
+                : "Pulsa para acceder a tu ubicación"}
+            </p>
+
+            {gpsError ? (
+              <p className="text-xs mt-2 text-white/90">{gpsError}</p>
+            ) : null}
+
+            {gpsStatus !== "loading" && (
+              <button
+                type="button"
+                onClick={requestGpsLocation}
+                className="mt-3 rounded-full bg-white text-[#9b7420] px-5 py-2.5 text-sm font-bold shadow"
+              >
+                Activar ubicación
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* TARJETA DE RECOGIDA ENCIMA DEL MAPA */}
+      {pickup && !panelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
+        <div
+          className={`absolute left-1/2 -translate-x-1/2 z-40 w-[78%] max-w-[430px] ${
+            gpsStatus !== "granted" ? "top-28" : "top-20"
+          }`}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setPanelOpen(true);
+              setActiveInput("pickup");
+            }}
+            className="w-full rounded-[22px] bg-white shadow-xl border border-gray-200 px-4 py-3 text-left"
+          >
+            <p className="text-sm text-gray-500 font-medium">De dónde</p>
+            <div className="flex items-center justify-between gap-3 mt-1">
+              <p className="text-[17px] font-bold text-gray-900 truncate">
+                {pickup}
+              </p>
+              <i className="ri-arrow-right-s-line text-2xl text-gray-800"></i>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* OFERTAS DE CONDUCTORES */}
       {vehicleFound && liveOffers.length > 0 && (
         <div className="absolute top-24 left-0 right-0 z-40 px-3">
           <div className="flex gap-3 overflow-x-auto pb-1">
@@ -1311,6 +1281,7 @@ function Home() {
         </div>
       )}
 
+      {/* ETA DEL CONDUCTOR */}
       {driverSelected &&
         (etaInfo?.etaText || etaInfo?.distanceText || captainArrived) && (
           <div className="absolute top-24 left-3 right-3 z-40">
@@ -1332,207 +1303,221 @@ function Home() {
           </div>
         )}
 
-      <div
-        ref={searchRef}
-        className="absolute flex flex-col justify-end top-0 h-screen w-full rounded-t-lg z-40 pointer-events-none"
-      >
-        <div className="px-4 pb-4 pointer-events-auto">
-          <div className="bg-white rounded-[32px] p-5 shadow-2xl border border-white/70">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-bold text-purple-700 uppercase tracking-[0.18em]">
-                  Central Go
-                </p>
+      {/* PANEL INFERIOR CERRADO */}
+      {!panelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
+        <div className="fixed bottom-0 left-0 right-0 z-40">
+          <div className="bg-white rounded-t-[32px] shadow-[0_-8px_40px_rgba(0,0,0,0.14)] px-5 pt-3 pb-6">
+            <div className="mx-auto w-12 h-1.5 rounded-full bg-gray-300 mb-5"></div>
 
-                <h4 ref={titleRef} className="text-3xl font-black text-gray-950 mt-1 leading-tight">
+            <button
+              type="button"
+              onClick={() => {
+                setPanelOpen(true);
+                setActiveInput("destination");
+              }}
+              className="w-full rounded-[22px] bg-[#f2f2f2] px-4 py-4 flex items-center justify-between border border-gray-200"
+            >
+              <div className="flex items-center gap-3">
+                <i className="ri-search-line text-3xl text-gray-900"></i>
+                <span className="text-[18px] font-semibold text-gray-900">
                   ¿A dónde vamos?
-                </h4>
-
-                <p className="text-sm text-gray-500 mt-1">
-                  Activa tu GPS, confirma tu recogida y encuentra un conductor.
-                </p>
+                </span>
               </div>
+              <i className="ri-arrow-right-s-line text-2xl text-gray-700"></i>
+            </button>
+
+            {recentPlaces.length > 0 && (
+              <div className="mt-5 space-y-4">
+                {recentPlaces.slice(0, 2).map((place, index) => (
+                  <button
+                    key={`${place}-${index}`}
+                    type="button"
+                    onClick={() => {
+                      setDestination(place);
+                      saveRecentPlace(place);
+                      handleFindDriver();
+                    }}
+                    className="w-full flex items-start gap-3 text-left"
+                  >
+                    <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
+                      <i className="ri-history-line text-xl text-gray-700"></i>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[16px] font-bold text-gray-900 truncate">
+                        {place}
+                      </p>
+                      <p className="text-sm text-gray-500 truncate">
+                        Destino reciente
+                      </p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-3 mt-6">
+              <button
+                type="button"
+                onClick={handleFindDriver}
+                className="rounded-[22px] bg-black text-white py-4 px-4 font-bold text-base shadow-lg"
+              >
+                Encontrar conductor
+              </button>
 
               <button
                 type="button"
-                onClick={() => {
-                  setPanelOpen(false);
-                }}
-                ref={arrowRef}
-                className="hidden w-10 h-10 rounded-full bg-gray-100 items-center justify-center"
+                onClick={goToAvailableOffers}
+                className="rounded-[22px] bg-gray-100 text-gray-900 py-4 px-4 font-bold text-base border border-gray-200"
               >
-                <i className="ri-arrow-down-s-line text-2xl text-gray-900"></i>
+                Entregas / Ofertas
               </button>
             </div>
-
-            {gpsStatus !== "granted" && (
-              <div className="mt-4 rounded-[24px] bg-gradient-to-br from-purple-700 to-slate-950 p-4 text-white shadow-xl">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
-                    <i className="ri-map-pin-user-fill text-2xl"></i>
-                  </div>
-
-                  <div className="flex-1">
-                    <p className="text-base font-black">
-                      Activa tu ubicación GPS
-                    </p>
-                    <p className="text-xs text-white/80 mt-1 leading-relaxed">
-                      Así llenamos automáticamente tu punto de recogida y los
-                      conductores podrán encontrarte mejor.
-                    </p>
-
-                    {gpsError && (
-                      <p className="text-xs text-red-100 mt-2 font-semibold">
-                        {gpsError}
-                      </p>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={requestGpsLocation}
-                      disabled={gpsStatus === "loading"}
-                      className="mt-3 w-full rounded-2xl bg-white text-purple-800 py-3 font-black text-sm disabled:opacity-70"
-                    >
-                      {gpsStatus === "loading"
-                        ? "Detectando ubicación..."
-                        : "Activar ubicación"}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {gpsStatus === "granted" && pickupDetected && (
-              <div className="mt-4 rounded-2xl bg-emerald-50 border border-emerald-100 px-4 py-3 flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-emerald-600 flex items-center justify-center shrink-0">
-                  <i className="ri-check-line text-white text-xl"></i>
-                </div>
-
-                <div className="min-w-0">
-                  <p className="text-sm font-black text-emerald-900">
-                    Ubicación detectada
-                  </p>
-                  <p className="text-xs text-emerald-700 truncate">
-                    {pickup}
-                  </p>
-                </div>
-              </div>
-            )}
-
-            <form className="relative mt-4" onSubmit={submitHandler}>
-              <div className="absolute left-5 top-[31px] bottom-[31px] w-[3px] bg-gray-200 rounded-full">
-                <div className="absolute -top-1 left-1/2 -translate-x-1/2 h-3.5 w-3.5 bg-purple-700 rounded-full border-2 border-white shadow"></div>
-                <div className="absolute -bottom-1 left-1/2 -translate-x-1/2 h-3.5 w-3.5 bg-slate-950 rounded-full border-2 border-white shadow"></div>
-              </div>
-
-              <div className="relative">
-                <i className="ri-map-pin-user-fill absolute left-11 top-1/2 -translate-y-1/2 text-purple-700 text-xl"></i>
-
-                <input
-                  value={pickup}
-                  onClick={() => {
-                    setPanelOpen(true);
-                    setActiveInput("pickup");
-                  }}
-                  onChange={(e) => {
-                    setPickup(e.target.value);
-                    setPickupDetected(false);
-                    fetchSuggestions(e.target.value);
-                  }}
-                  className="bg-gray-100 border border-gray-200 rounded-2xl px-3 py-4 text-base w-full mt-2 mb-2 pl-[76px] pr-4 font-semibold text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  type="text"
-                  placeholder={
-                    gpsStatus === "loading"
-                      ? "Detectando tu punto de recogida..."
-                      : "Agregar punto de recogida"
-                  }
-                />
-              </div>
-
-              <div className="relative">
-                <i className="ri-flag-2-fill absolute left-11 top-1/2 -translate-y-1/2 text-slate-950 text-xl"></i>
-
-                <input
-                  value={destination}
-                  onClick={() => {
-                    setPanelOpen(true);
-                    setActiveInput("destination");
-                  }}
-                  onChange={(e) => {
-                    setDestination(e.target.value);
-                    fetchSuggestions(e.target.value);
-                  }}
-                  className="bg-gray-100 border border-gray-200 rounded-2xl px-3 py-4 text-base w-full mt-2 mb-2 pl-[76px] pr-4 font-semibold text-gray-900 placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-purple-500"
-                  type="text"
-                  placeholder="¿Para dónde vas?"
-                />
-              </div>
-            </form>
-
-            <button
-              type="button"
-              onClick={handleFindDriver}
-              disabled={gpsStatus === "loading"}
-              className="mt-3 w-full rounded-[24px] bg-gradient-to-r from-purple-700 via-purple-800 to-slate-950 text-white px-4 py-4 flex items-center justify-between shadow-xl disabled:opacity-70"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center">
-                  <i className="ri-steering-2-fill text-xl"></i>
-                </div>
-
-                <div className="text-left">
-                  <p className="text-base font-black">Encontrar conductor</p>
-                  <p className="text-xs text-white/80">
-                    Mira precios y vehículos disponibles
-                  </p>
-                </div>
-              </div>
-
-              <i className="ri-arrow-right-line text-2xl"></i>
-            </button>
-
-            <button
-              type="button"
-              onClick={goToAvailableOffers}
-              className="mt-3 w-full rounded-[22px] bg-gray-950 text-white px-4 py-3 flex items-center justify-between shadow-lg"
-            >
-              <div className="flex items-center gap-3">
-                <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center">
-                  <i className="ri-fire-line text-xl"></i>
-                </div>
-
-                <div className="text-left">
-                  <p className="text-sm font-black">Ofertas disponibles</p>
-                  <p className="text-xs text-white/70">
-                    Mercancía, espacio y cupos en ruta
-                  </p>
-                </div>
-              </div>
-
-              <i className="ri-arrow-right-line text-xl"></i>
-            </button>
           </div>
         </div>
+      )}
 
-        <div
-          ref={panelRef}
-          className="opacity-0 bg-white flex flex-col justify-start pl-5 pr-2 z-50 pointer-events-auto rounded-t-[28px] shadow-2xl"
-        >
-          <LocationSearchPanel
-            vehiclePanel={vehiclePanel}
-            setVehiclePanel={setVehiclePanel}
-            panelOpen={panelOpen}
-            setPanelOpen={setPanelOpen}
-            setConfirmRidePanel={setConfirmRidePanel}
-            suggestions={suggestions}
-            onSuggestionSelect={handleSuggestionSelect}
+      {/* PANEL INFERIOR ABIERTO */}
+      {panelOpen && !vehiclePanel && !vehicleFound && !driverSelected && (
+        <>
+          <div
+            className="fixed inset-0 bg-black/25 z-40"
+            onClick={() => {
+              setPanelOpen(false);
+              setSuggestions([]);
+            }}
           />
-        </div>
-      </div>
 
+          <div className="fixed bottom-0 left-0 right-0 z-50 bg-white rounded-t-[32px] shadow-2xl max-h-[78vh] overflow-hidden">
+            <div className="px-5 pt-4 pb-4 border-b border-gray-100">
+              <div className="mx-auto w-12 h-1.5 rounded-full bg-gray-300 mb-4"></div>
+
+              <div className="flex items-center justify-between gap-3">
+                <h3 className="text-[20px] font-extrabold text-gray-900">
+                  Introduce tu ruta
+                </h3>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPanelOpen(false);
+                    setSuggestions([]);
+                  }}
+                  className="w-11 h-11 rounded-full bg-gray-100 flex items-center justify-center"
+                >
+                  <i className="ri-close-line text-2xl text-gray-900"></i>
+                </button>
+              </div>
+
+              <form className="mt-4" onSubmit={submitHandler}>
+                <div className="space-y-3">
+                  <div className="relative">
+                    <i className="ri-map-pin-user-fill absolute left-4 top-1/2 -translate-y-1/2 text-2xl text-gray-900"></i>
+                    <input
+                      value={pickup}
+                      onFocus={() => setActiveInput("pickup")}
+                      onClick={() => setActiveInput("pickup")}
+                      onChange={(e) => {
+                        setPickup(e.target.value);
+                        setPickupDetected(false);
+                        setActiveInput("pickup");
+                        fetchSuggestions(e.target.value);
+                      }}
+                      type="text"
+                      placeholder="De"
+                      className="w-full rounded-[18px] bg-[#f2f2f2] border border-gray-200 pl-14 pr-4 py-4 text-[18px] font-medium text-gray-900 outline-none"
+                    />
+                  </div>
+
+                  <div className="relative">
+                    <i className="ri-search-line absolute left-4 top-1/2 -translate-y-1/2 text-2xl text-gray-900"></i>
+                    <input
+                      value={destination}
+                      onFocus={() => setActiveInput("destination")}
+                      onClick={() => setActiveInput("destination")}
+                      onChange={(e) => {
+                        setDestination(e.target.value);
+                        setActiveInput("destination");
+                        fetchSuggestions(e.target.value);
+                      }}
+                      type="text"
+                      placeholder="A"
+                      className="w-full rounded-[18px] bg-[#f2f2f2] border-[2px] border-gray-800 pl-14 pr-4 py-4 text-[18px] font-medium text-gray-900 outline-none"
+                    />
+                  </div>
+                </div>
+              </form>
+            </div>
+
+            <div className="overflow-auto max-h-[46vh] px-5 py-4">
+              {suggestions.length > 0 ? (
+                <LocationSearchPanel
+                  vehiclePanel={vehiclePanel}
+                  setVehiclePanel={setVehiclePanel}
+                  panelOpen={panelOpen}
+                  setPanelOpen={setPanelOpen}
+                  setConfirmRidePanel={setConfirmRidePanel}
+                  suggestions={suggestions}
+                  onSuggestionSelect={handleSuggestionSelect}
+                />
+              ) : (
+                <div className="space-y-4">
+                  {recentPlaces.length > 0 ? (
+                    recentPlaces.map((place, index) => (
+                      <button
+                        key={`${place}-${index}`}
+                        type="button"
+                        onClick={() => {
+                          setDestination(place);
+                          saveRecentPlace(place);
+                          setPanelOpen(false);
+                          setSuggestions([]);
+                          setTimeout(() => {
+                            handleFindDriver();
+                          }, 100);
+                        }}
+                        className="w-full flex items-start gap-3 text-left"
+                      >
+                        <div className="w-10 h-10 rounded-full border border-gray-300 flex items-center justify-center shrink-0">
+                          <i className="ri-history-line text-xl text-gray-700"></i>
+                        </div>
+
+                        <div className="min-w-0 flex-1 border-b border-gray-100 pb-4">
+                          <p className="text-[18px] font-bold text-gray-900 truncate">
+                            {place}
+                          </p>
+                          <p className="text-sm text-gray-500 truncate">
+                            Destino reciente
+                          </p>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="text-center py-8 text-gray-500">
+                      Empieza escribiendo tu destino para ver sugerencias.
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="px-5 pb-5 pt-3 border-t border-gray-100">
+              <button
+                type="button"
+                onClick={handleFindDriver}
+                className="w-full rounded-[22px] bg-[#b8f10c] text-black py-4 font-extrabold text-[18px] shadow-lg"
+              >
+                Encontrar conductor
+              </button>
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* PANEL VEHÍCULOS */}
       <div
         ref={vehicleRef}
-        className="fixed min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-[28px] bg-white overflow-auto z-50 shadow-2xl"
+        className="fixed min-h-[35%] bottom-0 w-screen translate-y-full max-h-[50%] rounded-t-[28px] bg-white overflow-auto z-50"
       >
         <VehiclePanel
           setVehiclePanel={setVehiclePanel}
@@ -1545,9 +1530,10 @@ function Home() {
         />
       </div>
 
+      {/* CONFIRMAR VIAJE */}
       <div
         ref={confirmRidePanelRef}
-        className="fixed bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-hidden z-50 shadow-2xl"
+        className="fixed bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-hidden z-50"
       >
         <ConfirmedRide
           setConfirmRidePanel={setConfirmRidePanel}
@@ -1561,9 +1547,10 @@ function Home() {
         />
       </div>
 
+      {/* BUSCANDO CONDUCTOR */}
       <div
         ref={vehicleFoundRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-hidden h-[40%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-hidden h-[40%] shadow-2xl"
       >
         <FindingDriver
           setConfirmRidePanel={setConfirmRidePanel}
@@ -1577,9 +1564,10 @@ function Home() {
         />
       </div>
 
+      {/* CONDUCTOR SELECCIONADO */}
       <div
         ref={driverSelectedRef}
-        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[28px] bg-white overflow-auto max-h-[72%] shadow-2xl"
+        className="fixed z-50 bottom-0 w-screen translate-y-full rounded-t-[24px] bg-white overflow-auto max-h-[72%] shadow-2xl"
       >
         <DriverSelected
           ride={ride}
