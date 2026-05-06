@@ -7,6 +7,7 @@ const OfferBid = require("../models/offerBid.model");
 const User = require("../models/user.model");
 const Captain = require("../models/captain.model");
 const { sendMessageToSocketId } = require("../socket");
+const pushService = require("../services/push.service");
 
 const PRICE_TYPE_LABELS = {
     por_kg: "por kg",
@@ -100,7 +101,7 @@ const notifyCaptainNewBid = async (bidId) => {
     try {
         const bid = await OfferBid.findById(bidId)
             .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle socketId")
+            .populate("driver", "fullname vehicle socketId fcmTokens")
             .populate("goodsOffer")
             .populate("spaceOffer")
             .populate("seatOffer");
@@ -108,24 +109,40 @@ const notifyCaptainNewBid = async (bidId) => {
         if (!bid?.driver) return;
 
         const captainId = bid.driver._id || bid.driver;
-        const captain = await Captain.findById(captainId).select("socketId");
 
-        if (!captain?.socketId) {
-            console.log(
-                "[offers] captain offline, notification skipped:",
-                String(captainId)
-            );
-            return;
+        const title = "Nueva oferta recibida";
+        const body = `${getCustomerNameFromBid(bid)} ofertó ${
+            bid.requestedQuantity
+        } ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`;
+
+        const payload = buildBidNotificationPayload(bid, {
+            notificationTitle: title,
+            notificationBody: body,
+        });
+
+        const captain = await Captain.findById(captainId).select(
+            "socketId fcmTokens"
+        );
+
+        if (captain?.socketId) {
+            sendMessageToSocketId(captain.socketId, {
+                event: "new-offer-bid",
+                data: payload,
+            });
         }
 
-        sendMessageToSocketId(captain.socketId, {
-            event: "new-offer-bid",
-            data: buildBidNotificationPayload(bid, {
-                notificationTitle: "Nueva oferta recibida",
-                notificationBody: `${getCustomerNameFromBid(bid)} ofertó ${
-                    bid.requestedQuantity
-                } ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`,
-            }),
+        await pushService.sendToCaptain(captainId, {
+            title,
+            body,
+            type: "marketplace_bid_received",
+            data: {
+                bidId: String(bid._id),
+                listingType: bid.listingType,
+                status: bid.status,
+                screen: "captain_received_bids",
+            },
+            link: `${process.env.FRONTEND_URL || ""}/captain/offers/received`,
+            requireInteraction: true,
         });
     } catch (error) {
         console.error("[offers] notifyCaptainNewBid error:", error);
@@ -135,7 +152,7 @@ const notifyCaptainNewBid = async (bidId) => {
 const notifyUserBidUpdated = async (bidId, action) => {
     try {
         const bid = await OfferBid.findById(bidId)
-            .populate("customer", "fullname email socketId")
+            .populate("customer", "fullname email socketId fcmTokens")
             .populate("driver", "fullname vehicle")
             .populate("goodsOffer")
             .populate("spaceOffer")
@@ -144,15 +161,6 @@ const notifyUserBidUpdated = async (bidId, action) => {
         if (!bid?.customer) return;
 
         const userId = bid.customer._id || bid.customer;
-        const user = await User.findById(userId).select("socketId");
-
-        if (!user?.socketId) {
-            console.log(
-                "[offers] user offline, notification skipped:",
-                String(userId)
-            );
-            return;
-        }
 
         const actionLabels = {
             accepted: "aceptó",
@@ -162,15 +170,47 @@ const notifyUserBidUpdated = async (bidId, action) => {
             cancelled: "canceló",
         };
 
-        sendMessageToSocketId(user.socketId, {
-            event: "offer-bid-updated",
-            data: buildBidNotificationPayload(bid, {
+        const title =
+            action === "accepted"
+                ? "Oferta aceptada"
+                : action === "rejected"
+                ? "Oferta rechazada"
+                : action === "countered"
+                ? "Nueva contraoferta"
+                : "Respuesta a tu oferta";
+
+        const body = `${getCaptainName(bid.driver)} ${
+            actionLabels[action] || "respondió"
+        } tu oferta.`;
+
+        const payload = buildBidNotificationPayload(bid, {
+            action,
+            notificationTitle: title,
+            notificationBody: body,
+        });
+
+        const user = await User.findById(userId).select("socketId fcmTokens");
+
+        if (user?.socketId) {
+            sendMessageToSocketId(user.socketId, {
+                event: "offer-bid-updated",
+                data: payload,
+            });
+        }
+
+        await pushService.sendToUser(userId, {
+            title,
+            body,
+            type: "marketplace_bid_updated",
+            data: {
+                bidId: String(bid._id),
+                listingType: bid.listingType,
+                status: bid.status,
                 action,
-                notificationTitle: "Respuesta a tu oferta",
-                notificationBody: `${getCaptainName(bid.driver)} ${
-                    actionLabels[action] || "respondió"
-                } tu oferta.`,
-            }),
+                screen: "user_sent_bids",
+            },
+            link: `${process.env.FRONTEND_URL || ""}/sent-bids`,
+            requireInteraction: true,
         });
     } catch (error) {
         console.error("[offers] notifyUserBidUpdated error:", error);
@@ -181,7 +221,7 @@ const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
     try {
         const bid = await OfferBid.findById(bidId)
             .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle socketId")
+            .populate("driver", "fullname vehicle socketId fcmTokens")
             .populate("goodsOffer")
             .populate("spaceOffer")
             .populate("seatOffer");
@@ -189,25 +229,46 @@ const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
         if (!bid?.driver) return;
 
         const captainId = bid.driver._id || bid.driver;
-        const captain = await Captain.findById(captainId).select("socketId");
-
-        if (!captain?.socketId) {
-            console.log(
-                "[offers] captain offline, counter response notification skipped:",
-                String(captainId)
-            );
-            return;
-        }
 
         const actionLabel = action === "accepted" ? "aceptó" : "rechazó";
 
-        sendMessageToSocketId(captain.socketId, {
-            event: "offer-counter-response",
-            data: buildBidNotificationPayload(bid, {
+        const title =
+            action === "accepted"
+                ? "Contraoferta aceptada"
+                : "Contraoferta rechazada";
+
+        const body = `${getCustomerNameFromBid(bid)} ${actionLabel} tu contraoferta.`;
+
+        const payload = buildBidNotificationPayload(bid, {
+            action,
+            notificationTitle: title,
+            notificationBody: body,
+        });
+
+        const captain = await Captain.findById(captainId).select(
+            "socketId fcmTokens"
+        );
+
+        if (captain?.socketId) {
+            sendMessageToSocketId(captain.socketId, {
+                event: "offer-counter-response",
+                data: payload,
+            });
+        }
+
+        await pushService.sendToCaptain(captainId, {
+            title,
+            body,
+            type: "marketplace_counter_response",
+            data: {
+                bidId: String(bid._id),
+                listingType: bid.listingType,
+                status: bid.status,
                 action,
-                notificationTitle: "Respuesta a tu contraoferta",
-                notificationBody: `${getCustomerNameFromBid(bid)} ${actionLabel} tu contraoferta.`,
-            }),
+                screen: "captain_received_bids",
+            },
+            link: `${process.env.FRONTEND_URL || ""}/captain/offers/received`,
+            requireInteraction: true,
         });
     } catch (error) {
         console.error("[offers] notifyCaptainCustomerCounterResponse error:", error);
