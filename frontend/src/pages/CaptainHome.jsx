@@ -70,18 +70,40 @@ const CaptainHome = () => {
     }).format(Math.ceil(number));
   };
 
-  const formatKm = (value) => {
+  const normalizeDistanceToKm = (value) => {
     const number = Number(value);
 
     if (!Number.isFinite(number) || number <= 0) {
+      return null;
+    }
+
+    /*
+      Si viene mayor a 300 normalmente es porque está en metros.
+      Ejemplo: 11524 metros = 11.5 km.
+    */
+    if (number > 300) {
+      return number / 1000;
+    }
+
+    return number;
+  };
+
+  const formatKm = (value) => {
+    const km = normalizeDistanceToKm(value);
+
+    if (!Number.isFinite(km) || km <= 0) {
       return "-- km";
     }
 
-    if (number < 1) {
-      return `${Math.round(number * 1000)} m`;
+    if (km < 1) {
+      return `${Math.round(km * 1000)} m`;
     }
 
-    return `${number.toFixed(1)} km`;
+    if (km >= 1000) {
+      return "-- km";
+    }
+
+    return `${km.toFixed(1)} km`;
   };
 
   const formatShortAddress = (address = "") => {
@@ -97,6 +119,12 @@ const CaptainHome = () => {
     if (parts.length <= 2) return safe;
 
     return `${parts[0]}, ${parts[1]}`;
+  };
+
+  const getRouteStops = (rideData) => {
+    return Array.isArray(rideData?.routeStops)
+      ? rideData.routeStops.map((stop) => String(stop || "").trim()).filter(Boolean)
+      : [];
   };
 
   const getUserName = (rideData) => {
@@ -125,11 +153,16 @@ const CaptainHome = () => {
   };
 
   const getPickupToDestinationKm = (rideData) => {
-    return (
+    const metricValue =
       rideData?.metrics?.pickupToDestinationKm ??
-      rideData?.distance ??
-      null
-    );
+      rideData?.metrics?.pickupToDestination ??
+      null;
+
+    if (metricValue != null) {
+      return normalizeDistanceToKm(metricValue);
+    }
+
+    return normalizeDistanceToKm(rideData?.distance);
   };
 
   const getQuickOfferValues = (rideData) => {
@@ -604,7 +637,16 @@ const CaptainHome = () => {
         ["accepted", "arrived", "ongoing"].includes(updatedRide?.status)
       ) {
         goToActiveRide(updatedRide);
+        return;
       }
+
+      upsertAvailableRide(updatedRide);
+    };
+
+    const onRideUserOfferUpdated = (payload) => {
+      const updatedRide = payload?.ride || payload?.data || payload;
+      if (!updatedRide?._id) return;
+      upsertAvailableRide(updatedRide);
     };
 
     socket.off("connect", onConnect);
@@ -614,6 +656,7 @@ const CaptainHome = () => {
     socket.off("ride-offer-rejected", onRideOfferRejected);
     socket.off("ride-offer-accepted", onRideOfferAccepted);
     socket.off("ride-updated", onRideUpdated);
+    socket.off("ride-user-offer-updated", onRideUserOfferUpdated);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -622,6 +665,7 @@ const CaptainHome = () => {
     socket.on("ride-offer-rejected", onRideOfferRejected);
     socket.on("ride-offer-accepted", onRideOfferAccepted);
     socket.on("ride-updated", onRideUpdated);
+    socket.on("ride-user-offer-updated", onRideUserOfferUpdated);
 
     if (socket.connected) {
       onConnect();
@@ -635,6 +679,7 @@ const CaptainHome = () => {
       socket.off("ride-offer-rejected", onRideOfferRejected);
       socket.off("ride-offer-accepted", onRideOfferAccepted);
       socket.off("ride-updated", onRideUpdated);
+      socket.off("ride-user-offer-updated", onRideUserOfferUpdated);
     };
   }, [
     socket,
@@ -900,7 +945,13 @@ const CaptainHome = () => {
       </div>
 
       <div className="absolute w-screen h-[100%] top-0 z-20">
-        <LiveTracking />
+        <LiveTracking
+          pickup={rideDetailsOpen && ride ? ride.pickup : ""}
+          destination={rideDetailsOpen && ride ? ride.destination : ""}
+          routeStops={rideDetailsOpen && ride ? getRouteStops(ride) : []}
+          showPickupRadar={false}
+          autoFetchNearbyDrivers={false}
+        />
       </div>
 
       {availableRides.length > 0 && !rideDetailsOpen && (
@@ -930,6 +981,7 @@ const CaptainHome = () => {
               const driverToPickupKm = getDriverToPickupKm(item);
               const pickupToDestinationKm = getPickupToDestinationKm(item);
               const fare = getRideFare(item);
+              const stops = getRouteStops(item);
 
               return (
                 <button
@@ -992,6 +1044,28 @@ const CaptainHome = () => {
                             </p>
                           </div>
 
+                          {stops.slice(0, 2).map((stop, index) => (
+                            <div
+                              key={`${rideId}-stop-${index}`}
+                              className="flex items-start gap-1.5"
+                            >
+                              <span className="mt-1 w-4 h-4 rounded-full bg-violet-100 flex items-center justify-center shrink-0">
+                                <span className="text-[9px] font-black text-violet-700">
+                                  {index + 1}
+                                </span>
+                              </span>
+                              <p className="text-xs font-bold text-gray-800 leading-4 line-clamp-1">
+                                {formatShortAddress(stop)}
+                              </p>
+                            </div>
+                          ))}
+
+                          {stops.length > 2 && (
+                            <p className="text-[10px] font-black text-purple-700 pl-6">
+                              +{stops.length - 2} parada(s) más
+                            </p>
+                          )}
+
                           <div className="flex items-start gap-1.5">
                             <span className="mt-1 w-4 h-4 rounded-full bg-fuchsia-100 flex items-center justify-center shrink-0">
                               <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-700" />
@@ -1004,7 +1078,9 @@ const CaptainHome = () => {
 
                         <div className="mt-2 flex items-center justify-between">
                           <span className="rounded-full bg-purple-50 px-2.5 py-1 text-[10px] font-black text-purple-700">
-                            Tocar para ver detalle
+                            {stops.length > 0
+                              ? `${stops.length} parada(s)`
+                              : "Tocar para ver detalle"}
                           </span>
 
                           <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
@@ -1303,6 +1379,11 @@ const CaptainHome = () => {
                   <p className="text-2xl font-black text-gray-950 mt-1">
                     {formatKm(getPickupToDestinationKm(ride))}
                   </p>
+                  <p className="text-[10px] text-gray-500 mt-1">
+                    {getRouteStops(ride).length > 0
+                      ? `Incluye ${getRouteStops(ride).length} parada(s)`
+                      : "Origen a destino"}
+                  </p>
                 </div>
               </div>
 
@@ -1322,6 +1403,28 @@ const CaptainHome = () => {
                   </div>
                 </div>
 
+                {getRouteStops(ride).map((stop, index) => (
+                  <div
+                    key={`${stop}-${index}`}
+                    className="flex items-start gap-3"
+                  >
+                    <div className="w-9 h-9 rounded-2xl bg-violet-100 flex items-center justify-center shrink-0">
+                      <span className="text-xs font-black text-violet-700">
+                        {index + 1}
+                      </span>
+                    </div>
+
+                    <div className="min-w-0">
+                      <p className="text-[10px] font-black uppercase text-gray-500">
+                        Parada {index + 1}
+                      </p>
+                      <p className="text-sm font-black text-gray-950 leading-5">
+                        {formatShortAddress(stop)}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+
                 <div className="flex items-start gap-3">
                   <div className="w-9 h-9 rounded-2xl bg-fuchsia-100 flex items-center justify-center shrink-0">
                     <i className="ri-flag-fill text-fuchsia-700"></i>
@@ -1329,7 +1432,7 @@ const CaptainHome = () => {
 
                   <div className="min-w-0">
                     <p className="text-[10px] font-black uppercase text-gray-500">
-                      Punto B - Destino
+                      Punto final - Destino
                     </p>
                     <p className="text-sm font-black text-gray-950 leading-5">
                       {formatShortAddress(ride?.destination)}

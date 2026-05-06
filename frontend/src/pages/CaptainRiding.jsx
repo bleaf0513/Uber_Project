@@ -98,8 +98,14 @@ const CaptainRiding = () => {
 
   useEffect(() => {
     if (!currentRide) return;
+
     syncRideState(currentRide);
-  }, [currentRide?._id, currentRide?.status, currentRide?.userConfirmedAtPickup, currentRide?.arrivedAtPickup]);
+  }, [
+    currentRide?._id,
+    currentRide?.status,
+    currentRide?.userConfirmedAtPickup,
+    currentRide?.arrivedAtPickup,
+  ]);
 
   useEffect(() => {
     const loadCaptainActiveRide = async () => {
@@ -364,6 +370,47 @@ const CaptainRiding = () => {
     };
   };
 
+  const formatRideDistance = (value) => {
+    const raw = Number(value);
+
+    if (!Number.isFinite(raw) || raw <= 0) {
+      return "-- km";
+    }
+
+    const km = raw > 300 ? raw / 1000 : raw;
+
+    if (km >= 1000) {
+      return "-- km";
+    }
+
+    if (km >= 10) {
+      return `${km.toFixed(1)} km`;
+    }
+
+    return `${km.toFixed(2)} km`;
+  };
+
+  const formatRideDuration = (value) => {
+    const seconds = Number(value);
+
+    if (!Number.isFinite(seconds) || seconds <= 0) {
+      return "-- min";
+    }
+
+    const minutes = Math.max(1, Math.round(seconds / 60));
+
+    if (minutes < 60) {
+      return `${minutes} min`;
+    }
+
+    const hours = Math.floor(minutes / 60);
+    const remainingMinutes = minutes % 60;
+
+    return remainingMinutes > 0
+      ? `${hours} h ${remainingMinutes} min`
+      : `${hours} h`;
+  };
+
   const getUserPhoto = () =>
     currentRide?.user?.profileImage ||
     currentRide?.user?.photo ||
@@ -412,10 +459,7 @@ const CaptainRiding = () => {
 
     const encodedAddress = encodeURIComponent(address);
 
-    window.open(
-      `https://waze.com/ul?q=${encodedAddress}&navigate=yes`,
-      "_blank"
-    );
+    window.open(`https://waze.com/ul?q=${encodedAddress}&navigate=yes`, "_blank");
   };
 
   const openGoogleMapsNavigation = () => {
@@ -786,6 +830,13 @@ const CaptainRiding = () => {
   const pickupAddress = formatAddress(currentRide?.pickup);
   const destinationAddress = formatAddress(currentRide?.destination);
 
+  const routeStops = Array.isArray(currentRide?.routeStops)
+    ? currentRide.routeStops.filter(Boolean)
+    : [];
+
+  const rideDistanceText = formatRideDistance(currentRide?.distance);
+  const rideDurationText = formatRideDuration(currentRide?.duration);
+
   const userFullName =
     `${currentRide?.user?.fullname?.firstname || ""} ${
       currentRide?.user?.fullname?.lastname || ""
@@ -857,6 +908,7 @@ const CaptainRiding = () => {
         <LiveTracking
           pickup={currentRide?.pickup || ""}
           destination={currentRide?.destination || ""}
+          routeStops={routeStops}
           selectedCaptainId={currentRide?.captain?._id || null}
           showRouteToPickup={!shouldNavigateToDestination}
           showPickupRadar={false}
@@ -949,6 +1001,36 @@ const CaptainRiding = () => {
 
                 <p className="text-sm text-gray-600 mt-1">
                   {vehicleLabel} · {color} · {plate}
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              <div className="rounded-3xl bg-white border border-purple-100 p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
+                  Recorrido
+                </p>
+
+                <p className="text-2xl font-black text-gray-950 mt-1">
+                  {rideDistanceText}
+                </p>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  Recogida, paradas y destino
+                </p>
+              </div>
+
+              <div className="rounded-3xl bg-white border border-purple-100 p-4 shadow-sm">
+                <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
+                  Tiempo aprox.
+                </p>
+
+                <p className="text-2xl font-black text-gray-950 mt-1">
+                  {rideDurationText}
+                </p>
+
+                <p className="text-xs text-gray-500 mt-1">
+                  Según la ruta calculada
                 </p>
               </div>
             </div>
@@ -1147,6 +1229,10 @@ const CaptainRiding = () => {
                 </div>
 
                 <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
+                    Punto A - Recoger
+                  </p>
+
                   <p className="text-base font-bold text-gray-900">
                     {pickupAddress.firstPart || "Punto de recogida"}
                   </p>
@@ -1159,12 +1245,48 @@ const CaptainRiding = () => {
 
               <div className="h-5 w-px bg-gray-200 ml-5 my-2"></div>
 
+              {routeStops.map((stop, index) => {
+                const stopAddress = formatAddress(stop);
+
+                return (
+                  <React.Fragment key={`${stop}-${index}`}>
+                    <div className="flex items-start gap-3">
+                      <div className="w-10 h-10 rounded-2xl bg-purple-50 flex items-center justify-center shrink-0 border border-purple-100">
+                        <span className="text-sm font-black text-purple-800">
+                          {index + 1}
+                        </span>
+                      </div>
+
+                      <div className="min-w-0">
+                        <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
+                          Parada {index + 1}
+                        </p>
+
+                        <p className="text-base font-bold text-gray-900">
+                          {stopAddress.firstPart || `Parada ${index + 1}`}
+                        </p>
+
+                        <p className="text-sm text-gray-600">
+                          {stopAddress.secondPart || "Parada del recorrido"}
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="h-5 w-px bg-gray-200 ml-5 my-2"></div>
+                  </React.Fragment>
+                );
+              })}
+
               <div className="flex items-start gap-3">
                 <div className="w-10 h-10 rounded-2xl bg-purple-100 flex items-center justify-center shrink-0">
-                  <i className="ri-square-fill text-lg text-purple-700"></i>
+                  <i className="ri-flag-2-fill text-lg text-purple-700"></i>
                 </div>
 
                 <div className="min-w-0">
+                  <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
+                    Punto final - Destino
+                  </p>
+
                   <p className="text-base font-bold text-gray-900">
                     {destinationAddress.firstPart || "Destino"}
                   </p>
