@@ -831,7 +831,7 @@ const CaptainHome = () => {
 
     availableRidesIntervalRef.current = setInterval(() => {
       fetchAvailableRidesForCaptain();
-    }, 4000);
+    }, 15000);
 
     return () => {
       if (availableRidesIntervalRef.current) {

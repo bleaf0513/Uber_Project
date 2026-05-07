@@ -7,6 +7,21 @@ const captainModel = require("../models/captain.model");
 const { mapsErrorStatus } = require("../utils/mapsHttpStatus");
 const walletService = require("../services/wallet.service");
 
+/**
+ * HOTFIX ANTI-COBRO GOOGLE:
+ *
+ * El consumo alto vino por solicitudes duplicadas a Geocoding API.
+ * La función más peligrosa era getAvailableForCaptain porque el frontend
+ * la consulta cada pocos segundos y antes geocodificaba pickup/destination
+ * dentro de un loop.
+ *
+ * Con este archivo:
+ * - NO se geocodifica dentro de getAvailableForCaptain.
+ * - Se siguen mostrando solicitudes disponibles.
+ * - Temporalmente puede aparecer "-- km de ti".
+ * - Se evita quemar solicitudes duplicadas de Geocoding.
+ */
+
 function safeId(value) {
     try {
         return value ? String(value) : null;
@@ -264,6 +279,13 @@ module.exports.createRide = async (req, res) => {
             }
         );
 
+        /*
+         * Esta llamada se mantiene porque crear un viaje requiere ubicar el punto
+         * de recogida para notificar conductores cercanos.
+         *
+         * La emergencia fuerte estaba en getAvailableForCaptain, que se ejecuta
+         * muchas veces automáticamente y geocodificaba en loop.
+         */
         const pickupCoordinates = await mapService.getAddressCoordinates(pickup);
 
         if (
@@ -552,54 +574,19 @@ module.exports.updateUserOfferedFare = async (req, res) => {
             }
         }
 
-        try {
-            const pickupCoordinates = await mapService.getAddressCoordinates(
-                updatedRide.pickup
-            );
-
-            if (
-                pickupCoordinates &&
-                Number.isFinite(pickupCoordinates.ltd) &&
-                Number.isFinite(pickupCoordinates.lng)
-            ) {
-                const SEARCH_RADIUS_KM = 15;
-
-                const captainsInRadius = await mapService.getCaptainsInTheRadius(
-                    pickupCoordinates.ltd,
-                    pickupCoordinates.lng,
-                    SEARCH_RADIUS_KM
-                );
-
-                for (const captain of captainsInRadius || []) {
-                    const socketId = captain?.socketId || null;
-                    if (!socketId) continue;
-
-                    sendMessageToSocketId(socketId, {
-                        event: "new-ride",
-                        data: updatedRide,
-                    });
-
-                    sendMessageToSocketId(socketId, {
-                        event: "ride-user-offer-updated",
-                        data: payload,
-                    });
-
-                    sendMessageToSocketId(socketId, {
-                        event: "ride-updated",
-                        data: payload,
-                    });
-                }
-            }
-        } catch (notifyError) {
-            console.warn(
-                "[updateUserOfferedFare] No se pudo reenviar a conductores cercanos:",
-                notifyError?.message
-            );
-        }
-
+        /*
+         * HOTFIX:
+         * Antes aquí se volvía a geocodificar pickup para reenviar a conductores
+         * cercanos cuando el usuario cambiaba la oferta.
+         *
+         * Para parar consumo de Geocoding, NO hacemos geocoding aquí.
+         * Los conductores recibirán actualización por socket si ya tenían la solicitud
+         * o por polling de available-for-captain sin geocodificar.
+         */
         return res.status(200).json({
             message: "Oferta actualizada correctamente.",
             ride: payload,
+            geocodingDisabled: true,
         });
     } catch (err) {
         console.error("[updateUserOfferedFare] error:", err);
@@ -1100,11 +1087,19 @@ module.exports.getAvailableForCaptain = async (req, res) => {
             });
         }
 
-        const captain = await captainModel.findById(captainId);
-
-        const captainLat = toNumber(captain?.location?.ltd);
-        const captainLng = toNumber(captain?.location?.lng);
-        const hasCaptainLocation = isValidLatLng(captainLat, captainLng);
+        /*
+         * HOTFIX ANTI-COBRO GOOGLE:
+         *
+         * Esta función la llama el frontend del conductor cada pocos segundos.
+         * Antes hacía:
+         * - mapService.getAddressCoordinates(freshRide.pickup)
+         * - mapService.getAddressCoordinates(freshRide.destination)
+         *
+         * Eso generó miles de solicitudes duplicadas de Geocoding.
+         *
+         * Ahora NO llamamos Google aquí.
+         * Solo usamos información ya guardada en el viaje.
+         */
 
         const maxAgeMinutes = 30;
         const createdAfter = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
@@ -1164,83 +1159,25 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                 continue;
             }
 
-            let driverToPickupKm = null;
-            let pickupToDestinationKm = null;
-
-            try {
-                const pickupCoordinates = await mapService.getAddressCoordinates(
-                    freshRide.pickup
-                );
-
-                if (
-                    pickupCoordinates &&
-                    Number.isFinite(pickupCoordinates.ltd) &&
-                    Number.isFinite(pickupCoordinates.lng)
-                ) {
-                    if (hasCaptainLocation) {
-                        const metersDriverToPickup = haversineMeters(
-                            captainLat,
-                            captainLng,
-                            pickupCoordinates.ltd,
-                            pickupCoordinates.lng
-                        );
-
-                        driverToPickupKm = Number(
-                            (metersDriverToPickup / 1000).toFixed(2)
-                        );
-                    }
-
-                    if (Number.isFinite(Number(freshRide.distance))) {
-                        pickupToDestinationKm = normalizeDistanceToKm(
-                            freshRide.distance
-                        );
-                    } else {
-                        const destinationCoordinates =
-                            await mapService.getAddressCoordinates(
-                                freshRide.destination
-                            );
-
-                        if (
-                            destinationCoordinates &&
-                            Number.isFinite(destinationCoordinates.ltd) &&
-                            Number.isFinite(destinationCoordinates.lng)
-                        ) {
-                            const metersPickupToDestination = haversineMeters(
-                                pickupCoordinates.ltd,
-                                pickupCoordinates.lng,
-                                destinationCoordinates.ltd,
-                                destinationCoordinates.lng
-                            );
-
-                            pickupToDestinationKm = Number(
-                                (metersPickupToDestination / 1000).toFixed(2)
-                            );
-                        }
-                    }
-                }
-            } catch (metricsError) {
-                console.warn(
-                    "[getAvailableForCaptain] No se pudieron calcular métricas:",
-                    metricsError?.message
-                );
-            }
+            const pickupToDestinationKm =
+                normalizeDistanceToKm(freshRide.distance) || null;
 
             const payload = ridePayloadWithActiveOffers(freshRide);
 
             availableRides.push({
                 ...payload,
                 metrics: {
-                    driverToPickupKm,
+                    driverToPickupKm: null,
                     pickupToDestinationKm,
-                    driverToPickupText:
-                        Number.isFinite(driverToPickupKm) && driverToPickupKm > 0
-                            ? `${driverToPickupKm.toFixed(1)} km`
-                            : "-- km",
+                    driverToPickupText: "-- km",
                     pickupToDestinationText:
                         Number.isFinite(pickupToDestinationKm) &&
                         pickupToDestinationKm > 0
                             ? `${pickupToDestinationKm.toFixed(1)} km`
                             : "-- km",
+                    geocodingDisabled: true,
+                    geocodingDisabledReason:
+                        "Geocoding desactivado temporalmente en available-for-captain para evitar cobros duplicados.",
                 },
             });
         }
@@ -1248,6 +1185,7 @@ module.exports.getAvailableForCaptain = async (req, res) => {
         return res.status(200).json({
             rides: availableRides,
             count: availableRides.length,
+            geocodingDisabled: true,
         });
     } catch (err) {
         console.error("[getAvailableForCaptain] error:", err);
