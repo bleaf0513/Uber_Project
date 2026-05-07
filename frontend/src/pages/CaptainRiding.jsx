@@ -22,7 +22,10 @@ const CANCEL_REASONS = [
 ];
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_DEEP = "linear-gradient(135deg, #3B0764, #6D28D9, #C026D3)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+const GREEN_GRADIENT = "linear-gradient(135deg, #16A34A, #22C55E)";
+const DARK_GRADIENT = "linear-gradient(135deg, #111827, #374151)";
 
 const CaptainRiding = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -58,8 +61,16 @@ const CaptainRiding = () => {
   const [messages, setMessages] = useState([]);
   const [sendingMessage, setSendingMessage] = useState(false);
 
+  const [navigationSheetOpen, setNavigationSheetOpen] = useState(false);
+  const [navigationTarget, setNavigationTarget] = useState("pickup");
+  const [hasOpenedPickupNavigation, setHasOpenedPickupNavigation] =
+    useState(false);
+  const [hasOpenedDestinationNavigation, setHasOpenedDestinationNavigation] =
+    useState(false);
+
   const cancelModalRef = useRef(null);
   const ratingModalRef = useRef(null);
+  const navigationModalRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const location = useLocation();
@@ -186,6 +197,24 @@ const CaptainRiding = () => {
       });
     }
   }, [showRatingModal]);
+
+  useGSAP(() => {
+    if (navigationSheetOpen) {
+      gsap.to(navigationModalRef.current, {
+        y: "0%",
+        opacity: 1,
+        duration: 0.25,
+        ease: "power2.out",
+      });
+    } else {
+      gsap.to(navigationModalRef.current, {
+        y: "100%",
+        opacity: 0,
+        duration: 0.2,
+        ease: "power2.inOut",
+      });
+    }
+  }, [navigationSheetOpen]);
 
   useEffect(() => {
     if (!socket || !captain?._id) return;
@@ -411,6 +440,27 @@ const CaptainRiding = () => {
       : `${hours} h`;
   };
 
+  const parseEtaDistanceToKm = (value = "") => {
+    const text = String(value || "")
+      .toLowerCase()
+      .replace(",", ".")
+      .trim();
+
+    if (!text) return null;
+
+    const match = text.match(/([\d.]+)/);
+    if (!match) return null;
+
+    const number = Number(match[1]);
+    if (!Number.isFinite(number)) return null;
+
+    if (text.includes("m") && !text.includes("km")) {
+      return number / 1000;
+    }
+
+    return number;
+  };
+
   const getUserPhoto = () =>
     currentRide?.user?.profileImage ||
     currentRide?.user?.photo ||
@@ -434,8 +484,18 @@ const CaptainRiding = () => {
     return labels[vehicleType] || "Vehículo";
   };
 
-  const shouldNavigateToDestination =
-    rideStarted || currentRide?.status === "ongoing";
+  const isRideOngoing = rideStarted || currentRide?.status === "ongoing";
+  const isRideCompleted = rideFinished || currentRide?.status === "completed";
+
+  const shouldNavigateToDestination = isRideOngoing;
+
+  const getAddressByTarget = (target = navigationTarget) => {
+    if (target === "destination") {
+      return currentRide?.destination || "";
+    }
+
+    return currentRide?.pickup || "";
+  };
 
   const getNavigationTargetAddress = () => {
     if (shouldNavigateToDestination) {
@@ -445,12 +505,17 @@ const CaptainRiding = () => {
     return currentRide?.pickup || "";
   };
 
-  const getNavigationTargetLabel = () => {
-    return shouldNavigateToDestination ? "destino" : "punto de recogida";
+  const getNavigationTargetLabel = (target = navigationTarget) => {
+    return target === "destination" ? "destino" : "punto de recogida";
   };
 
-  const openWazeNavigation = () => {
-    const address = getNavigationTargetAddress();
+  const openNavigationSelector = (target = "pickup") => {
+    setNavigationTarget(target);
+    setNavigationSheetOpen(true);
+  };
+
+  const openWazeNavigation = (target = navigationTarget) => {
+    const address = getAddressByTarget(target);
 
     if (!address) {
       toast.error("No hay dirección disponible para navegar.");
@@ -458,12 +523,22 @@ const CaptainRiding = () => {
     }
 
     const encodedAddress = encodeURIComponent(address);
+
+    if (target === "pickup") {
+      setHasOpenedPickupNavigation(true);
+    }
+
+    if (target === "destination") {
+      setHasOpenedDestinationNavigation(true);
+    }
+
+    setNavigationSheetOpen(false);
 
     window.open(`https://waze.com/ul?q=${encodedAddress}&navigate=yes`, "_blank");
   };
 
-  const openGoogleMapsNavigation = () => {
-    const address = getNavigationTargetAddress();
+  const openGoogleMapsNavigation = (target = navigationTarget) => {
+    const address = getAddressByTarget(target);
 
     if (!address) {
       toast.error("No hay dirección disponible para navegar.");
@@ -471,6 +546,16 @@ const CaptainRiding = () => {
     }
 
     const encodedAddress = encodeURIComponent(address);
+
+    if (target === "pickup") {
+      setHasOpenedPickupNavigation(true);
+    }
+
+    if (target === "destination") {
+      setHasOpenedDestinationNavigation(true);
+    }
+
+    setNavigationSheetOpen(false);
 
     window.open(
       `https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}&travelmode=driving`,
@@ -640,11 +725,11 @@ const CaptainRiding = () => {
       }
 
       setRideStarted(true);
-      toast.success("Viaje iniciado. Ahora navega hacia el destino.");
+      toast.success("Viaje iniciado. Elige Waze o Google Maps para navegar.");
 
       setTimeout(() => {
-        openWazeNavigation();
-      }, 600);
+        openNavigationSelector("destination");
+      }, 450);
     } catch (error) {
       console.error("Error iniciando viaje:", error);
       toast.error(
@@ -878,9 +963,22 @@ const CaptainRiding = () => {
 
   const canFinishRide = rideStarted || currentRide?.status === "ongoing";
 
-  const headerStatus = rideFinished
+  const etaDistanceKm = parseEtaDistanceToKm(etaInfo?.distanceText);
+  const driverLooksCloseToPickup =
+    !isRideOngoing &&
+    Number.isFinite(etaDistanceKm) &&
+    etaDistanceKm > 0 &&
+    etaDistanceKm <= 0.25;
+
+  const showFastArrivedButton =
+    !driverArrived &&
+    !rideStarted &&
+    !rideFinished &&
+    (hasOpenedPickupNavigation || driverLooksCloseToPickup);
+
+  const headerStatus = isRideCompleted
     ? "Viaje finalizado"
-    : rideStarted || currentRide?.status === "ongoing"
+    : isRideOngoing
     ? "Viaje iniciado"
     : userConfirmedPickup || currentRide?.userConfirmedAtPickup
     ? "Usuario listo"
@@ -888,9 +986,9 @@ const CaptainRiding = () => {
     ? "Esperando al usuario"
     : "En camino a recoger";
 
-  const headerSubtext = rideFinished
+  const headerSubtext = isRideCompleted
     ? "El recorrido terminó. Califica al usuario para cerrar el servicio."
-    : rideStarted || currentRide?.status === "ongoing"
+    : isRideOngoing
     ? "Dirígete al destino del usuario con Waze o Google Maps."
     : userConfirmedPickup || currentRide?.userConfirmedAtPickup
     ? "El usuario confirmó que ya está en el punto. Puedes iniciar el viaje."
@@ -901,6 +999,49 @@ const CaptainRiding = () => {
         etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
       }`
     : "Dirígete al punto de recogida del usuario.";
+
+  const primaryButtonText = isRideCompleted
+    ? "Servicio finalizado"
+    : isRideOngoing
+    ? hasOpenedDestinationNavigation
+      ? "Abrir ruta al destino"
+      : "Ir al destino"
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "Iniciar viaje"
+    : driverArrived
+    ? "Esperando al usuario"
+    : hasOpenedPickupNavigation
+    ? "Abrir ruta al usuario"
+    : "Ir hacia el usuario";
+
+  const primaryButtonIcon = isRideOngoing
+    ? "ri-route-line"
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "ri-play-circle-fill"
+    : driverArrived
+    ? "ri-timer-line"
+    : "ri-navigation-fill";
+
+  const handlePrimaryAction = () => {
+    if (isRideCompleted) return;
+
+    if (isRideOngoing) {
+      openNavigationSelector("destination");
+      return;
+    }
+
+    if (userConfirmedPickup || currentRide?.userConfirmedAtPickup) {
+      handleStartRide();
+      return;
+    }
+
+    if (driverArrived) {
+      toast.info("Espera a que el usuario confirme que ya está en el punto.");
+      return;
+    }
+
+    openNavigationSelector("pickup");
+  };
 
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
@@ -952,13 +1093,11 @@ const CaptainRiding = () => {
       </button>
 
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
-        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[62vh] overflow-y-auto">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[68vh] overflow-y-auto">
           <div
             className="px-4 py-4 text-white"
             style={{
-              background: rideFinished
-                ? "linear-gradient(135deg, #111827, #374151)"
-                : PURPLE_GRADIENT,
+              background: isRideCompleted ? DARK_GRADIENT : PURPLE_DEEP,
             }}
           >
             <div className="flex items-start justify-between gap-3">
@@ -985,6 +1124,46 @@ const CaptainRiding = () => {
           </div>
 
           <div className="p-4 space-y-3">
+            <button
+              type="button"
+              onClick={handlePrimaryAction}
+              disabled={
+                isRideCompleted ||
+                startingRide ||
+                (driverArrived &&
+                  !userConfirmedPickup &&
+                  !currentRide?.userConfirmedAtPickup &&
+                  !isRideOngoing)
+              }
+              className="w-full rounded-[24px] py-5 px-4 text-white font-black text-lg shadow-xl shadow-purple-900/20 disabled:opacity-60 active:scale-[0.99] transition flex items-center justify-center gap-3"
+              style={{
+                background:
+                  userConfirmedPickup || currentRide?.userConfirmedAtPickup
+                    ? GREEN_GRADIENT
+                    : PURPLE_GRADIENT,
+              }}
+            >
+              <i className={`${primaryButtonIcon} text-2xl`}></i>
+              <span>
+                {startingRide ? "Iniciando..." : primaryButtonText}
+              </span>
+            </button>
+
+            {showFastArrivedButton && (
+              <button
+                type="button"
+                onClick={handleArrived}
+                disabled={sendingArrived}
+                className="w-full rounded-[22px] py-4 px-4 text-white font-black text-base shadow-lg shadow-emerald-900/20 active:scale-[0.99] transition flex items-center justify-center gap-3"
+                style={{ background: GREEN_GRADIENT }}
+              >
+                <i className="ri-map-pin-user-fill text-2xl"></i>
+                <span>
+                  {sendingArrived ? "Notificando..." : "Ya llegué al punto"}
+                </span>
+              </button>
+            )}
+
             <div className="flex items-center gap-3 rounded-3xl border border-purple-100 bg-purple-50 p-3">
               <img
                 src={getUserPhoto()}
@@ -1053,8 +1232,8 @@ const CaptainRiding = () => {
                         Esperando confirmación del usuario
                       </p>
                       <p className="text-xs text-purple-700 mt-1 leading-5">
-                        El usuario debe tocar “Ya estoy acá”. Después de eso se
-                        habilita el botón para iniciar el viaje.
+                        El usuario debe tocar “Ya estoy acá”. Después se habilita
+                        el botón para iniciar el viaje.
                       </p>
                     </div>
                   </div>
@@ -1075,7 +1254,8 @@ const CaptainRiding = () => {
                         Usuario listo para abordar
                       </p>
                       <p className="text-xs text-emerald-700 mt-1 leading-5">
-                        Ya puedes iniciar el viaje y navegar hacia el destino.
+                        Toca “Iniciar viaje” y luego elige Waze o Google Maps
+                        para navegar hacia el destino.
                       </p>
                     </div>
                   </div>
@@ -1138,16 +1318,18 @@ const CaptainRiding = () => {
                 <div
                   className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{
-                    background: driverArrived
-                      ? "linear-gradient(135deg, #16A34A, #4ADE80)"
-                      : PURPLE_GRADIENT,
+                    background: driverArrived ? GREEN_GRADIENT : PURPLE_GRADIENT,
                   }}
                 >
                   <i className="ri-map-pin-user-fill text-2xl text-white"></i>
                 </div>
 
                 <p className="text-xs font-bold text-purple-800 mt-2">
-                  {driverArrived ? "Notificado" : "Llegué"}
+                  {sendingArrived
+                    ? "Enviando"
+                    : driverArrived
+                    ? "Notificado"
+                    : "Llegué"}
                 </p>
               </button>
             </div>
@@ -1177,7 +1359,11 @@ const CaptainRiding = () => {
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={openWazeNavigation}
+                onClick={() =>
+                  openNavigationSelector(
+                    shouldNavigateToDestination ? "destination" : "pickup"
+                  )
+                }
                 className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
               >
                 <div
@@ -1190,16 +1376,25 @@ const CaptainRiding = () => {
                 </div>
 
                 <div className="text-left">
-                  <p className="text-sm font-black text-purple-900">Waze</p>
+                  <p className="text-sm font-black text-purple-900">
+                    Navegar
+                  </p>
                   <p className="text-[11px] text-purple-600">
-                    Ir al {getNavigationTargetLabel()}
+                    Ir al{" "}
+                    {getNavigationTargetLabel(
+                      shouldNavigateToDestination ? "destination" : "pickup"
+                    )}
                   </p>
                 </div>
               </button>
 
               <button
                 type="button"
-                onClick={openGoogleMapsNavigation}
+                onClick={() =>
+                  openGoogleMapsNavigation(
+                    shouldNavigateToDestination ? "destination" : "pickup"
+                  )
+                }
                 className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
               >
                 <div
@@ -1213,10 +1408,10 @@ const CaptainRiding = () => {
 
                 <div className="text-left">
                   <p className="text-sm font-black text-purple-900">
-                    Google Maps
+                    Maps rápido
                   </p>
                   <p className="text-[11px] text-purple-600">
-                    Ir al {getNavigationTargetLabel()}
+                    Google Maps
                   </p>
                 </div>
               </button>
@@ -1321,9 +1516,7 @@ const CaptainRiding = () => {
                   disabled={!canStartRide || startingRide}
                   className="w-full rounded-2xl py-4 text-white font-black disabled:opacity-50"
                   style={{
-                    background: canStartRide
-                      ? "linear-gradient(135deg, #16A34A, #22C55E)"
-                      : "linear-gradient(135deg, #9CA3AF, #6B7280)",
+                    background: canStartRide ? GREEN_GRADIENT : DARK_GRADIENT,
                   }}
                 >
                   {startingRide
@@ -1366,6 +1559,87 @@ const CaptainRiding = () => {
           </div>
         </div>
       </div>
+
+      {navigationSheetOpen && (
+        <div className="fixed inset-0 z-[950] bg-black/50 flex items-end">
+          <div
+            ref={navigationModalRef}
+            className="w-full translate-y-full opacity-0 rounded-t-[30px] bg-white p-5 shadow-2xl"
+          >
+            <div className="flex justify-center mb-3">
+              <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
+            </div>
+
+            <div
+              className="rounded-[26px] px-5 py-5 text-white"
+              style={{
+                background: PURPLE_DEEP,
+              }}
+            >
+              <p className="text-xs uppercase tracking-[0.14em] text-white/75 font-black">
+                Navegación rápida
+              </p>
+
+              <h3 className="text-2xl font-black mt-1">
+                Ir al {getNavigationTargetLabel(navigationTarget)}
+              </h3>
+
+              <p className="text-sm text-white/85 mt-2 leading-5">
+                Elige la app de navegación. Está pensado para que el conductor
+                toque rápido y siga la ruta.
+              </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button
+                type="button"
+                onClick={() => openWazeNavigation(navigationTarget)}
+                className="rounded-[24px] border border-purple-100 bg-purple-50 p-5 text-left active:scale-[0.99] transition"
+              >
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: PURPLE_GRADIENT }}
+                >
+                  <i className="ri-navigation-fill text-3xl text-white"></i>
+                </div>
+
+                <p className="text-xl font-black text-gray-950 mt-4">Waze</p>
+                <p className="text-sm text-purple-700 mt-1">
+                  Abrir ruta ahora
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => openGoogleMapsNavigation(navigationTarget)}
+                className="rounded-[24px] border border-purple-100 bg-purple-50 p-5 text-left active:scale-[0.99] transition"
+              >
+                <div
+                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                  style={{ background: PURPLE_GRADIENT }}
+                >
+                  <i className="ri-map-2-fill text-3xl text-white"></i>
+                </div>
+
+                <p className="text-xl font-black text-gray-950 mt-4">
+                  Google Maps
+                </p>
+                <p className="text-sm text-purple-700 mt-1">
+                  Abrir ruta ahora
+                </p>
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setNavigationSheetOpen(false)}
+              className="w-full mt-4 rounded-2xl border border-gray-200 bg-white py-4 font-black text-gray-700"
+            >
+              Cerrar
+            </button>
+          </div>
+        </div>
+      )}
 
       {chatOpen && (
         <div className="fixed inset-0 z-[999] bg-black/40 flex items-end">
