@@ -208,11 +208,14 @@ const getFare = async (pickup, destination, routeStops = []) => {
     const stops = normalizeRouteStops(routeStops);
 
     /*
-      IMPORTANTE:
-      Este tercer parámetro funciona correctamente cuando maps.service.js
-      también reciba stops y los mande como waypoints a Google Distance Matrix
-      o Directions API.
-    */
+     * IMPORTANTE:
+     * Esta es la ÚNICA llamada a mapService.getDistance para calcular tarifa.
+     *
+     * Antes createRide volvía a llamar mapService.getDistance otra vez,
+     * duplicando consumo de Distance Matrix / Directions.
+     *
+     * Ahora devolvemos la metadata en fares.meta y createRide reutiliza esa info.
+     */
     const distanceTime = await mapService.getDistance(pickup, destination, stops);
 
     const meters = Number(distanceTime?.distance?.value);
@@ -245,6 +248,9 @@ const getFare = async (pickup, destination, routeStops = []) => {
         durationMin: Math.max(1, Math.round(durationMin)),
         stopsCount: stops.length,
         formula: "base + km + minutes",
+        distanceSource: distanceTime?.source || null,
+        rawDistance: distanceTime?.distance || null,
+        rawDuration: distanceTime?.duration || null,
     };
 
     return fares;
@@ -265,6 +271,7 @@ const getMinOfferByVehicle = (vehicle, suggestedFare) => {
     };
 
     const factor = factors[vehicle] ?? 0.85;
+
     return roundToHundred(Math.max(1, safeSuggested * factor));
 };
 
@@ -288,6 +295,12 @@ const createRide = async ({
         throw new Error("User not found");
     }
 
+    /*
+     * HOTFIX ANTI-CONSUMO GOOGLE:
+     *
+     * getFare ya calcula distancia y duración usando mapService.getDistance.
+     * No volvemos a llamar mapService.getDistance aquí.
+     */
     const fares = await getFare(pickup, destination, stops);
 
     if (!Object.prototype.hasOwnProperty.call(fares, vehicle)) {
@@ -313,9 +326,8 @@ const createRide = async ({
         finalFare = roundToHundred(parsedOffer);
     }
 
-    const distanceTime = await mapService.getDistance(pickup, destination, stops);
-    const meters = Number(distanceTime?.distance?.value);
-    const seconds = Number(distanceTime?.duration?.value);
+    const meters = Number(fares?.meta?.distanceMeters);
+    const seconds = Number(fares?.meta?.durationSeconds);
 
     const ridePayload = {
         user: latestUser._id,
@@ -345,10 +357,9 @@ const createRide = async ({
     };
 
     /*
-      Si ride.model.js ya tiene routeStops en el schema, se guarda.
-      Si todavía no lo tiene, Mongoose lo puede ignorar según strict mode.
-      Después revisamos ride.model.js para dejarlo perfecto.
-    */
+     * Si ride.model.js ya tiene routeStops en el schema, se guarda.
+     * Si todavía no lo tiene, Mongoose lo puede ignorar según strict mode.
+     */
     if (stops.length > 0) {
         ridePayload.routeStops = stops;
     }
