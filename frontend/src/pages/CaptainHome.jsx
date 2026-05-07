@@ -22,7 +22,10 @@ import {
 } from "../services/pushNotifications";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
+const PURPLE_DEEP_GRADIENT =
+  "linear-gradient(135deg, #4C1D95 0%, #7E22CE 45%, #C026D3 100%)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
+const GPS_SOFT = "linear-gradient(135deg, #FAF5FF 0%, #FDF4FF 100%)";
 const DARK_GLASS = "rgba(17, 24, 39, 0.94)";
 
 const CaptainHome = () => {
@@ -55,9 +58,11 @@ const CaptainHome = () => {
   const [locationError, setLocationError] = useState("");
   const [requestingLocation, setRequestingLocation] = useState(false);
   const [showGpsPrompt, setShowGpsPrompt] = useState(false);
+  const [gpsPromptDismissed, setGpsPromptDismissed] = useState(false);
 
   useEffect(() => {
-    const token = localStorage.getItem("captainToken") || localStorage.getItem("token");
+    const token =
+      localStorage.getItem("captainToken") || localStorage.getItem("token");
 
     if (!token || !captain?._id) return;
 
@@ -374,6 +379,7 @@ const CaptainHome = () => {
       setLocationReady(true);
       setLocationError("");
       setShowGpsPrompt(false);
+      setGpsPromptDismissed(false);
       setLocationPermission("granted");
 
       socket.emit("update-location-captain", {
@@ -421,24 +427,37 @@ const CaptainHome = () => {
           emitCaptainLocation(position.coords, source);
           setRequestingLocation(false);
         },
-        (error) => {
-          const message = getGeolocationErrorMessage(error);
+        (firstError) => {
+          navigator.geolocation.getCurrentPosition(
+            (position) => {
+              emitCaptainLocation(position.coords, `${source}-fallback`);
+              setRequestingLocation(false);
+            },
+            (secondError) => {
+              const message = getGeolocationErrorMessage(secondError || firstError);
 
-          setRequestingLocation(false);
-          setLocationReady(false);
-          setLocationError(message);
-          setShowGpsPrompt(true);
+              setRequestingLocation(false);
+              setLocationReady(false);
+              setLocationError(message);
+              setShowGpsPrompt(true);
 
-          if (error?.code === 1) {
-            setLocationPermission("denied");
-          } else if (forcePrompt) {
-            setLocationPermission("prompt");
-          }
+              if (secondError?.code === 1 || firstError?.code === 1) {
+                setLocationPermission("denied");
+              } else if (forcePrompt) {
+                setLocationPermission("prompt");
+              }
+            },
+            {
+              enableHighAccuracy: false,
+              maximumAge: 60000,
+              timeout: 25000,
+            }
+          );
         },
         {
           enableHighAccuracy: true,
           maximumAge: 5000,
-          timeout: 15000,
+          timeout: 20000,
         }
       );
     },
@@ -481,14 +500,14 @@ const CaptainHome = () => {
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 15000,
+        maximumAge: 10000,
+        timeout: 20000,
       }
     );
 
     locationIntervalRef.current = setInterval(() => {
       requestAndEmitCurrentLocation("interval-refresh");
-    }, 10000);
+    }, 15000);
   }, [
     captain?._id,
     socket,
@@ -498,6 +517,7 @@ const CaptainHome = () => {
   ]);
 
   const handleEnableGps = useCallback(() => {
+    setGpsPromptDismissed(false);
     requestAndEmitCurrentLocation("manual-enable-gps", true);
   }, [requestAndEmitCurrentLocation]);
 
@@ -528,6 +548,7 @@ const CaptainHome = () => {
 
             if (result.state === "granted") {
               setShowGpsPrompt(false);
+              setGpsPromptDismissed(false);
               setLocationError("");
               setLocationReady(false);
               requestAndEmitCurrentLocation("permission-changed-granted");
@@ -968,6 +989,9 @@ const CaptainHome = () => {
 
   const gpsBlocked = !locationReady || locationPermission !== "granted";
 
+  const shouldShowGpsPrompt =
+    showGpsPrompt && !gpsPromptDismissed && locationPermission !== "granted";
+
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
       <div className="absolute top-0 left-0 ml-7 py-7 z-30">
@@ -987,7 +1011,7 @@ const CaptainHome = () => {
       </Link>
 
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
-        <div className="flex items-center gap-2 rounded-full bg-white/95 shadow-lg border border-gray-200 px-4 py-2">
+        <div className="flex items-center gap-2 rounded-full bg-white/95 shadow-xl border border-purple-100 px-4 py-2 backdrop-blur-md">
           <span
             className={`inline-block w-2.5 h-2.5 rounded-full ${
               socketReady ? "bg-emerald-500" : "bg-red-500"
@@ -999,7 +1023,7 @@ const CaptainHome = () => {
           <span className="text-gray-300">|</span>
           <span
             className={`text-xs font-semibold ${
-              locationReady ? "text-emerald-700" : "text-amber-600"
+              locationReady ? "text-emerald-700" : "text-purple-700"
             }`}
           >
             {locationReady ? "Ubicación activa" : "GPS pendiente"}
@@ -1158,66 +1182,113 @@ const CaptainHome = () => {
         </div>
       )}
 
-      {showGpsPrompt && (
-        <div className="fixed inset-0 z-[90] bg-black/55 flex items-center justify-center px-5">
-          <div className="w-full max-w-md rounded-[28px] bg-white shadow-2xl p-6">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-100 flex items-center justify-center mx-auto mb-4">
-              <i className="ri-map-pin-user-fill text-3xl text-emerald-700"></i>
+      {shouldShowGpsPrompt && (
+        <div className="fixed inset-0 z-[90] bg-slate-950/65 backdrop-blur-sm flex items-center justify-center px-5">
+          <div className="w-full max-w-md rounded-[32px] bg-white shadow-2xl overflow-hidden">
+            <div
+              className="px-6 pt-6 pb-5 text-white relative overflow-hidden"
+              style={{
+                background: PURPLE_DEEP_GRADIENT,
+              }}
+            >
+              <div className="absolute -top-14 -right-12 w-40 h-40 rounded-full bg-white/15 blur-2xl" />
+              <div className="absolute -bottom-16 -left-10 w-44 h-44 rounded-full bg-fuchsia-300/20 blur-2xl" />
+
+              <div className="relative z-10 flex items-start gap-4">
+                <div className="w-14 h-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
+                  <i className="ri-map-pin-user-fill text-3xl text-white"></i>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">
+                    GPS del transportador
+                  </p>
+
+                  <h2 className="text-2xl font-black leading-tight mt-1">
+                    Activa tu ubicación
+                  </h2>
+
+                  <p className="text-sm text-white/80 mt-2 leading-5">
+                    Central Go usa tu ubicación para asignarte servicios
+                    cercanos y mostrar tu ruta en tiempo real.
+                  </p>
+                </div>
+              </div>
             </div>
 
-            <h2 className="text-2xl font-bold text-gray-900 text-center">
-              Activa tu ubicación
-            </h2>
+            <div className="p-6">
+              {!!locationError && (
+                <div className="rounded-2xl border border-purple-100 bg-purple-50 px-4 py-3 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
+                    <i className="ri-information-line text-xl text-purple-700"></i>
+                  </div>
 
-            <p className="text-sm text-gray-600 text-center mt-3 leading-6">
-              Para usar Central Go como conductor debes permitir el acceso al GPS
-              y mantener la ubicación activa en tiempo real.
-            </p>
+                  <div>
+                    <p className="text-sm font-black text-purple-900">
+                      GPS pendiente
+                    </p>
+                    <p className="text-xs text-purple-700 mt-1 leading-5">
+                      {locationError}
+                    </p>
+                  </div>
+                </div>
+              )}
 
-            {!!locationError && (
-              <div className="mt-4 rounded-2xl border border-orange-200 bg-orange-50 px-4 py-3 text-sm text-orange-800">
-                {locationError}
+              {!geoSupported && (
+                <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  Tu dispositivo o navegador no permite obtener la ubicación.
+                </div>
+              )}
+
+              {locationPermission === "denied" && (
+                <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 leading-5">
+                  El permiso fue bloqueado. Habilita la ubicación desde la
+                  configuración del navegador o del teléfono y vuelve a intentar.
+                </div>
+              )}
+
+              <div className="mt-5 space-y-3">
+                <button
+                  type="button"
+                  onClick={handleEnableGps}
+                  disabled={requestingLocation || !geoSupported}
+                  className="w-full rounded-2xl text-white font-black py-4 px-4 disabled:opacity-60 shadow-lg shadow-purple-900/20 active:scale-[0.99] transition"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  {requestingLocation
+                    ? "Activando ubicación..."
+                    : "Activar GPS ahora"}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setGpsPromptDismissed(false);
+                    requestAndEmitCurrentLocation("retry-location");
+                  }}
+                  disabled={requestingLocation || !geoSupported}
+                  className="w-full rounded-2xl border border-purple-100 bg-purple-50 text-purple-800 font-black py-4 px-4 disabled:opacity-60 active:scale-[0.99] transition"
+                >
+                  Reintentar ubicación
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setGpsPromptDismissed(true)}
+                  className="w-full rounded-2xl border border-gray-200 bg-white text-gray-700 font-bold py-4 px-4 active:scale-[0.99] transition"
+                >
+                  Continuar por ahora
+                </button>
               </div>
-            )}
 
-            {!geoSupported && (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                Tu dispositivo o navegador no permite obtener la ubicación.
-              </div>
-            )}
-
-            {locationPermission === "denied" && (
-              <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                El permiso fue bloqueado. Debes habilitar la ubicación desde la
-                configuración del navegador o del teléfono y luego volver a
-                intentar.
-              </div>
-            )}
-
-            <div className="mt-5 space-y-3">
-              <button
-                type="button"
-                onClick={handleEnableGps}
-                disabled={requestingLocation || !geoSupported}
-                className="w-full rounded-2xl bg-emerald-600 text-white font-bold py-4 px-4 disabled:opacity-60"
-              >
-                {requestingLocation ? "Activando GPS..." : "Activar GPS ahora"}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => requestAndEmitCurrentLocation("retry-location")}
-                disabled={requestingLocation || !geoSupported}
-                className="w-full rounded-2xl border border-gray-300 bg-white text-gray-800 font-semibold py-4 px-4 disabled:opacity-60"
-              >
-                Reintentar ubicación
-              </button>
+              <p className="text-[12px] text-gray-500 text-center mt-4 leading-5">
+                Puedes seguir usando el panel, pero para recibir servicios
+                cercanos y aparecer correctamente en el mapa debes mantener
+                activo el GPS.
+              </p>
             </div>
-
-            <p className="text-[12px] text-gray-500 text-center mt-4 leading-5">
-              Sin ubicación activa el conductor no podrá ser monitoreado ni
-              recibir correctamente servicios en tiempo real.
-            </p>
           </div>
         </div>
       )}
@@ -1245,22 +1316,32 @@ const CaptainHome = () => {
 
           {gpsBlocked && (
             <div className="px-4 pb-2">
-              <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
-                <div className="mt-0.5">
-                  <i className="ri-map-pin-line text-xl text-amber-700"></i>
+              <div
+                className="rounded-[22px] border border-purple-100 px-4 py-3 flex items-center gap-3 shadow-sm"
+                style={{
+                  background: GPS_SOFT,
+                }}
+              >
+                <div className="w-11 h-11 rounded-2xl bg-white border border-purple-100 flex items-center justify-center shrink-0">
+                  <i className="ri-map-pin-line text-xl text-purple-700"></i>
                 </div>
-                <div className="flex-1">
-                  <p className="text-sm font-bold text-amber-800">
-                    Ubicación requerida
+
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-black text-purple-950">
+                    GPS pendiente
                   </p>
-                  <p className="text-xs text-amber-700 mt-1">
-                    Debes activar el GPS para operar como conductor.
+                  <p className="text-xs text-purple-700 mt-0.5 leading-4">
+                    Activa tu ubicación para recibir servicios cercanos.
                   </p>
                 </div>
+
                 <button
                   type="button"
                   onClick={handleEnableGps}
-                  className="rounded-xl bg-amber-600 text-white text-xs font-bold px-3 py-2"
+                  className="rounded-2xl text-white text-xs font-black px-4 py-2.5 shadow-md shadow-purple-900/20"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
                 >
                   Activar
                 </button>
