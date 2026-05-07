@@ -72,6 +72,15 @@ function Home() {
   const [userCoords, setUserCoords] = useState(null);
   const [pickupDetected, setPickupDetected] = useState(false);
 
+  /*
+   * HOTFIX ANTI-GEOCODING:
+   * Estos estados guardan coordenadas reales cuando vienen de GPS o Places.
+   * El usuario ve texto bonito, pero para APIs mandamos lat,lng.
+   */
+  const [pickupCoords, setPickupCoords] = useState(null);
+  const [destinationCoords, setDestinationCoords] = useState(null);
+  const [routeStopCoords, setRouteStopCoords] = useState([]);
+
   const [recentPlaces, setRecentPlaces] = useState(() => {
     try {
       const raw = localStorage.getItem(RECENT_PLACES_KEY);
@@ -190,6 +199,90 @@ function Home() {
     });
   }, []);
 
+  const coordsToText = useCallback((coords) => {
+    if (!coords) return "";
+
+    const lat = Number(coords.lat);
+    const lng = Number(coords.lng);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return "";
+
+    return `${lat.toFixed(6)}, ${lng.toFixed(6)}`;
+  }, []);
+
+  const getPlaceCoordinates = useCallback(
+    async (suggestion) => {
+      try {
+        if (!suggestion || typeof suggestion === "string") return null;
+
+        if (suggestion.lat && suggestion.lng) {
+          return {
+            lat: Number(suggestion.lat),
+            lng: Number(suggestion.lng),
+          };
+        }
+
+        if (suggestion.location?.lat && suggestion.location?.lng) {
+          return {
+            lat: Number(suggestion.location.lat),
+            lng: Number(suggestion.location.lng),
+          };
+        }
+
+        if (!suggestion.place_id || !mapsApiLoaded || !window.google?.maps) {
+          return null;
+        }
+
+        const { Place } = await window.google.maps.importLibrary("places");
+
+        const place = new Place({
+          id: suggestion.place_id,
+        });
+
+        await place.fetchFields({
+          fields: ["location", "formattedAddress", "displayName"],
+        });
+
+        const location = place.location;
+
+        if (!location) return null;
+
+        const lat =
+          typeof location.lat === "function" ? location.lat() : location.lat;
+
+        const lng =
+          typeof location.lng === "function" ? location.lng() : location.lng;
+
+        if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+          return null;
+        }
+
+        return {
+          lat: Number(lat),
+          lng: Number(lng),
+        };
+      } catch (error) {
+        console.warn("No se pudieron obtener coordenadas del place:", error);
+        return null;
+      }
+    },
+    [mapsApiLoaded]
+  );
+
+  const getPickupForApi = useCallback(() => {
+    return coordsToText(pickupCoords) || pickup;
+  }, [coordsToText, pickupCoords, pickup]);
+
+  const getDestinationForApi = useCallback(() => {
+    return coordsToText(destinationCoords) || destination;
+  }, [coordsToText, destinationCoords, destination]);
+
+  const getStopsForApi = useCallback(() => {
+    return cleanRouteStops.map((stop, index) => {
+      return coordsToText(routeStopCoords[index]) || stop;
+    });
+  }, [cleanRouteStops, coordsToText, routeStopCoords]);
+
   const reverseGeocodeCoords = useCallback(
     async (lat, lng) => {
       /*
@@ -203,11 +296,6 @@ function Home() {
        *
        * Por ahora NO convertimos coordenadas a dirección con Google.
        * Dejamos lat/lng como texto temporal para evitar más cobros.
-       *
-       * Después lo correcto será:
-       * 1. Guardar lat/lng del pickup en la base de datos.
-       * 2. Usar dirección solo si viene de Google Places/autocomplete.
-       * 3. Cachear reverse geocoding en backend si realmente se necesita.
        */
       if (!lat || !lng) return "";
 
@@ -246,8 +334,10 @@ function Home() {
         async (position) => {
           const lat = position.coords.latitude;
           const lng = position.coords.longitude;
+          const coords = { lat, lng };
 
-          setUserCoords({ lat, lng });
+          setUserCoords(coords);
+          setPickupCoords(coords);
           emitUserLocation(lat, lng);
 
           const detectedAddress = await reverseGeocodeCoords(lat, lng);
@@ -769,6 +859,11 @@ function Home() {
           row.formatted_address ||
           "",
         place_id: row.place_id || "",
+        structured_formatting: row.structured_formatting || null,
+        source: row.source || "backend",
+        lat: row.lat || row.location?.lat || null,
+        lng: row.lng || row.location?.lng || null,
+        location: row.location || null,
       }))
       .filter((item) => item.description);
 
@@ -799,6 +894,11 @@ function Home() {
               return {
                 description: description || "",
                 place_id: prediction.placeId || "",
+                structured_formatting: {
+                  main_text: prediction.mainText?.text || description || "",
+                  secondary_text: prediction.secondaryText?.text || "",
+                },
+                source: "google_places_new",
               };
             })
             .filter((item) => item.description);
@@ -895,20 +995,24 @@ function Home() {
       try {
         setPricingError(null);
 
+        const originForApi = getPickupForApi();
+        const destinationForApi = getDestinationForApi();
+        const stopsForApi = getStopsForApi();
+
         const [pricesRes, distRes] = await Promise.all([
           axios.get(`${getApiBaseUrl()}/maps/get-prices`, {
             params: {
-              origin: pickup,
-              destination,
-              stops: cleanRouteStops.join("|"),
+              origin: originForApi,
+              destination: destinationForApi,
+              stops: stopsForApi.join("|"),
             },
             headers: { Authorization: `Bearer ${token}` },
           }),
           axios.get(`${getApiBaseUrl()}/maps/get-distance`, {
             params: {
-              origin: pickup,
-              destination,
-              stops: cleanRouteStops.join("|"),
+              origin: originForApi,
+              destination: destinationForApi,
+              stops: stopsForApi.join("|"),
             },
             headers: { Authorization: `Bearer ${token}` },
           }),
@@ -940,7 +1044,16 @@ function Home() {
     return () => {
       cancelled = true;
     };
-  }, [vehiclePanel, pickup, destination, cleanRouteStops, prices]);
+  }, [
+    vehiclePanel,
+    pickup,
+    destination,
+    cleanRouteStops,
+    prices,
+    getPickupForApi,
+    getDestinationForApi,
+    getStopsForApi,
+  ]);
 
   const logoutUser = async () => {
     try {
@@ -962,7 +1075,7 @@ function Home() {
     setSuggestions([]);
   };
 
-  const handleSuggestionSelect = (suggestion) => {
+  const handleSuggestionSelect = async (suggestion) => {
     const selectedText =
       typeof suggestion === "string"
         ? suggestion
@@ -970,8 +1083,11 @@ function Home() {
 
     if (!selectedText) return;
 
+    const coords = await getPlaceCoordinates(suggestion);
+
     if (activeInput === "pickup") {
       setPickup(selectedText);
+      setPickupCoords(coords);
       setPickupDetected(false);
       setSuggestions([]);
       setPanelOpen(true);
@@ -982,6 +1098,7 @@ function Home() {
 
     if (activeInput === "destination") {
       setDestination(selectedText);
+      setDestinationCoords(coords);
       saveRecentPlace(selectedText);
 
       setSuggestions([]);
@@ -998,6 +1115,12 @@ function Home() {
         setRouteStops((prev) => {
           const next = [...prev];
           next[index] = selectedText;
+          return next;
+        });
+
+        setRouteStopCoords((prev) => {
+          const next = Array.isArray(prev) ? [...prev] : [];
+          next[index] = coords;
           return next;
         });
       }
@@ -1018,6 +1141,12 @@ function Home() {
       return next;
     });
 
+    setRouteStopCoords((prev) => {
+      const next = Array.isArray(prev) ? [...prev] : [];
+      next.push(null);
+      return next;
+    });
+
     setStopsPanelOpen(false);
     setPanelOpen(true);
     setSuggestions([]);
@@ -1029,6 +1158,10 @@ function Home() {
 
   const removeStop = (index) => {
     setRouteStops((prev) => prev.filter((_, i) => i !== index));
+
+    setRouteStopCoords((prev) =>
+      Array.isArray(prev) ? prev.filter((_, i) => i !== index) : []
+    );
   };
 
   const openStopsManager = () => {
@@ -1080,6 +1213,7 @@ function Home() {
 
     if (forcedDestination) {
       setDestination(finalDestination);
+      setDestinationCoords(null);
     }
 
     saveRecentPlace(finalDestination);
@@ -1095,6 +1229,7 @@ function Home() {
     if (!clean) return;
 
     setDestination(clean);
+    setDestinationCoords(null);
     saveRecentPlace(clean);
     setPanelOpen(false);
     setStopsPanelOpen(false);
@@ -1115,6 +1250,12 @@ function Home() {
           next[stopIndex] = clean;
           return next;
         });
+
+        setRouteStopCoords((prev) => {
+          const next = Array.isArray(prev) ? [...prev] : [];
+          next[stopIndex] = null;
+          return next;
+        });
       }
 
       setSuggestions([]);
@@ -1125,6 +1266,7 @@ function Home() {
     }
 
     setDestination(clean);
+    setDestinationCoords(null);
     saveRecentPlace(clean);
 
     setSuggestions([]);
@@ -1152,12 +1294,29 @@ function Home() {
       const finalOfferedFare =
         Number(offeredFare) || Number(selectedPrice) || 0;
 
+      const pickupForApi = getPickupForApi();
+      const destinationForApi = getDestinationForApi();
+      const stopsForApi = getStopsForApi();
+
       const response = await axios.post(
         `${getApiBaseUrl()}/rides/create`,
         {
-          pickup,
-          destination,
-          routeStops: cleanRouteStops,
+          /*
+           * Se manda coordenada si existe; si no, texto.
+           * Con Geocoding apagado, lo ideal es que pickup/destination sean lat,lng.
+           */
+          pickup: pickupForApi,
+          destination: destinationForApi,
+          routeStops: stopsForApi,
+
+          /*
+           * Labels para que después backend pueda guardarlos y mostrar bonito.
+           * Si backend aún no los usa, no afecta.
+           */
+          pickupLabel: pickup,
+          destinationLabel: destination,
+          routeStopLabels: cleanRouteStops,
+
           vehicle: selectedVehicle,
           offeredFare: finalOfferedFare,
         },
@@ -1172,8 +1331,15 @@ function Home() {
         throw new Error("El servidor no devolvió la solicitud creada.");
       }
 
+      const rideForUi = {
+        ...rideData,
+        pickupLabel: rideData.pickupLabel || pickup,
+        destinationLabel: rideData.destinationLabel || destination,
+        routeStopLabels: rideData.routeStopLabels || cleanRouteStops,
+      };
+
       setOfferedPrice(finalOfferedFare);
-      setRide(rideData);
+      setRide(rideForUi);
 
       setPanelOpen(false);
       setStopsPanelOpen(false);
@@ -1183,7 +1349,7 @@ function Home() {
       setVehicleFound(true);
       setCaptainArrived(false);
 
-      return rideData;
+      return rideForUi;
     } catch (error) {
       console.error("Error creating ride:", error);
 
@@ -1269,6 +1435,9 @@ function Home() {
           pickup: prev?.pickup || pickup,
           destination: prev?.destination || destination,
           routeStops: prev?.routeStops || cleanRouteStops,
+          pickupLabel: prev?.pickupLabel || pickup,
+          destinationLabel: prev?.destinationLabel || destination,
+          routeStopLabels: prev?.routeStopLabels || cleanRouteStops,
           status: data?.status || prev?.status,
           negotiationStatus: data?.negotiationStatus || prev?.negotiationStatus,
           offeredFare: data?.offeredFare ?? prev?.offeredFare,
@@ -1488,12 +1657,20 @@ function Home() {
     <div className="h-screen relative w-screen overflow-hidden bg-white">
       <div className="absolute inset-0 z-10">
         <LiveTracking
-          pickup={driverSelected ? ride?.pickup || pickup : pickup}
-          destination={driverSelected ? ride?.destination || destination : destination}
+          pickup={
+            driverSelected
+              ? ride?.pickup || getPickupForApi()
+              : getPickupForApi()
+          }
+          destination={
+            driverSelected
+              ? ride?.destination || getDestinationForApi()
+              : getDestinationForApi()
+          }
           routeStops={
             driverSelected
-              ? ride?.routeStops || cleanRouteStops
-              : cleanRouteStops
+              ? ride?.routeStops || getStopsForApi()
+              : getStopsForApi()
           }
           nearbyDrivers={nearbyDrivers}
           showPickupRadar={vehicleFound && !driverSelected}
@@ -1848,6 +2025,7 @@ function Home() {
                       onClick={() => setActiveInput("pickup")}
                       onChange={(e) => {
                         setPickup(e.target.value);
+                        setPickupCoords(null);
                         setPickupDetected(false);
                         setActiveInput("pickup");
                         fetchSuggestions(e.target.value);
@@ -1872,6 +2050,12 @@ function Home() {
                           setRouteStops((prev) => {
                             const next = [...prev];
                             next[index] = value;
+                            return next;
+                          });
+
+                          setRouteStopCoords((prev) => {
+                            const next = Array.isArray(prev) ? [...prev] : [];
+                            next[index] = null;
                             return next;
                           });
 
@@ -1902,6 +2086,7 @@ function Home() {
                       onClick={() => setActiveInput("destination")}
                       onChange={(e) => {
                         setDestination(e.target.value);
+                        setDestinationCoords(null);
                         setActiveInput("destination");
                         fetchSuggestions(e.target.value);
                       }}
