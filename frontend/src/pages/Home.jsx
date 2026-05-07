@@ -190,51 +190,30 @@ function Home() {
     });
   }, []);
 
-  const formatAddressFromGeocoder = (result) => {
-    if (!result) return "";
-
-    const formatted = result.formatted_address || "";
-    if (!formatted) return "";
-
-    return formatted.replace(/, Colombia$/i, "").trim();
-  };
-
   const reverseGeocodeCoords = useCallback(
     async (lat, lng) => {
+      /*
+       * HOTFIX ANTI-COBRO GOOGLE:
+       *
+       * Antes aquí se usaba:
+       * new window.google.maps.Geocoder().geocode(...)
+       *
+       * Eso consume Geocoding API cada vez que el usuario activa GPS
+       * o cuando la app intenta detectar automáticamente su dirección.
+       *
+       * Por ahora NO convertimos coordenadas a dirección con Google.
+       * Dejamos lat/lng como texto temporal para evitar más cobros.
+       *
+       * Después lo correcto será:
+       * 1. Guardar lat/lng del pickup en la base de datos.
+       * 2. Usar dirección solo si viene de Google Places/autocomplete.
+       * 3. Cachear reverse geocoding en backend si realmente se necesita.
+       */
       if (!lat || !lng) return "";
-
-      if (mapsApiLoaded && window.google?.maps?.Geocoder) {
-        try {
-          const geocoder = new window.google.maps.Geocoder();
-
-          const result = await new Promise((resolve, reject) => {
-            geocoder.geocode(
-              {
-                location: {
-                  lat: Number(lat),
-                  lng: Number(lng),
-                },
-              },
-              (results, status) => {
-                if (status === "OK" && Array.isArray(results) && results[0]) {
-                  resolve(results[0]);
-                } else {
-                  reject(new Error(status || "No se pudo detectar dirección"));
-                }
-              }
-            );
-          });
-
-          const address = formatAddressFromGeocoder(result);
-          if (address) return address;
-        } catch (error) {
-          console.warn("No se pudo geocodificar el GPS:", error);
-        }
-      }
 
       return `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
     },
-    [mapsApiLoaded]
+    []
   );
 
   const emitUserLocation = useCallback(
@@ -1312,7 +1291,12 @@ function Home() {
 
     fetchOffers();
 
-    const interval = setInterval(fetchOffers, 2000);
+    /*
+     * HOTFIX:
+     * Antes estaba en 2000ms.
+     * Lo bajamos a 5000ms para reducir presión sobre backend y APIs.
+     */
+    const interval = setInterval(fetchOffers, 5000);
 
     return () => {
       cancelled = true;

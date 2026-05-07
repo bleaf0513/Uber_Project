@@ -65,6 +65,72 @@ const normalizeLatLngFromDriver = (driver) => {
   return { lat, lng };
 };
 
+const parseLatLngFromText = (value) => {
+  const text = String(value || "").trim();
+
+  if (!text) return null;
+
+  const directMatch = text.match(
+    /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/
+  );
+
+  if (!directMatch) return null;
+
+  const lat = Number(directMatch[1]);
+  const lng = Number(directMatch[2]);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+
+  return {
+    lat,
+    lng,
+    address: text,
+    source: "coordinate-text",
+  };
+};
+
+const normalizeLatLngFromObject = (value) => {
+  if (!value || typeof value !== "object") return null;
+
+  const lat =
+    toFiniteNumber(value?.lat) ??
+    toFiniteNumber(value?.ltd) ??
+    toFiniteNumber(value?.latitude) ??
+    toFiniteNumber(value?.location?.lat) ??
+    toFiniteNumber(value?.location?.ltd) ??
+    toFiniteNumber(value?.coords?.lat) ??
+    toFiniteNumber(value?.coords?.ltd);
+
+  const lng =
+    toFiniteNumber(value?.lng) ??
+    toFiniteNumber(value?.longitude) ??
+    toFiniteNumber(value?.location?.lng) ??
+    toFiniteNumber(value?.coords?.lng);
+
+  if (lat == null || lng == null) return null;
+  if (lat < -90 || lat > 90) return null;
+  if (lng < -180 || lng > 180) return null;
+
+  return {
+    lat,
+    lng,
+    address: value?.address || value?.description || "",
+    source: "object",
+  };
+};
+
+const normalizePositionInput = (value) => {
+  if (!value) return null;
+
+  if (typeof value === "object") {
+    return normalizeLatLngFromObject(value);
+  }
+
+  return parseLatLngFromText(value);
+};
+
 const LiveTracking = ({
   pickup = "",
   destination = "",
@@ -73,7 +139,7 @@ const LiveTracking = ({
   showPickupRadar = true,
   zoom = 15,
   autoFetchNearbyDrivers = true,
-  nearbyDriversRefreshMs = 8000,
+  nearbyDriversRefreshMs = 15000,
   selectedCaptainId = null,
   showRouteToPickup = false,
   onEtaUpdate = null,
@@ -100,7 +166,6 @@ const LiveTracking = ({
 
   const watchIdRef = useRef(null);
   const driversIntervalRef = useRef(null);
-  const geocoderRequestIdRef = useRef(0);
   const directionsRequestIdRef = useRef(0);
 
   const hasAutoFittedRef = useRef(false);
@@ -112,16 +177,11 @@ const LiveTracking = ({
 
   const safeRouteStops = useMemo(() => {
     return (Array.isArray(routeStops) ? routeStops : [])
-      .map((stop) => String(stop || "").trim())
+      .map((stop) => stop)
       .filter(Boolean);
   }, [routeStops]);
 
-  const hasUserRoute = Boolean(
-    pickup &&
-      String(pickup).trim().length >= 3 &&
-      destination &&
-      String(destination).trim().length >= 3
-  );
+  const hasUserRoute = Boolean(pickupPosition && destinationPosition);
 
   const mapOptions = useMemo(
     () => ({
@@ -339,7 +399,7 @@ const LiveTracking = ({
       {
         enableHighAccuracy: true,
         timeout: 30000,
-        maximumAge: 3000,
+        maximumAge: 10000,
       }
     );
 
@@ -349,7 +409,7 @@ const LiveTracking = ({
       {
         enableHighAccuracy: true,
         timeout: 30000,
-        maximumAge: 3000,
+        maximumAge: 10000,
       }
     );
 
@@ -360,53 +420,32 @@ const LiveTracking = ({
     };
   }, []);
 
-  const geocodeAddress = (geocoder, address) => {
-    return new Promise((resolve) => {
-      if (!address || String(address).trim().length < 3) {
-        resolve(null);
-        return;
-      }
-
-      geocoder.geocode({ address }, (results, status) => {
-        if (status === "OK" && results?.[0]?.geometry?.location) {
-          const location = results[0].geometry.location;
-
-          resolve({
-            lat: location.lat(),
-            lng: location.lng(),
-            address,
-          });
-        } else {
-          console.warn("[LiveTracking] No se pudo geocodificar:", address, status);
-          resolve(null);
-        }
-      });
-    });
-  };
-
   useEffect(() => {
-    if (!mapsApiLoaded || !window.google?.maps) return;
+    /*
+     * HOTFIX ANTI-COBRO GOOGLE:
+     *
+     * Antes este componente usaba:
+     * new window.google.maps.Geocoder()
+     * geocoder.geocode({ address })
+     *
+     * Eso consumía Geocoding API para pickup, destination y paradas.
+     *
+     * Ahora NO geocodificamos direcciones aquí.
+     * Solo pintamos posiciones si ya vienen como coordenadas:
+     * "6.244200, -75.581200"
+     * o como objeto { lat, lng }.
+     */
+    const nextPickupPosition = normalizePositionInput(pickup);
+    const nextDestinationPosition = normalizePositionInput(destination);
 
-    const currentRequestId = ++geocoderRequestIdRef.current;
-    const geocoder = new window.google.maps.Geocoder();
+    const nextStopPositions = safeRouteStops
+      .map((stop) => normalizePositionInput(stop))
+      .filter(Boolean);
 
-    const run = async () => {
-      const pickupResult = await geocodeAddress(geocoder, pickup);
-      const destinationResult = await geocodeAddress(geocoder, destination);
-
-      const stopsResult = await Promise.all(
-        safeRouteStops.map((stop) => geocodeAddress(geocoder, stop))
-      );
-
-      if (currentRequestId !== geocoderRequestIdRef.current) return;
-
-      setPickupPosition(pickupResult);
-      setDestinationPosition(destinationResult);
-      setStopPositions(stopsResult.filter(Boolean));
-    };
-
-    run();
-  }, [pickup, destination, safeRouteStops, mapsApiLoaded]);
+    setPickupPosition(nextPickupPosition);
+    setDestinationPosition(nextDestinationPosition);
+    setStopPositions(nextStopPositions);
+  }, [pickup, destination, safeRouteStops]);
 
   useEffect(() => {
     if (!showPickupRadar) return;
@@ -414,7 +453,7 @@ const LiveTracking = ({
     const interval = setInterval(() => {
       setPulseRadiusA((prev) => (prev >= 280 ? 140 : prev + 12));
       setPulseRadiusB((prev) => (prev >= 420 ? 220 : prev + 14));
-    }, 120);
+    }, 220);
 
     return () => clearInterval(interval);
   }, [showPickupRadar]);
@@ -502,7 +541,10 @@ const LiveTracking = ({
       directionsService.route(
         {
           origin: { lat: routeOrigin.lat, lng: routeOrigin.lng },
-          destination: pickupPosition,
+          destination: {
+            lat: pickupPosition.lat,
+            lng: pickupPosition.lng,
+          },
           travelMode: window.google.maps.TravelMode.DRIVING,
         },
         (result, status) => {
@@ -552,8 +594,14 @@ const LiveTracking = ({
 
     directionsService.route(
       {
-        origin: pickupPosition,
-        destination: destinationPosition,
+        origin: {
+          lat: pickupPosition.lat,
+          lng: pickupPosition.lng,
+        },
+        destination: {
+          lat: destinationPosition.lat,
+          lng: destinationPosition.lng,
+        },
         waypoints: stopPositions.map((stop) => ({
           location: {
             lat: stop.lat,
@@ -638,7 +686,7 @@ const LiveTracking = ({
 
     if (showRouteToPickup && routeOrigin && pickupPosition) {
       bounds.extend({ lat: routeOrigin.lat, lng: routeOrigin.lng });
-      bounds.extend(pickupPosition);
+      bounds.extend({ lat: pickupPosition.lat, lng: pickupPosition.lng });
       hasPoints = true;
 
       map.fitBounds(bounds, {
@@ -648,9 +696,14 @@ const LiveTracking = ({
         left: 60,
       });
     } else if (pickupPosition && destinationPosition) {
-      bounds.extend(pickupPosition);
-      stopPositions.forEach((stop) => bounds.extend(stop));
-      bounds.extend(destinationPosition);
+      bounds.extend({ lat: pickupPosition.lat, lng: pickupPosition.lng });
+      stopPositions.forEach((stop) =>
+        bounds.extend({ lat: stop.lat, lng: stop.lng })
+      );
+      bounds.extend({
+        lat: destinationPosition.lat,
+        lng: destinationPosition.lng,
+      });
       hasPoints = true;
 
       map.fitBounds(bounds, {
@@ -660,7 +713,7 @@ const LiveTracking = ({
         left: 70,
       });
     } else if (pickupPosition && showPickupRadar) {
-      bounds.extend(pickupPosition);
+      bounds.extend({ lat: pickupPosition.lat, lng: pickupPosition.lng });
       hasPoints = true;
 
       if (currentPosition) {
@@ -678,7 +731,7 @@ const LiveTracking = ({
         left: 60,
       });
     } else if (pickupPosition) {
-      map.panTo(pickupPosition);
+      map.panTo({ lat: pickupPosition.lat, lng: pickupPosition.lng });
       map.setZoom(15);
       hasPoints = true;
     } else if (currentPosition) {
@@ -1008,7 +1061,10 @@ const LiveTracking = ({
           {showPickupRadar && !hasUserRoute && (
             <>
               <Circle
-                center={pickupPosition}
+                center={{
+                  lat: pickupPosition.lat,
+                  lng: pickupPosition.lng,
+                }}
                 radius={pulseRadiusA}
                 options={{
                   fillColor: CENTRAL_GO_PURPLE,
@@ -1021,7 +1077,10 @@ const LiveTracking = ({
               />
 
               <Circle
-                center={pickupPosition}
+                center={{
+                  lat: pickupPosition.lat,
+                  lng: pickupPosition.lng,
+                }}
                 radius={pulseRadiusB}
                 options={{
                   fillColor: CENTRAL_GO_PURPLE,
@@ -1036,7 +1095,10 @@ const LiveTracking = ({
           )}
 
           <Circle
-            center={pickupPosition}
+            center={{
+              lat: pickupPosition.lat,
+              lng: pickupPosition.lng,
+            }}
             radius={70}
             options={{
               fillColor: CENTRAL_GO_DARK,
@@ -1046,10 +1108,20 @@ const LiveTracking = ({
             }}
           />
 
-          <Marker position={pickupPosition} icon={pickupDotIcon} zIndex={80} />
+          <Marker
+            position={{
+              lat: pickupPosition.lat,
+              lng: pickupPosition.lng,
+            }}
+            icon={pickupDotIcon}
+            zIndex={80}
+          />
 
           <OverlayView
-            position={pickupPosition}
+            position={{
+              lat: pickupPosition.lat,
+              lng: pickupPosition.lng,
+            }}
             mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
           >
             <div
@@ -1084,14 +1156,20 @@ const LiveTracking = ({
       {destinationPosition && (
         <>
           <Marker
-            position={destinationPosition}
+            position={{
+              lat: destinationPosition.lat,
+              lng: destinationPosition.lng,
+            }}
             icon={destinationDotIcon}
             zIndex={82}
             title="Destino final"
           />
 
           <OverlayView
-            position={destinationPosition}
+            position={{
+              lat: destinationPosition.lat,
+              lng: destinationPosition.lng,
+            }}
             mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
           >
             <div
@@ -1141,7 +1219,22 @@ const LiveTracking = ({
 
       {directions && (etaText || distanceText) && pickupPosition && (
         <OverlayView
-          position={showRouteToPickup ? pickupPosition : destinationPosition || pickupPosition}
+          position={
+            showRouteToPickup
+              ? {
+                  lat: pickupPosition.lat,
+                  lng: pickupPosition.lng,
+                }
+              : destinationPosition
+              ? {
+                  lat: destinationPosition.lat,
+                  lng: destinationPosition.lng,
+                }
+              : {
+                  lat: pickupPosition.lat,
+                  lng: pickupPosition.lng,
+                }
+          }
           mapPaneName={OverlayView.OVERLAY_MOUSE_TARGET}
         >
           <div
