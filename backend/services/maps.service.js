@@ -1,10 +1,57 @@
 const axios = require('axios');
 const captainModel = require('../models/captain.model');
 
-console.log('🇨🇴 MAPS SERVICE COLOMBIA FILTRADO ACTIVO 🇨🇴');
+console.log('🇨🇴 MAPS SERVICE CENTRAL GO - HOTFIX ANTI GEOCODING ACTIVO 🇨🇴');
+
+/**
+ * HOTFIX ANTI-COBRO GOOGLE GEOCODING
+ *
+ * Este archivo evita llamadas a Geocoding API por defecto.
+ *
+ * Para volver a activar Geocoding explícitamente:
+ * GEOCODING_ENABLED=true
+ *
+ * Mientras GEOCODING_ENABLED no sea "true":
+ * - getAddressCoordinates NO llama geocode/json
+ * - getSuggestions NO llama geocode/json
+ * - usa coordenadas locales aproximadas o coordenadas directas "lat,lng"
+ *
+ * Esto es temporal para cortar el consumo accidental.
+ */
+
+function isFeatureEnabled(name, defaultValue = false) {
+    const raw = String(process.env[name] || '').trim().toLowerCase();
+
+    if (raw === 'true' || raw === '1' || raw === 'yes' || raw === 'on') {
+        return true;
+    }
+
+    if (raw === 'false' || raw === '0' || raw === 'no' || raw === 'off') {
+        return false;
+    }
+
+    return defaultValue;
+}
+
+function isGeocodingEnabled() {
+    return isFeatureEnabled('GEOCODING_ENABLED', false);
+}
+
+function isPlacesEnabled() {
+    return isFeatureEnabled('GOOGLE_PLACES_ENABLED', true);
+}
+
+function isDirectionsEnabled() {
+    return isFeatureEnabled('GOOGLE_DIRECTIONS_ENABLED', true);
+}
+
+function isDistanceMatrixEnabled() {
+    return isFeatureEnabled('GOOGLE_DISTANCE_MATRIX_ENABLED', true);
+}
 
 function normalizeAddressQuery(value) {
     if (value == null) return '';
+
     let text = String(value)
         .replace(/\0/g, ' ')
         .replace(/\+/g, ' ')
@@ -29,6 +76,7 @@ function normalizeAddressQuery(value) {
         .trim();
 
     if (text.length > 500) text = text.slice(0, 500).trim();
+
     return text;
 }
 
@@ -88,6 +136,29 @@ function isColombiaCoordinate(lat, lng) {
     );
 }
 
+function parseLatLngText(value) {
+    const text = normalizeAddressQuery(value);
+
+    if (!text) return null;
+
+    const match = text.match(
+        /^\s*(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)\s*$/
+    );
+
+    if (!match) return null;
+
+    const lat = Number(match[1]);
+    const lng = Number(match[2]);
+
+    if (!isValidLatLng(lat, lng)) return null;
+
+    return {
+        ltd: lat,
+        lng,
+        source: 'coordinate_text',
+    };
+}
+
 async function googleGet(apiPath, params = {}, timeout = 20000) {
     const key = serverMapsKey();
 
@@ -121,6 +192,7 @@ function haversineMeters(lat1, lng1, lat2, lng2) {
             Math.sin(dLng / 2);
 
     const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
     return R * c;
 }
 
@@ -129,6 +201,7 @@ function formatDistanceText(meters) {
     const km = safeMeters / 1000;
 
     if (km >= 10) return `${km.toFixed(0)} km`;
+
     return `${km.toFixed(1)} km`;
 }
 
@@ -144,6 +217,7 @@ function formatDurationText(seconds) {
     const minutes = totalMinutes % 60;
 
     if (minutes <= 0) return `${hours} h`;
+
     return `${hours} h ${minutes} min`;
 }
 
@@ -180,6 +254,9 @@ function approxDistanceElement(straightLineMeters) {
 function roughCoordsForColombia(address) {
     const s = normalizeLooseText(address);
 
+    if (/central mayorista/.test(s)) return { ltd: 6.1654, lng: -75.6171 };
+    if (/mayorista/.test(s) && /itagui/.test(s)) return { ltd: 6.1654, lng: -75.6171 };
+
     if (/ditaires/.test(s)) return { ltd: 6.1687, lng: -75.6203 };
     if (/itagui/.test(s)) return { ltd: 6.1719, lng: -75.6114 };
     if (/sabaneta/.test(s)) return { ltd: 6.1515, lng: -75.6167 };
@@ -188,8 +265,20 @@ function roughCoordsForColombia(address) {
     if (/bello/.test(s)) return { ltd: 6.3373, lng: -75.5579 };
     if (/copacabana/.test(s)) return { ltd: 6.3463, lng: -75.5089 };
     if (/la estrella/.test(s)) return { ltd: 6.1577, lng: -75.6432 };
+    if (/caldas/.test(s) && /antioquia/.test(s)) return { ltd: 6.0911, lng: -75.6357 };
     if (/girardota/.test(s)) return { ltd: 6.3778, lng: -75.4488 };
     if (/barbosa/.test(s) && /antioquia/.test(s)) return { ltd: 6.4381, lng: -75.3311 };
+
+    if (/poblado/.test(s) && /medellin/.test(s)) return { ltd: 6.2088, lng: -75.5679 };
+    if (/laureles/.test(s) && /medellin/.test(s)) return { ltd: 6.2447, lng: -75.5939 };
+    if (/belen/.test(s) && /medellin/.test(s)) return { ltd: 6.2262, lng: -75.5965 };
+    if (/san javier/.test(s) && /medellin/.test(s)) return { ltd: 6.2568, lng: -75.6214 };
+    if (/robledo/.test(s) && /medellin/.test(s)) return { ltd: 6.2766, lng: -75.5991 };
+    if (/castilla/.test(s) && /medellin/.test(s)) return { ltd: 6.2872, lng: -75.5683 };
+    if (/buenos aires/.test(s) && /medellin/.test(s)) return { ltd: 6.2356, lng: -75.5577 };
+    if (/aranjuez/.test(s) && /medellin/.test(s)) return { ltd: 6.2751, lng: -75.5584 };
+    if (/manrique/.test(s) && /medellin/.test(s)) return { ltd: 6.2676, lng: -75.5489 };
+
     if (/bogota/.test(s)) return { ltd: 4.711, lng: -74.0721 };
     if (/cali/.test(s)) return { ltd: 3.4516, lng: -76.532 };
     if (/barranquilla/.test(s)) return { ltd: 10.9685, lng: -74.7813 };
@@ -200,11 +289,21 @@ function roughCoordsForColombia(address) {
 }
 
 async function geocodeWithoutGoogle(address) {
+    const directCoords = parseLatLngText(address);
+
+    if (directCoords) {
+        return {
+            ltd: directCoords.ltd,
+            lng: directCoords.lng,
+        };
+    }
+
     const hint = roughCoordsForColombia(address);
+
     if (hint) return hint;
 
     throw new Error(
-        `Unable to resolve "${address}". Configure GOOGLE_MAPS_SERVER_API or use a more specific Colombia address.`
+        `No se pudo resolver "${address}" sin Geocoding. Usa coordenadas lat,lng o una ciudad/zona reconocida de Colombia.`
     );
 }
 
@@ -219,6 +318,7 @@ function buildLocalSuggestion(description, placeId) {
 
 function getLocalCatalog() {
     return [
+        'Central Mayorista, Itagüí, Antioquia, Colombia',
         'Itagüí, Antioquia, Colombia',
         'Ditaires, Itagüí, Antioquia, Colombia',
         'Centro de la Moda, Itagüí, Antioquia, Colombia',
@@ -255,6 +355,7 @@ function getLocalCatalog() {
 
 function localSuggestionsForColombia(address) {
     const q = normalizeLooseText(address);
+
     if (!q || q.length < 2) return [];
 
     const catalog = getLocalCatalog();
@@ -264,11 +365,13 @@ function localSuggestionsForColombia(address) {
         const itemNorm = normalizeLooseText(item);
 
         let score = 0;
+
         if (itemNorm === q) score += 300;
         if (itemNorm.startsWith(q)) score += 180;
         if (itemNorm.includes(q)) score += 120;
 
         let matched = 0;
+
         for (const part of queryParts) {
             if (itemNorm.includes(part)) {
                 matched += 1;
@@ -280,7 +383,8 @@ function localSuggestionsForColombia(address) {
             score += (matched / queryParts.length) * 100;
         }
 
-        if (/ditaires/.test(itemNorm)) score += 25;
+        if (/mayorista/.test(itemNorm) && /mayorista/.test(q)) score += 35;
+        if (/ditaires/.test(itemNorm) && /ditaires/.test(q)) score += 25;
         if (/itagui/.test(itemNorm) && /itagui/.test(q)) score += 25;
 
         return { item, score };
@@ -298,6 +402,15 @@ function localSuggestionsForColombia(address) {
         );
 
     if (ranked.length > 0) return ranked;
+
+    if (q.includes('mayorista')) {
+        return [
+            buildLocalSuggestion(
+                'Central Mayorista, Itagüí, Antioquia, Colombia',
+                'local_central_mayorista_itagui_antioquia_colombia'
+            ),
+        ];
+    }
 
     if (q.includes('ditaires')) {
         return [
@@ -343,6 +456,7 @@ function hasCountryContext(text) {
 function extractStreetType(text) {
     const s = normalizeLooseText(text);
     const m = s.match(/\b(calle|cl|carrera|cra|cr|avenida|av|transversal|tv|diagonal|dg)\b/);
+
     return m ? m[1] : '';
 }
 
@@ -352,6 +466,7 @@ function extractNumbers(text) {
 
 function expandColombianStreetFormats(input) {
     const raw = normalizeAddressQuery(input);
+
     if (!raw) return [];
 
     const set = new Set([raw]);
@@ -394,6 +509,7 @@ function expandColombianStreetFormats(input) {
 
 function buildSuggestionVariants(address) {
     const clean = normalizeAddressQuery(address);
+
     if (!clean) return [];
 
     const set = new Set();
@@ -409,11 +525,12 @@ function buildSuggestionVariants(address) {
         }
     }
 
-    return [...set].slice(0, 6);
+    return [...set].slice(0, 4);
 }
 
 function buildCoordinateVariants(address) {
     const clean = normalizeAddressQuery(address);
+
     if (!clean) return [];
 
     const set = new Set();
@@ -441,8 +558,6 @@ function buildCoordinateVariants(address) {
             'Envigado, Antioquia, Colombia',
             'Sabaneta, Antioquia, Colombia',
             'Bello, Antioquia, Colombia',
-            'Bogotá, Colombia',
-            'Cali, Colombia',
         ];
 
         for (const item of streetVariants) {
@@ -452,16 +567,19 @@ function buildCoordinateVariants(address) {
         }
     }
 
-    return [...set].slice(0, 20);
+    return [...set].slice(0, 8);
 }
 
 function pushUniqueSuggestion(results, seen, item) {
     const description = String(item?.description || '').trim();
-    const placeId = String(item?.place_id || '').trim() || `synthetic:${description.toLowerCase()}`;
+    const placeId =
+        String(item?.place_id || '').trim() ||
+        `synthetic:${description.toLowerCase()}`;
 
     if (!description) return;
 
     const key = `${description.toLowerCase()}|${placeId}`;
+
     if (seen.has(key)) return;
 
     seen.add(key);
@@ -498,7 +616,9 @@ function isRelevantSuggestion(row, originalQuery) {
 
         if (queryNumbers.length > 0) {
             const textNumbers = extractNumbers(text);
-            const sharedNumbers = queryNumbers.filter((n) => textNumbers.includes(n));
+            const sharedNumbers = queryNumbers.filter((n) =>
+                textNumbers.includes(n)
+            );
 
             if (sharedNumbers.length === 0) {
                 return false;
@@ -523,6 +643,7 @@ function rankSuggestions(rows, originalQuery) {
 
     const score = (row) => {
         const text = normalizeLooseText(row?.description || '');
+
         let value = 0;
 
         if (text === nq) value += 200;
@@ -546,8 +667,8 @@ function rankSuggestions(rows, originalQuery) {
             value += 50;
         }
 
-        if (row?.source === 'geocode') value += 20;
-        if (row?.source === 'findplace') value += 15;
+        if (row?.source === 'autocomplete') value += 15;
+        if (row?.source === 'findplace') value += 10;
         if (row?.source === 'local') value -= 20;
 
         return value;
@@ -557,6 +678,10 @@ function rankSuggestions(rows, originalQuery) {
 }
 
 async function autocompleteSearch(variant) {
+    if (!isPlacesEnabled()) {
+        return [];
+    }
+
     const data = await googleGet('place/autocomplete/json', {
         input: variant,
         components: 'country:co',
@@ -582,6 +707,11 @@ async function autocompleteSearch(variant) {
 }
 
 async function geocodeSearch(variant) {
+    if (!isGeocodingEnabled()) {
+        console.warn('[maps][geocode] BLOQUEADO por GEOCODING_ENABLED=false:', variant);
+        return [];
+    }
+
     const data = await googleGet('geocode/json', {
         address: variant,
         components: 'country:CO',
@@ -609,6 +739,10 @@ async function geocodeSearch(variant) {
 }
 
 async function findPlaceSearch(variant) {
+    if (!isPlacesEnabled()) {
+        return [];
+    }
+
     const data = await googleGet('place/findplacefromtext/json', {
         input: variant,
         inputtype: 'textquery',
@@ -639,6 +773,10 @@ async function findPlaceSearch(variant) {
 }
 
 async function getDirectionsDistance(origin, destination, stops = []) {
+    if (!isDirectionsEnabled()) {
+        throw new Error('Directions API disabled by GOOGLE_DIRECTIONS_ENABLED=false');
+    }
+
     const cleanStops = normalizeStops(stops);
 
     const params = {
@@ -666,7 +804,10 @@ async function getDirectionsDistance(origin, destination, stops = []) {
     });
 
     if (data?.status !== 'OK' || !Array.isArray(data?.routes) || !data.routes[0]) {
-        throw new Error(data?.error_message || `Directions API failed: ${data?.status || 'UNKNOWN'}`);
+        throw new Error(
+            data?.error_message ||
+                `Directions API failed: ${data?.status || 'UNKNOWN'}`
+        );
     }
 
     const legs = Array.isArray(data.routes[0].legs) ? data.routes[0].legs : [];
@@ -705,6 +846,12 @@ async function getDirectionsDistance(origin, destination, stops = []) {
 }
 
 async function getDistanceMatrixDistance(origin, destination) {
+    if (!isDistanceMatrixEnabled()) {
+        throw new Error(
+            'Distance Matrix API disabled by GOOGLE_DISTANCE_MATRIX_ENABLED=false'
+        );
+    }
+
     const data = await googleGet('distancematrix/json', {
         origins: origin,
         destinations: destination,
@@ -736,12 +883,14 @@ async function getDistanceMatrixDistance(origin, destination) {
         };
     }
 
-    throw new Error(data?.error_message || `Distance Matrix failed: ${element?.status || data?.status || 'UNKNOWN'}`);
+    throw new Error(
+        data?.error_message ||
+            `Distance Matrix failed: ${element?.status || data?.status || 'UNKNOWN'}`
+    );
 }
 
 async function getApproxRouteDistance(origin, destination, stops = []) {
     const points = [origin, ...normalizeStops(stops), destination];
-
     const coords = [];
 
     for (const point of points) {
@@ -776,38 +925,63 @@ module.exports.getAddressCoordinates = async (address) => {
         throw new Error('Address is required');
     }
 
-    const key = serverMapsKey();
-    const variants = buildCoordinateVariants(addrRaw);
+    const directCoords = parseLatLngText(addrRaw);
+
+    if (directCoords) {
+        return {
+            ltd: directCoords.ltd,
+            lng: directCoords.lng,
+        };
+    }
+
     const rough = roughCoordsForColombia(addrRaw);
+
+    if (!isGeocodingEnabled()) {
+        if (rough) return rough;
+
+        console.warn('[maps] GEOCODING BLOQUEADO. No se llama Google geocode/json:', {
+            address: addrRaw,
+        });
+
+        return geocodeWithoutGoogle(addrRaw);
+    }
+
+    const key = serverMapsKey();
 
     if (!key) {
         if (rough) return rough;
         return geocodeWithoutGoogle(addrRaw);
     }
 
+    const variants = buildCoordinateVariants(addrRaw);
+
     for (const variant of variants) {
         try {
-            const results = await geocodeSearch(variant);
-            const first = results[0];
+            const rows = await geocodeSearch(variant);
+            const first = rows[0];
 
-            if (first?.description) {
-                const geoData = await googleGet('geocode/json', {
-                    address: first.description,
-                    components: 'country:CO',
-                    language: 'es',
-                    region: 'co',
-                });
+            if (!first?.description) continue;
 
-                const loc = geoData?.results?.[0]?.geometry?.location;
-                const lat = toNumber(loc?.lat);
-                const lng = toNumber(loc?.lng);
+            const geoData = await googleGet('geocode/json', {
+                address: first.description,
+                components: 'country:CO',
+                language: 'es',
+                region: 'co',
+            });
 
-                if (isValidLatLng(lat, lng)) {
-                    return { ltd: lat, lng };
-                }
+            const loc = geoData?.results?.[0]?.geometry?.location;
+            const lat = toNumber(loc?.lat);
+            const lng = toNumber(loc?.lng);
+
+            if (isValidLatLng(lat, lng)) {
+                return { ltd: lat, lng };
             }
         } catch (error) {
-            console.warn('[maps] getAddressCoordinates variant failed:', variant, error.message);
+            console.warn(
+                '[maps] getAddressCoordinates variant failed:',
+                variant,
+                error.message
+            );
         }
     }
 
@@ -828,10 +1002,6 @@ module.exports.getDistance = async (origin, destination, stops = []) => {
     const key = serverMapsKey();
 
     if (key) {
-        /*
-          Si hay paradas, Directions API es obligatorio para calcular la ruta completa.
-          Si no hay paradas, Distance Matrix es más simple y rápido.
-        */
         if (cleanStops.length > 0) {
             try {
                 return await getDirectionsDistance(o, d, cleanStops);
@@ -869,40 +1039,60 @@ module.exports.getSuggestions = async (address) => {
     console.log('[maps] getSuggestions variants:', variants);
 
     if (key) {
-        for (const variant of variants) {
-            try {
-                const rows = await autocompleteSearch(variant);
+        if (isPlacesEnabled()) {
+            for (const variant of variants) {
+                try {
+                    const rows = await autocompleteSearch(variant);
 
-                for (const row of rows) {
-                    pushUniqueSuggestion(results, seen, row);
+                    for (const row of rows) {
+                        pushUniqueSuggestion(results, seen, row);
+                    }
+                } catch (error) {
+                    console.warn(
+                        '[maps] autocomplete failed:',
+                        variant,
+                        error.message
+                    );
                 }
-            } catch (error) {
-                console.warn('[maps] autocomplete failed:', variant, error.message);
             }
+
+            for (const variant of variants) {
+                try {
+                    const rows = await findPlaceSearch(variant);
+
+                    for (const row of rows) {
+                        pushUniqueSuggestion(results, seen, row);
+                    }
+                } catch (error) {
+                    console.warn(
+                        '[maps] findplace failed:',
+                        variant,
+                        error.message
+                    );
+                }
+            }
+        } else {
+            console.warn('[maps] Places bloqueado por GOOGLE_PLACES_ENABLED=false');
         }
 
-        for (const variant of variants) {
-            try {
-                const rows = await findPlaceSearch(variant);
+        if (isGeocodingEnabled()) {
+            for (const variant of variants) {
+                try {
+                    const rows = await geocodeSearch(variant);
 
-                for (const row of rows) {
-                    pushUniqueSuggestion(results, seen, row);
+                    for (const row of rows) {
+                        pushUniqueSuggestion(results, seen, row);
+                    }
+                } catch (error) {
+                    console.warn(
+                        '[maps] geocode search failed:',
+                        variant,
+                        error.message
+                    );
                 }
-            } catch (error) {
-                console.warn('[maps] findplace failed:', variant, error.message);
             }
-        }
-
-        for (const variant of variants) {
-            try {
-                const rows = await geocodeSearch(variant);
-
-                for (const row of rows) {
-                    pushUniqueSuggestion(results, seen, row);
-                }
-            } catch (error) {
-                console.warn('[maps] geocode search failed:', variant, error.message);
-            }
+        } else {
+            console.warn('[maps] Geocoding en sugerencias BLOQUEADO por GEOCODING_ENABLED=false');
         }
     } else {
         console.warn('[maps] getSuggestions without Google key');
