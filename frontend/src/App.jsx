@@ -13,7 +13,9 @@ import CaptainProtectedWrapper from "./pages/CaptainProtectWrapper";
 import CaptainLogout from "./pages/CaptainLogout";
 import RideStarted from "./pages/RideStarted";
 import CaptainRiding from "./pages/CaptainRiding";
+import CaptainWallet from "./pages/CaptainWallet";
 import { ToastContainer } from "react-toastify";
+
 import EnterpriseLogin from "./pages/EnterpriseLogin";
 import EnterpriseSignup from "./pages/EnterpriseSignup";
 import EnterpriseDashboard from "./pages/EnterpriseDashboard";
@@ -92,6 +94,15 @@ const App = () => {
         />
 
         <Route
+          path="/captain-wallet"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainWallet />
+            </CaptainProtectedWrapper>
+          }
+        />
+
+        <Route
           path="/captain/offers/goods"
           element={
             <CaptainProtectedWrapper>
@@ -163,7 +174,14 @@ const App = () => {
           }
         />
 
-        <Route path="/captain-riding" element={<CaptainRiding />} />
+        <Route
+          path="/captain-riding"
+          element={
+            <CaptainProtectedWrapper>
+              <CaptainRiding />
+            </CaptainProtectedWrapper>
+          }
+        />
 
         <Route
           path="/captain-logout"

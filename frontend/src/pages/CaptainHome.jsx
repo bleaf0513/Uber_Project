@@ -20,6 +20,7 @@ import {
   requestPushPermissionAndRegister,
   listenForegroundPushNotifications,
 } from "../services/pushNotifications";
+import { formatCOP, getMyWallet } from "../services/walletService";
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
 const PURPLE_DEEP_GRADIENT =
@@ -47,6 +48,9 @@ const CaptainHome = () => {
   const [rideDetailsOpen, setRideDetailsOpen] = useState(false);
   const [ride, setRide] = useState(null);
   const [availableRides, setAvailableRides] = useState([]);
+
+  const [walletData, setWalletData] = useState(null);
+  const [walletLoading, setWalletLoading] = useState(false);
 
   const [socketReady, setSocketReady] = useState(false);
   const [locationReady, setLocationReady] = useState(false);
@@ -124,16 +128,6 @@ const CaptainHome = () => {
     };
   }, [captain?._id]);
 
-  const formatCOP = (value) => {
-    const number = Number(value) || 0;
-
-    return new Intl.NumberFormat("es-CO", {
-      style: "currency",
-      currency: "COP",
-      maximumFractionDigits: 0,
-    }).format(Math.ceil(number));
-  };
-
   const formatCOPShort = (value) => {
     const number = Number(value) || 0;
 
@@ -141,6 +135,29 @@ const CaptainHome = () => {
       maximumFractionDigits: 0,
     }).format(Math.ceil(number));
   };
+
+  const loadCaptainWallet = useCallback(async () => {
+    try {
+      setWalletLoading(true);
+
+      const data = await getMyWallet();
+
+      setWalletData(data);
+    } catch (error) {
+      console.warn(
+        "[captain-home] No se pudo cargar billetera:",
+        error?.response?.data?.message || error?.message
+      );
+    } finally {
+      setWalletLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!captain?._id) return;
+
+    loadCaptainWallet();
+  }, [captain?._id, loadCaptainWallet]);
 
   const normalizeDistanceToKm = (value) => {
     const number = Number(value);
@@ -733,6 +750,10 @@ const CaptainHome = () => {
       upsertAvailableRide(updatedRide);
     };
 
+    const onWalletUpdated = () => {
+      loadCaptainWallet();
+    };
+
     socket.off("connect", onConnect);
     socket.off("disconnect", onDisconnect);
     socket.off("new-ride", onNewRide);
@@ -741,6 +762,7 @@ const CaptainHome = () => {
     socket.off("ride-offer-accepted", onRideOfferAccepted);
     socket.off("ride-updated", onRideUpdated);
     socket.off("ride-user-offer-updated", onRideUserOfferUpdated);
+    socket.off("wallet-updated", onWalletUpdated);
 
     socket.on("connect", onConnect);
     socket.on("disconnect", onDisconnect);
@@ -750,6 +772,7 @@ const CaptainHome = () => {
     socket.on("ride-offer-accepted", onRideOfferAccepted);
     socket.on("ride-updated", onRideUpdated);
     socket.on("ride-user-offer-updated", onRideUserOfferUpdated);
+    socket.on("wallet-updated", onWalletUpdated);
 
     if (socket.connected) {
       onConnect();
@@ -764,6 +787,7 @@ const CaptainHome = () => {
       socket.off("ride-offer-accepted", onRideOfferAccepted);
       socket.off("ride-updated", onRideUpdated);
       socket.off("ride-user-offer-updated", onRideUserOfferUpdated);
+      socket.off("wallet-updated", onWalletUpdated);
     };
   }, [
     socket,
@@ -776,6 +800,7 @@ const CaptainHome = () => {
     upsertAvailableRide,
     removeAvailableRide,
     goToActiveRide,
+    loadCaptainWallet,
   ]);
 
   useEffect(() => {
@@ -1350,6 +1375,75 @@ const CaptainHome = () => {
           )}
 
           <CaptainDetails />
+
+          <div className="px-4 pb-3">
+            <Link
+              to="/captain-wallet"
+              className="block rounded-[26px] overflow-hidden shadow-lg border border-purple-100 active:scale-[0.99] transition"
+            >
+              <div
+                className="p-4 text-white relative overflow-hidden"
+                style={{
+                  background: PURPLE_DEEP_GRADIENT,
+                }}
+              >
+                <div className="absolute -top-12 -right-10 w-36 h-36 rounded-full bg-white/15 blur-2xl" />
+                <div className="absolute -bottom-14 -left-8 w-40 h-40 rounded-full bg-fuchsia-300/20 blur-2xl" />
+
+                <div className="relative z-10 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-xs uppercase tracking-[0.16em] font-black text-white/70">
+                      Saldo Central Go
+                    </p>
+
+                    <h3 className="text-3xl font-black mt-1">
+                      {walletLoading
+                        ? "Cargando..."
+                        : formatCOP(walletData?.wallet?.balance || 0)}
+                    </h3>
+
+                    <p className="text-xs text-white/75 mt-2 leading-5">
+                      Recarga saldo y trabaja sin interrupciones. La comisión se
+                      descuenta al finalizar cada servicio.
+                    </p>
+                  </div>
+
+                  <div className="w-14 h-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
+                    <i className="ri-wallet-3-line text-3xl text-white"></i>
+                  </div>
+                </div>
+
+                <div className="relative z-10 grid grid-cols-2 gap-3 mt-4">
+                  <div className="rounded-2xl bg-white/12 border border-white/10 px-3 py-2">
+                    <p className="text-[10px] uppercase font-black text-white/60">
+                      Comisión
+                    </p>
+                    <p className="text-base font-black mt-0.5">
+                      {walletData?.commission?.active === false
+                        ? "Inactiva"
+                        : `${walletData?.commission?.percentage ?? 10}%`}
+                    </p>
+                  </div>
+
+                  <div className="rounded-2xl bg-white/12 border border-white/10 px-3 py-2">
+                    <p className="text-[10px] uppercase font-black text-white/60">
+                      Mínimo
+                    </p>
+                    <p className="text-base font-black mt-0.5">
+                      {formatCOP(
+                        walletData?.commission?.minimumBalanceToAccept || 0
+                      )}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative z-10 mt-4 rounded-2xl bg-white text-purple-800 py-3 px-4 flex items-center justify-center gap-2 font-black">
+                  <i className="ri-add-circle-line text-xl"></i>
+                  Recargar saldo
+                </div>
+              </div>
+            </Link>
+          </div>
 
           <div className="px-4 pb-5">
             <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">

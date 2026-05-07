@@ -5,6 +5,7 @@ const { sendMessageToSocketId } = require("../socket");
 const rideModel = require("../models/ride.model");
 const captainModel = require("../models/captain.model");
 const { mapsErrorStatus } = require("../utils/mapsHttpStatus");
+const walletService = require("../services/wallet.service");
 
 function safeId(value) {
     try {
@@ -177,11 +178,6 @@ module.exports.createRide = async (req, res) => {
     const { pickup, destination, routeStops, vehicle, offeredFare } = req.body;
 
     try {
-        /*
-         * BLOQUEO ANTI-DUPLICADOS:
-         * Si el usuario refresca la página o pierde el estado del frontend,
-         * el backend no debe permitir crear otra solicitud mientras tenga una viva.
-         */
         const ACTIVE_USER_RIDE_MAX_AGE_HOURS = 6;
         const activeSince = new Date(
             Date.now() - ACTIVE_USER_RIDE_MAX_AGE_HOURS * 60 * 60 * 1000
@@ -400,14 +396,6 @@ module.exports.createRide = async (req, res) => {
             if (sent) emittedCount += 1;
         }
 
-        /*
-         * IMPORTANTE:
-         * Ya NO devolvemos 404 si no hay conductores cerca.
-         * La solicitud queda viva en "Buscando conductores" para que:
-         * - el usuario pueda cancelar,
-         * - pueda subir la oferta,
-         * - y si un conductor aparece/consulta disponibles, la vea.
-         */
         if ((captainsInRadius || []).length === 0) {
             return res.status(201).json({
                 ...rideWithUser.toObject(),
@@ -677,6 +665,16 @@ module.exports.captainOfferRide = async (req, res) => {
             return res.status(400).json({ message: "Precio inválido." });
         }
 
+        try {
+            await walletService.assertCaptainCanAcceptRide(captainId);
+        } catch (walletError) {
+            return res.status(walletError.statusCode || 400).json({
+                message: walletError.message,
+                code: walletError.code || "WALLET_VALIDATION_ERROR",
+                wallet: walletError.wallet || null,
+            });
+        }
+
         const currentOffers = (ride.driverOffers || []).map(normalizeOffer);
 
         const existingOfferIndex = currentOffers.findIndex((offer) => {
@@ -891,6 +889,16 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
         if (ride.negotiationStatus !== "open") {
             return res.status(400).json({
                 message: "La negociación ya fue cerrada.",
+            });
+        }
+
+        try {
+            await walletService.assertCaptainCanAcceptRide(captainId);
+        } catch (walletError) {
+            return res.status(walletError.statusCode || 400).json({
+                message: "El conductor no tiene saldo suficiente para tomar este viaje.",
+                code: walletError.code || "CAPTAIN_INSUFFICIENT_WALLET_BALANCE",
+                wallet: walletError.wallet || null,
             });
         }
 
@@ -1798,6 +1806,21 @@ module.exports.endRide = async (req, res) => {
             captain: req.captain,
         });
 
+        let commissionResult = null;
+
+        try {
+            commissionResult = await walletService.debitCommissionForRide(ride);
+        } catch (walletError) {
+            console.error("[endRide] Error descontando comisión:", walletError);
+
+            commissionResult = {
+                charged: false,
+                error:
+                    walletError.message ||
+                    "No se pudo descontar la comisión del conductor.",
+            };
+        }
+
         let notified = false;
 
         if (ride?.user?.socketId) {
@@ -1821,11 +1844,25 @@ module.exports.endRide = async (req, res) => {
             notified = Boolean(notifiedMain || notifiedUpdate);
         }
 
+        if (ride?.captain?.socketId || req.captain?.socketId) {
+            emitToCaptain(ride.captain || req.captain, {
+                event: "wallet-updated",
+                data: {
+                    rideId: ride._id,
+                    commission: commissionResult,
+                    message: commissionResult?.charged
+                        ? "Comisión descontada correctamente."
+                        : "Viaje finalizado.",
+                },
+            });
+        }
+
         return res.status(200).json({
             ...ride.toObject(),
             userNotified: notified,
             shouldRateUser: true,
             shouldRateCaptain: true,
+            commission: commissionResult,
         });
     } catch (err) {
         return res.status(500).json({

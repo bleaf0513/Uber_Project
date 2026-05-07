@@ -18,6 +18,10 @@ const mapRoutes = require('./routes/maps.routes');
 const rideRoutes = require('./routes/ride.routes');
 const offerRoutes = require('./routes/offer.routes');
 
+// Nuevas rutas financieras Central Go
+const walletRoutes = require('./routes/wallet.routes');
+const adminFinanceRoutes = require('./routes/adminFinance.routes');
+
 const enterpriseRoutes = require('./routes/enterprise.routes');
 const enterpriseDriverRoutes = require('./routes/enterpriseDriver.routes');
 const enterpriseDeliveryRoutes = require('./routes/enterpriseDelivery.routes');
@@ -63,6 +67,22 @@ app.use('/captains', captainRoutes);
 app.use('/maps', mapRoutes);
 app.use('/rides', rideRoutes);
 app.use('/offers', offerRoutes);
+
+/**
+ * FINANZAS CENTRAL GO
+ *
+ * /wallet:
+ * - saldo del conductor
+ * - recargas del conductor
+ * - movimientos de billetera
+ *
+ * /admin/finance:
+ * - aprobar/rechazar recargas
+ * - ver resumen financiero
+ * - configurar comisión
+ */
+app.use('/wallet', walletRoutes);
+app.use('/admin/finance', adminFinanceRoutes);
 
 app.use('/enterprise', enterpriseRoutes);
 app.use('/enterprise-drivers', enterpriseDriverRoutes);

@@ -208,6 +208,33 @@ const captainSchema = new mongoose.Schema(
         },
 
         /*
+         * Billetera interna del conductor.
+         * Este saldo es el que Central Go usará para:
+         * - validar si puede ofertar o aceptar servicios,
+         * - descontar la comisión al finalizar un viaje,
+         * - mostrar saldo disponible en el panel del conductor.
+         *
+         * El historial real de movimientos NO se guarda aquí,
+         * se guarda en walletTransaction.model.js.
+         */
+        wallet: {
+            balance: {
+                type: Number,
+                default: 0,
+                min: 0,
+            },
+            currency: {
+                type: String,
+                default: "COP",
+                enum: ["COP"],
+            },
+            lastMovementAt: {
+                type: Date,
+                default: null,
+            },
+        },
+
+        /*
          * Tokens de notificaciones push.
          * Aquí guardamos los dispositivos/navegadores del conductor
          * para avisarle cuando reciba ofertas de mercancía, espacio, cupos
@@ -247,6 +274,7 @@ captainSchema.statics.hashPassword = async function (password) {
 
 captainSchema.index({ email: 1 });
 captainSchema.index({ status: 1 });
+captainSchema.index({ "wallet.balance": 1 });
 captainSchema.index({ "fcmTokens.token": 1 });
 
 const captainModel = mongoose.model("captain", captainSchema);
