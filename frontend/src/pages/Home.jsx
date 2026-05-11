@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useGSAP } from "@gsap/react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import LocationSearchPanel from "../../components/LocationSearchPanel";
@@ -1374,8 +1374,17 @@ function Home() {
     }
   };
 
-  const goToAvailableOffers = () => {
-    navigate("/available-offers");
+  const goToLogisticsMarketplace = () => {
+    setPanelOpen(false);
+    setStopsPanelOpen(false);
+    setVehiclePanel(false);
+    setConfirmRidePanel(false);
+    setVehicleFound(false);
+    setDriverSelected(false);
+    setSuggestions([]);
+    setActiveInput(null);
+
+    navigate("/available-offers", { replace: false });
   };
 
   const getOfferExpiresAtMs = (offer) => {
@@ -1688,12 +1697,13 @@ function Home() {
         />
       </div>
 
-      <Link
+      <button
+        type="button"
         onClick={logoutUser}
         className="absolute top-5 right-4 w-11 h-11 rounded-full bg-white/95 flex items-center justify-center z-40 shadow-lg border border-gray-200"
       >
         <i className="ri-logout-box-line text-xl text-gray-900"></i>
-      </Link>
+      </button>
 
       {gpsStatus !== "granted" && !vehicleFound && !driverSelected && (
         <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-r from-purple-800 via-purple-900 to-purple-950 text-white shadow-xl">
@@ -1973,10 +1983,41 @@ function Home() {
               <div className="mt-6">
                 <button
                   type="button"
-                  onClick={goToAvailableOffers}
-                  className="w-full rounded-[22px] bg-gradient-to-r from-purple-700 via-purple-800 to-purple-950 text-white py-4 px-4 font-extrabold text-base shadow-lg"
+                  onClick={goToLogisticsMarketplace}
+                  className="group relative w-full overflow-hidden rounded-[26px] bg-gradient-to-r from-purple-800 via-purple-700 to-fuchsia-700 px-5 py-4 text-left shadow-[0_16px_40px_rgba(88,28,135,0.35)] active:scale-[0.98] transition"
                 >
-                  Entregas / Ofertas
+                  <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/15 blur-xl"></div>
+                  <div className="absolute -left-10 -bottom-10 h-28 w-28 rounded-full bg-white/10 blur-xl"></div>
+
+                  <div className="relative z-10 flex items-center gap-4">
+                    <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/18 border border-white/20 flex items-center justify-center shadow-inner">
+                      <i className="ri-store-3-fill text-3xl text-white"></i>
+                    </div>
+
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-full bg-white/20 px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-white">
+                          Nuevo
+                        </span>
+
+                        <span className="text-[12px] font-bold text-white/80">
+                          Cargas · Cupos · Entregas
+                        </span>
+                      </div>
+
+                      <p className="mt-1 text-[20px] font-black leading-tight text-white">
+                        Marketplace Logístico
+                      </p>
+
+                      <p className="mt-0.5 text-[13px] font-medium text-white/85 leading-snug">
+                        Publica o encuentra ofertas de transporte disponibles
+                      </p>
+                    </div>
+
+                    <div className="h-11 w-11 shrink-0 rounded-full bg-white text-purple-800 flex items-center justify-center shadow-lg group-active:translate-x-1 transition">
+                      <i className="ri-arrow-right-line text-2xl"></i>
+                    </div>
+                  </div>
                 </button>
               </div>
             </div>
