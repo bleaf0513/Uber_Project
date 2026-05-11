@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useGSAP } from "@gsap/react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import LocationSearchPanel from "../../components/LocationSearchPanel";
@@ -355,6 +355,13 @@ function Home() {
           }
 
           setGpsStatus("granted");
+          setHideGpsBanner(true);
+
+          try {
+            localStorage.setItem("centralgo_hide_gps_banner", "1");
+          } catch {
+            // No bloqueamos si localStorage falla.
+          }
 
           resolve({
             lat,
@@ -380,6 +387,17 @@ function Home() {
 
           setGpsStatus("denied");
           setGpsError(message);
+
+          setTimeout(() => {
+            setHideGpsBanner(true);
+
+            try {
+              localStorage.setItem("centralgo_hide_gps_banner", "1");
+            } catch {
+              // No bloqueamos si localStorage falla.
+            }
+          }, 3500);
+
           resolve(null);
         },
         {
@@ -1401,6 +1419,17 @@ function Home() {
     setSuggestions([]);
   };
 
+  const goToMarketplaceLogistico = () => {
+    prepareMarketplaceNavigation();
+
+    /*
+     * Navegación fuerte:
+     * En producción la URL sí cambiaba, pero la vista no montaba hasta hacer F5.
+     * Con assign() se hace el cambio de ruta y la carga completa automáticamente.
+     */
+    window.location.assign("/available-offers");
+  };
+
   const getOfferExpiresAtMs = (offer) => {
     if (offer?.expiresAt) {
       const t = new Date(offer.expiresAt).getTime();
@@ -2028,9 +2057,9 @@ function Home() {
               )}
 
               <div className="mt-6">
-                <Link
-                  to="/available-offers"
-                  onClick={prepareMarketplaceNavigation}
+                <button
+                  type="button"
+                  onClick={goToMarketplaceLogistico}
                   className="group relative block w-full overflow-hidden rounded-[26px] bg-gradient-to-r from-purple-800 via-purple-700 to-purple-950 px-5 py-4 text-left shadow-[0_16px_40px_rgba(88,28,135,0.35)] active:scale-[0.98] transition"
                 >
                   <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/15 blur-xl"></div>
@@ -2065,7 +2094,7 @@ function Home() {
                       <i className="ri-arrow-right-line text-2xl"></i>
                     </div>
                   </div>
-                </Link>
+                </button>
               </div>
             </div>
           </div>
