@@ -9,11 +9,14 @@ const EnterpriseDriver = require('../models/enterpriseDriver.model');
 const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 
 const DriverApplication = require('../models/driverApplication.model');
+const WalletTransaction = require('../models/walletTransaction.model');
 
 const {
     sendDriverApplicationApprovedEmail,
     sendDriverApplicationRejectedEmail,
 } = require('../services/email.service');
+
+const MIN_CAPTAIN_BALANCE_TO_WORK = 5000;
 
 function getTodayRange() {
     const now = new Date();
@@ -87,6 +90,34 @@ function buildCaptainResponse(captainDoc) {
         vehicle: captain.vehicle,
         profileImage: captain.profileImage || '',
         rating: captain.rating || 5,
+        createdAt: captain.createdAt,
+        updatedAt: captain.updatedAt,
+    };
+}
+
+function buildCaptainWalletResponse(captainDoc) {
+    if (!captainDoc) return null;
+
+    const captain = captainDoc.toObject ? captainDoc.toObject() : captainDoc;
+    const balance = Number(captain?.wallet?.balance || 0);
+
+    return {
+        _id: captain._id,
+        id: captain._id,
+        fullname: captain.fullname,
+        email: captain.email,
+        status: captain.status,
+        vehicle: captain.vehicle,
+        profileImage: captain.profileImage || '',
+        rating: captain.rating || 5,
+        wallet: {
+            balance,
+            currency: captain?.wallet?.currency || 'COP',
+            lastMovementAt: captain?.wallet?.lastMovementAt || null,
+            minBalanceToWork: MIN_CAPTAIN_BALANCE_TO_WORK,
+            canWork: balance >= MIN_CAPTAIN_BALANCE_TO_WORK,
+            missingToWork: Math.max(0, MIN_CAPTAIN_BALANCE_TO_WORK - balance),
+        },
         createdAt: captain.createdAt,
         updatedAt: captain.updatedAt,
     };
@@ -812,6 +843,11 @@ module.exports.approveDriverApplication = async (req, res) => {
                 totalTrips: 0,
                 pendingToSettle: 0,
             },
+            wallet: {
+                balance: 0,
+                currency: 'COP',
+                lastMovementAt: null,
+            },
         });
 
         application.status = 'approved';
@@ -903,6 +939,174 @@ module.exports.rejectDriverApplication = async (req, res) => {
         return res.status(500).json({
             success: false,
             message: error.message || 'No se pudo rechazar la solicitud.',
+        });
+    }
+};
+
+module.exports.getCaptainWallets = async (req, res) => {
+    try {
+        const search = String(req.query.search || '').trim();
+        const limitRaw = Number(req.query.limit || 50);
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(Math.max(limitRaw, 1), 100)
+            : 50;
+
+        const filter = {};
+
+        if (search) {
+            const safeSearch = search.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const regex = new RegExp(safeSearch, 'i');
+
+            filter.$or = [
+                { email: regex },
+                { 'fullname.firstname': regex },
+                { 'fullname.lastname': regex },
+                { 'vehicle.plate': regex },
+                { 'vehicle.vehicleType': regex },
+            ];
+        }
+
+        const captains = await Captain.find(filter)
+            .sort({ 'wallet.balance': 1, createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            minBalanceToWork: MIN_CAPTAIN_BALANCE_TO_WORK,
+            captains: captains.map(buildCaptainWalletResponse),
+        });
+    } catch (error) {
+        console.error('Error en getCaptainWallets:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudieron cargar los saldos de conductores.',
+        });
+    }
+};
+
+module.exports.topupCaptainWallet = async (req, res) => {
+    try {
+        const { captainId } = req.params;
+        const amount = Number(req.body.amount || 0);
+        const description = String(req.body.description || req.body.note || '').trim();
+        const reference = String(req.body.reference || '').trim();
+
+        if (!captainId) {
+            return res.status(400).json({
+                success: false,
+                message: 'Conductor inválido.',
+            });
+        }
+
+        if (!Number.isFinite(amount) || amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                message: 'El valor de la recarga debe ser mayor que 0.',
+            });
+        }
+
+        if (amount < 1000) {
+            return res.status(400).json({
+                success: false,
+                message: 'La recarga mínima administrativa es de $1.000 COP.',
+            });
+        }
+
+        const captain = await Captain.findById(captainId);
+
+        if (!captain) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado.',
+            });
+        }
+
+        const balanceBefore = Number(captain?.wallet?.balance || 0);
+        const balanceAfter = balanceBefore + amount;
+
+        captain.wallet = captain.wallet || {};
+        captain.wallet.balance = balanceAfter;
+        captain.wallet.currency = 'COP';
+        captain.wallet.lastMovementAt = new Date();
+
+        await captain.save();
+
+        const movement = await WalletTransaction.create({
+            captain: captain._id,
+            type: 'manual_credit',
+            amount,
+            currency: 'COP',
+            balanceBefore,
+            balanceAfter,
+            description:
+                description ||
+                `Recarga manual realizada desde Super Admin por ${req.superAdmin?.email || 'administrador'}.`,
+            reference:
+                reference ||
+                `SUPERADMIN-${Date.now()}-${String(captain._id).slice(-6)}`,
+            metadata: {
+                source: 'super_admin',
+                action: 'captain_wallet_topup',
+                adminId: req.superAdmin?._id || null,
+                adminEmail: req.superAdmin?.email || '',
+                adminName: req.superAdmin?.name || '',
+            },
+        });
+
+        return res.status(200).json({
+            success: true,
+            message: 'Saldo recargado correctamente.',
+            minBalanceToWork: MIN_CAPTAIN_BALANCE_TO_WORK,
+            captain: buildCaptainWalletResponse(captain),
+            transaction: movement,
+        });
+    } catch (error) {
+        console.error('Error en topupCaptainWallet:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudo recargar el saldo del conductor.',
+        });
+    }
+};
+
+module.exports.getCaptainWalletTransactions = async (req, res) => {
+    try {
+        const { captainId } = req.params;
+        const limitRaw = Number(req.query.limit || 20);
+        const limit = Number.isFinite(limitRaw)
+            ? Math.min(Math.max(limitRaw, 1), 100)
+            : 20;
+
+        const captain = await Captain.findById(captainId).lean();
+
+        if (!captain) {
+            return res.status(404).json({
+                success: false,
+                message: 'Conductor no encontrado.',
+            });
+        }
+
+        const transactions = await WalletTransaction.find({
+            captain: captainId,
+        })
+            .sort({ createdAt: -1 })
+            .limit(limit)
+            .lean();
+
+        return res.status(200).json({
+            success: true,
+            captain: buildCaptainWalletResponse(captain),
+            transactions,
+        });
+    } catch (error) {
+        console.error('Error en getCaptainWalletTransactions:', error);
+
+        return res.status(500).json({
+            success: false,
+            message: error.message || 'No se pudo cargar el historial de saldo.',
         });
     }
 };

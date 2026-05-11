@@ -12,6 +12,11 @@ const {
     getDriverApplications,
     approveDriverApplication,
     rejectDriverApplication,
+
+    // Wallet conductores
+    getCaptainWallets,
+    topupCaptainWallet,
+    getCaptainWalletTransactions,
 } = require('../controllers/superAdmin.controller');
 
 router.post('/login', login);
@@ -26,5 +31,10 @@ router.get('/enterprises-overview', authSuperAdmin, getEnterprisesOverview);
 router.get('/driver-applications', authSuperAdmin, getDriverApplications);
 router.patch('/driver-applications/:id/approve', authSuperAdmin, approveDriverApplication);
 router.patch('/driver-applications/:id/reject', authSuperAdmin, rejectDriverApplication);
+
+// Saldo / wallet de conductores
+router.get('/captain-wallets', authSuperAdmin, getCaptainWallets);
+router.post('/captain-wallets/:captainId/topup', authSuperAdmin, topupCaptainWallet);
+router.get('/captain-wallets/:captainId/transactions', authSuperAdmin, getCaptainWalletTransactions);
 
 module.exports = router;
