@@ -7,7 +7,7 @@ import React, {
   useMemo,
 } from "react";
 import { useGSAP } from "@gsap/react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
 import LocationSearchPanel from "../../components/LocationSearchPanel";
@@ -71,6 +71,13 @@ function Home() {
   const [gpsError, setGpsError] = useState("");
   const [userCoords, setUserCoords] = useState(null);
   const [pickupDetected, setPickupDetected] = useState(false);
+  const [hideGpsBanner, setHideGpsBanner] = useState(() => {
+    try {
+      return localStorage.getItem("centralgo_hide_gps_banner") === "1";
+    } catch {
+      return false;
+    }
+  });
 
   /*
    * HOTFIX ANTI-GEOCODING:
@@ -383,6 +390,16 @@ function Home() {
       );
     });
   }, [emitUserLocation, reverseGeocodeCoords]);
+
+  const dismissGpsBanner = () => {
+    setHideGpsBanner(true);
+
+    try {
+      localStorage.setItem("centralgo_hide_gps_banner", "1");
+    } catch {
+      // No bloqueamos si localStorage falla.
+    }
+  };
 
   const startGpsWatch = useCallback(() => {
     if (!user?._id || !navigator.geolocation || !socket) return;
@@ -1374,7 +1391,7 @@ function Home() {
     }
   };
 
-  const goToLogisticsMarketplace = () => {
+  const prepareMarketplaceNavigation = () => {
     setPanelOpen(false);
     setStopsPanelOpen(false);
     setVehiclePanel(false);
@@ -1382,9 +1399,6 @@ function Home() {
     setVehicleFound(false);
     setDriverSelected(false);
     setSuggestions([]);
-    setActiveInput(null);
-
-    navigate("/available-offers", { replace: false });
   };
 
   const getOfferExpiresAtMs = (offer) => {
@@ -1701,41 +1715,74 @@ function Home() {
         type="button"
         onClick={logoutUser}
         className="absolute top-5 right-4 w-11 h-11 rounded-full bg-white/95 flex items-center justify-center z-40 shadow-lg border border-gray-200"
+        aria-label="Cerrar sesión"
       >
         <i className="ri-logout-box-line text-xl text-gray-900"></i>
       </button>
 
-      {gpsStatus !== "granted" && !vehicleFound && !driverSelected && (
-        <div className="absolute top-0 left-0 right-0 z-50 bg-gradient-to-r from-purple-800 via-purple-900 to-purple-950 text-white shadow-xl">
-          <div className="px-4 pt-3 pb-4">
-            <p className="text-[15px] font-extrabold leading-tight">
-              {gpsStatus === "loading"
-                ? "Detectando tu ubicación..."
-                : "No pudimos encontrarte"}
-            </p>
+      {gpsStatus !== "granted" &&
+        !hideGpsBanner &&
+        !vehicleFound &&
+        !driverSelected && (
+          <div className="absolute top-4 left-4 right-4 z-50">
+            <div className="rounded-[26px] bg-white/95 backdrop-blur border border-purple-100 shadow-2xl overflow-hidden">
+              <div className="flex items-start gap-3 p-4">
+                <div className="h-12 w-12 rounded-2xl bg-purple-100 text-purple-900 flex items-center justify-center shrink-0">
+                  <i className="ri-map-pin-user-fill text-2xl"></i>
+                </div>
 
-            <p className="text-sm mt-1 text-white/95">
-              {gpsStatus === "loading"
-                ? "Espera un momento mientras accedemos a tu ubicación."
-                : "Pulsa para acceder a tu ubicación"}
-            </p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] font-black text-gray-900 leading-tight">
+                    {gpsStatus === "loading"
+                      ? "Detectando tu ubicación"
+                      : "Activa tu ubicación"}
+                  </p>
 
-            {gpsError ? (
-              <p className="text-xs mt-2 text-white/90">{gpsError}</p>
-            ) : null}
+                  <p className="text-[13px] text-gray-600 mt-1 leading-snug">
+                    {gpsStatus === "loading"
+                      ? "Estamos ubicándote para mejorar la precisión del servicio."
+                      : "Así podremos mostrarte conductores y rutas más cercanas."}
+                  </p>
 
-            {gpsStatus !== "loading" && (
-              <button
-                type="button"
-                onClick={requestGpsLocation}
-                className="mt-3 rounded-full bg-white text-purple-900 px-5 py-2.5 text-sm font-bold shadow"
-              >
-                Activar ubicación
-              </button>
-            )}
+                  {gpsError ? (
+                    <p className="text-[12px] mt-2 text-red-600 font-semibold leading-snug">
+                      {gpsError}
+                    </p>
+                  ) : null}
+
+                  <div className="flex items-center gap-2 mt-3">
+                    {gpsStatus !== "loading" && (
+                      <button
+                        type="button"
+                        onClick={requestGpsLocation}
+                        className="rounded-full bg-purple-800 text-white px-4 py-2 text-sm font-black shadow"
+                      >
+                        Activar ubicación
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={dismissGpsBanner}
+                      className="rounded-full bg-gray-100 text-gray-700 px-4 py-2 text-sm font-bold"
+                    >
+                      Ahora no
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={dismissGpsBanner}
+                  className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center shrink-0"
+                  aria-label="Cerrar aviso de ubicación"
+                >
+                  <i className="ri-close-line text-xl text-gray-800"></i>
+                </button>
+              </div>
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
       {pickup &&
         destination &&
@@ -1981,16 +2028,16 @@ function Home() {
               )}
 
               <div className="mt-6">
-                <button
-                  type="button"
-                  onClick={goToLogisticsMarketplace}
-                  className="group relative w-full overflow-hidden rounded-[26px] bg-gradient-to-r from-purple-800 via-purple-700 to-fuchsia-700 px-5 py-4 text-left shadow-[0_16px_40px_rgba(88,28,135,0.35)] active:scale-[0.98] transition"
+                <Link
+                  to="/available-offers"
+                  onClick={prepareMarketplaceNavigation}
+                  className="group relative block w-full overflow-hidden rounded-[26px] bg-gradient-to-r from-purple-800 via-purple-700 to-purple-950 px-5 py-4 text-left shadow-[0_16px_40px_rgba(88,28,135,0.35)] active:scale-[0.98] transition"
                 >
                   <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-white/15 blur-xl"></div>
                   <div className="absolute -left-10 -bottom-10 h-28 w-28 rounded-full bg-white/10 blur-xl"></div>
 
                   <div className="relative z-10 flex items-center gap-4">
-                    <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/18 border border-white/20 flex items-center justify-center shadow-inner">
+                    <div className="h-14 w-14 shrink-0 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shadow-inner">
                       <i className="ri-store-3-fill text-3xl text-white"></i>
                     </div>
 
@@ -2018,7 +2065,7 @@ function Home() {
                       <i className="ri-arrow-right-line text-2xl"></i>
                     </div>
                   </div>
-                </button>
+                </Link>
               </div>
             </div>
           </div>
