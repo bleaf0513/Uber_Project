@@ -28,13 +28,32 @@ import {
 
 const OFFER_TTL_MS = 60000;
 const RECENT_PLACES_KEY = "centralgo_recent_places";
+const CURRENT_LOCATION_KEY = "centralgo_current_location";
 
 function Home() {
   const submitHandler = (e) => {
     e.preventDefault();
   };
 
-  const [pickup, setPickup] = useState("");
+  const [pickup, setPickup] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CURRENT_LOCATION_KEY);
+      const saved = JSON.parse(raw || "null");
+
+      if (saved?.address) {
+        return saved.address;
+      }
+
+      if (saved?.lat && saved?.lng) {
+        return `${Number(saved.lat).toFixed(6)}, ${Number(saved.lng).toFixed(6)}`;
+      }
+
+      return "";
+    } catch {
+      return "";
+    }
+  });
+
   const [destination, setDestination] = useState("");
   const [routeStops, setRouteStops] = useState([]);
   const [stopsPanelOpen, setStopsPanelOpen] = useState(false);
@@ -69,7 +88,23 @@ function Home() {
 
   const [gpsStatus, setGpsStatus] = useState("idle");
   const [gpsError, setGpsError] = useState("");
-  const [userCoords, setUserCoords] = useState(null);
+  const [userCoords, setUserCoords] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CURRENT_LOCATION_KEY);
+      const saved = JSON.parse(raw || "null");
+
+      if (saved?.lat && saved?.lng) {
+        return {
+          lat: Number(saved.lat),
+          lng: Number(saved.lng),
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  });
   const [pickupDetected, setPickupDetected] = useState(false);
   const [hideGpsBanner, setHideGpsBanner] = useState(() => {
     try {
@@ -84,7 +119,23 @@ function Home() {
    * Estos estados guardan coordenadas reales cuando vienen de GPS o Places.
    * El usuario ve texto bonito, pero para APIs mandamos lat,lng.
    */
-  const [pickupCoords, setPickupCoords] = useState(null);
+  const [pickupCoords, setPickupCoords] = useState(() => {
+    try {
+      const raw = localStorage.getItem(CURRENT_LOCATION_KEY);
+      const saved = JSON.parse(raw || "null");
+
+      if (saved?.lat && saved?.lng) {
+        return {
+          lat: Number(saved.lat),
+          lng: Number(saved.lng),
+        };
+      }
+
+      return null;
+    } catch {
+      return null;
+    }
+  });
   const [destinationCoords, setDestinationCoords] = useState(null);
   const [routeStopCoords, setRouteStopCoords] = useState([]);
 
@@ -348,17 +399,25 @@ function Home() {
           emitUserLocation(lat, lng);
 
           const detectedAddress = await reverseGeocodeCoords(lat, lng);
+          const locationText =
+            detectedAddress || `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
 
-          if (detectedAddress) {
-            setPickup(detectedAddress);
-            setPickupDetected(true);
-          }
-
+          setPickup(locationText);
+          setPickupDetected(true);
           setGpsStatus("granted");
           setHideGpsBanner(true);
 
           try {
             localStorage.setItem("centralgo_hide_gps_banner", "1");
+            localStorage.setItem(
+              CURRENT_LOCATION_KEY,
+              JSON.stringify({
+                lat,
+                lng,
+                address: locationText,
+                updatedAt: Date.now(),
+              })
+            );
           } catch {
             // No bloqueamos si localStorage falla.
           }
@@ -366,7 +425,7 @@ function Home() {
           resolve({
             lat,
             lng,
-            address: detectedAddress,
+            address: locationText,
           });
         },
         (error) => {
@@ -409,6 +468,30 @@ function Home() {
     });
   }, [emitUserLocation, reverseGeocodeCoords]);
 
+  useEffect(() => {
+    if (pickupCoords || pickup) return;
+    if (!navigator.permissions || !navigator.geolocation) return;
+
+    let cancelled = false;
+
+    navigator.permissions
+      .query({ name: "geolocation" })
+      .then((permissionStatus) => {
+        if (cancelled) return;
+
+        if (permissionStatus.state === "granted") {
+          requestGpsLocation();
+        }
+      })
+      .catch(() => {
+        // Algunos navegadores no soportan permissions.query para geolocalización.
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [pickup, pickupCoords, requestGpsLocation]);
+
   const dismissGpsBanner = () => {
     setHideGpsBanner(true);
 
@@ -432,8 +515,29 @@ function Home() {
         const lat = position.coords.latitude;
         const lng = position.coords.longitude;
 
-        setUserCoords({ lat, lng });
+        const coords = { lat, lng };
+        setUserCoords(coords);
+        setPickupCoords((prev) => prev || coords);
         emitUserLocation(lat, lng);
+
+        try {
+          const currentRaw = localStorage.getItem(CURRENT_LOCATION_KEY);
+          const currentSaved = JSON.parse(currentRaw || "null") || {};
+          localStorage.setItem(
+            CURRENT_LOCATION_KEY,
+            JSON.stringify({
+              ...currentSaved,
+              lat,
+              lng,
+              address:
+                currentSaved.address ||
+                `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`,
+              updatedAt: Date.now(),
+            })
+          );
+        } catch {
+          // No bloqueamos si localStorage falla.
+        }
       },
       (error) => {
         console.warn("No se pudo actualizar la ubicación del usuario:", error);
