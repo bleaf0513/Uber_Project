@@ -946,34 +946,10 @@ module.exports.rejectDriverApplication = async (req, res) => {
 module.exports.getCaptainWallets = async (req, res) => {
     try {
         const search = String(req.query.search || '').trim();
-        const status = String(req.query.status || 'blocked').trim();
-
-        const allowedStatuses = [
-            'all',
-            'blocked',
-            'can_work',
-            'low_balance',
-        ];
-
-        if (!allowedStatuses.includes(status)) {
-            return res.status(400).json({
-                success: false,
-                message: 'Filtro de saldo no válido.',
-            });
-        }
-
-        const pageRaw = Number(req.query.page || 1);
-        const limitRaw = Number(req.query.limit || 6);
-
-        const page = Number.isFinite(pageRaw)
-            ? Math.max(Math.floor(pageRaw), 1)
-            : 1;
-
+        const limitRaw = Number(req.query.limit || 50);
         const limit = Number.isFinite(limitRaw)
-            ? Math.min(Math.max(Math.floor(limitRaw), 1), 20)
-            : 6;
-
-        const skip = (page - 1) * limit;
+            ? Math.min(Math.max(limitRaw, 1), 100)
+            : 50;
 
         const filter = {};
 
@@ -990,81 +966,14 @@ module.exports.getCaptainWallets = async (req, res) => {
             ];
         }
 
-        if (status === 'blocked') {
-            filter['wallet.balance'] = {
-                $lt: MIN_CAPTAIN_BALANCE_TO_WORK,
-            };
-        }
-
-        if (status === 'can_work') {
-            filter['wallet.balance'] = {
-                $gte: MIN_CAPTAIN_BALANCE_TO_WORK,
-            };
-        }
-
-        if (status === 'low_balance') {
-            filter['wallet.balance'] = {
-                $gte: MIN_CAPTAIN_BALANCE_TO_WORK,
-                $lt: MIN_CAPTAIN_BALANCE_TO_WORK * 2,
-            };
-        }
-
-        const [
-            captains,
-            total,
-            totalCaptains,
-            blockedCaptains,
-            canWorkCaptains,
-            lowBalanceCaptains,
-        ] = await Promise.all([
-            Captain.find(filter)
-                .sort({ 'wallet.balance': 1, createdAt: -1 })
-                .skip(skip)
-                .limit(limit)
-                .lean(),
-
-            Captain.countDocuments(filter),
-
-            Captain.countDocuments(),
-
-            Captain.countDocuments({
-                'wallet.balance': {
-                    $lt: MIN_CAPTAIN_BALANCE_TO_WORK,
-                },
-            }),
-
-            Captain.countDocuments({
-                'wallet.balance': {
-                    $gte: MIN_CAPTAIN_BALANCE_TO_WORK,
-                },
-            }),
-
-            Captain.countDocuments({
-                'wallet.balance': {
-                    $gte: MIN_CAPTAIN_BALANCE_TO_WORK,
-                    $lt: MIN_CAPTAIN_BALANCE_TO_WORK * 2,
-                },
-            }),
-        ]);
-
-        const totalPages = Math.max(1, Math.ceil(total / limit));
+        const captains = await Captain.find(filter)
+            .sort({ 'wallet.balance': 1, createdAt: -1 })
+            .limit(limit)
+            .lean();
 
         return res.status(200).json({
             success: true,
             minBalanceToWork: MIN_CAPTAIN_BALANCE_TO_WORK,
-            status,
-            page,
-            limit,
-            total,
-            totalPages,
-            hasNextPage: page < totalPages,
-            hasPrevPage: page > 1,
-            stats: {
-                totalCaptains,
-                blockedCaptains,
-                canWorkCaptains,
-                lowBalanceCaptains,
-            },
             captains: captains.map(buildCaptainWalletResponse),
         });
     } catch (error) {
