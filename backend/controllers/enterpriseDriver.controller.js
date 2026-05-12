@@ -40,7 +40,51 @@ function shouldPersistNewPoint(previousPoint, nextPoint) {
     if (!previousPoint) return true;
 
     const distanceKm = haversineDistanceKm(previousPoint, nextPoint);
+
+    /*
+     * Guardamos un nuevo punto si se movió mínimo 30 metros.
+     * Esto evita llenar la base de datos con miles de puntos repetidos
+     * cuando el conductor está quieto.
+     */
     return distanceKm >= 0.03;
+}
+
+function getBogotaDateString() {
+    return new Date().toLocaleDateString('en-CA', {
+        timeZone: 'America/Bogota',
+    });
+}
+
+function normalizeTimeValue(value, fallback) {
+    const clean = String(value || '').trim();
+
+    if (!clean) return fallback;
+
+    /*
+     * Acepta formatos:
+     * 08:00
+     * 8:00
+     * 08:00:00
+     */
+    const match = clean.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+
+    if (!match) return fallback;
+
+    const hour = Number(match[1]);
+    const minute = Number(match[2]);
+
+    if (
+        !Number.isFinite(hour) ||
+        !Number.isFinite(minute) ||
+        hour < 0 ||
+        hour > 23 ||
+        minute < 0 ||
+        minute > 59
+    ) {
+        return fallback;
+    }
+
+    return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
 async function getOrCreateActiveShift(driver) {
@@ -320,6 +364,10 @@ module.exports.updateDriverLocation = async (req, res) => {
         const numericLng = Number(lng);
         const now = new Date();
 
+        /*
+         * Siempre actualizamos la ubicación actual para que el panel en vivo
+         * siga funcionando aunque falle el guardado histórico.
+         */
         const shift = await getOrCreateActiveShift(driver);
 
         if (!shift) {
@@ -337,6 +385,7 @@ module.exports.updateDriverLocation = async (req, res) => {
         const nextPoint = { lat: numericLat, lng: numericLng };
         let totalDistanceKm = Number(shift.totalDistanceKm || 0);
         let totalPoints = Number(shift.totalPoints || 0);
+        let pointSaved = false;
 
         if (shouldPersistNewPoint(lastPoint, nextPoint)) {
             await EnterpriseDriverRoutePoint.create({
@@ -348,6 +397,8 @@ module.exports.updateDriverLocation = async (req, res) => {
                 recordedAt: now,
                 source: 'gps',
             });
+
+            pointSaved = true;
 
             if (lastPoint) {
                 totalDistanceKm += haversineDistanceKm(
@@ -384,6 +435,7 @@ module.exports.updateDriverLocation = async (req, res) => {
             success: true,
             message: 'Ubicación actualizada correctamente.',
             driver: updatedDriver,
+            pointSaved,
             shift: {
                 _id: shift._id,
                 totalPoints,
@@ -521,7 +573,10 @@ module.exports.deleteDriver = async (req, res) => {
 module.exports.getDriverRouteSummary = async (req, res) => {
     try {
         const { id } = req.params;
+
         const date = String(req.query.date || '').trim();
+        const from = normalizeTimeValue(req.query.from, '00:00');
+        const to = normalizeTimeValue(req.query.to, '23:59');
 
         if (!req.enterprise?._id) {
             return res.status(401).json({
@@ -543,33 +598,88 @@ module.exports.getDriverRouteSummary = async (req, res) => {
             });
         }
 
-        let startDate;
-        let endDate;
+        /*
+         * Zona horaria correcta para Colombia.
+         * Antes se usaba T00:00:00.000Z, que consulta en UTC.
+         * En Colombia, desde las 7:00 p. m. ya puede existir diferencia de día
+         * contra UTC. Eso podía dejar el recorrido vacío.
+         */
+        const selectedDate = date || getBogotaDateString();
 
-        if (date) {
-            startDate = new Date(`${date}T00:00:00.000Z`);
-            endDate = new Date(`${date}T23:59:59.999Z`);
-        } else {
-            const now = new Date();
-            const yyyyMmDd = now.toISOString().slice(0, 10);
-            startDate = new Date(`${yyyyMmDd}T00:00:00.000Z`);
-            endDate = new Date(`${yyyyMmDd}T23:59:59.999Z`);
+        const startDate = new Date(`${selectedDate}T${from}:00.000-05:00`);
+        const endDate = new Date(`${selectedDate}T${to}:59.999-05:00`);
+
+        if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+            return res.status(400).json({
+                success: false,
+                message: 'Fecha u horas inválidas para consultar el recorrido.',
+            });
         }
 
+        if (startDate > endDate) {
+            return res.status(400).json({
+                success: false,
+                message: 'La hora inicial no puede ser mayor que la hora final.',
+            });
+        }
+
+        /*
+         * Consulta robusta:
+         * Ya no dependemos solamente de que la jornada startedAt caiga en ese día.
+         * Buscamos directamente los puntos GPS por recordedAt.
+         */
+        const routePoints = await EnterpriseDriverRoutePoint.find({
+            enterprise: req.enterprise._id,
+            driverId: driver._id,
+            recordedAt: {
+                $gte: startDate,
+                $lte: endDate,
+            },
+        }).sort({ recordedAt: 1 });
+
+        const shiftIds = [
+            ...new Set(
+                routePoints
+                    .map((point) => String(point.shiftId || ''))
+                    .filter(Boolean)
+            ),
+        ];
+
+        const shifts = shiftIds.length
+            ? await EnterpriseDriverShift.find({
+                  _id: { $in: shiftIds },
+                  enterprise: req.enterprise._id,
+                  driverId: driver._id,
+              }).sort({ startedAt: -1 })
+            : [];
+
         const shift =
+            shifts[0] ||
             (await EnterpriseDriverShift.findOne({
                 enterprise: req.enterprise._id,
                 driverId: driver._id,
-                startedAt: { $gte: startDate, $lte: endDate },
-            }).sort({ startedAt: -1 })) || null;
-
-        const routePoints = shift
-            ? await EnterpriseDriverRoutePoint.find({
-                  enterprise: req.enterprise._id,
-                  driverId: driver._id,
-                  shiftId: shift._id,
-              }).sort({ recordedAt: 1 })
-            : [];
+                $or: [
+                    {
+                        startedAt: {
+                            $gte: startDate,
+                            $lte: endDate,
+                        },
+                    },
+                    {
+                        endedAt: {
+                            $gte: startDate,
+                            $lte: endDate,
+                        },
+                    },
+                    {
+                        startedAt: { $lte: startDate },
+                        $or: [
+                            { endedAt: null },
+                            { endedAt: { $gte: startDate } },
+                        ],
+                    },
+                ],
+            }).sort({ startedAt: -1 }));
 
         const deliveries = await EnterpriseDelivery.find({
             enterprise: req.enterprise._id,
@@ -600,8 +710,37 @@ module.exports.getDriverRouteSummary = async (req, res) => {
                   )
                 : 0;
 
+        let calculatedDistanceKm = 0;
+
+        for (let i = 1; i < routePoints.length; i += 1) {
+            const previous = routePoints[i - 1];
+            const current = routePoints[i];
+
+            if (
+                isValidCoordinate(previous.lat, previous.lng) &&
+                isValidCoordinate(current.lat, current.lng)
+            ) {
+                calculatedDistanceKm += haversineDistanceKm(
+                    { lat: previous.lat, lng: previous.lng },
+                    { lat: current.lat, lng: current.lng }
+                );
+            }
+        }
+
+        const firstPoint = routePoints[0] || null;
+        const lastPoint = routePoints[routePoints.length - 1] || null;
+
         const shiftDurationSeconds =
-            shift?.startedAt
+            firstPoint && lastPoint
+                ? Math.max(
+                      0,
+                      Math.round(
+                          (new Date(lastPoint.recordedAt).getTime() -
+                              new Date(firstPoint.recordedAt).getTime()) /
+                              1000
+                      )
+                  )
+                : shift?.startedAt
                 ? Math.max(
                       0,
                       Math.round(
@@ -629,7 +768,14 @@ module.exports.getDriverRouteSummary = async (req, res) => {
                 currentLocation: driver.currentLocation || null,
             },
             summary: {
-                date: date || startDate.toISOString().slice(0, 10),
+                date: selectedDate,
+                from,
+                to,
+                timezone: 'America/Bogota',
+                queryRange: {
+                    startDate,
+                    endDate,
+                },
                 shift: shift
                     ? {
                           _id: shift._id,
@@ -638,8 +784,34 @@ module.exports.getDriverRouteSummary = async (req, res) => {
                           endedAt: shift.endedAt,
                           startedLocation: shift.startedLocation || null,
                           endedLocation: shift.endedLocation || null,
-                          totalPoints: Number(shift.totalPoints || 0),
-                          totalDistanceKm: Number(shift.totalDistanceKm || 0),
+                          totalPoints: routePoints.length,
+                          totalDistanceKm: Number(
+                              calculatedDistanceKm.toFixed(4)
+                          ),
+                          shiftDurationSeconds,
+                      }
+                    : routePoints.length
+                    ? {
+                          _id: null,
+                          status: 'Con puntos GPS sin jornada encontrada',
+                          startedAt: firstPoint?.recordedAt || null,
+                          endedAt: lastPoint?.recordedAt || null,
+                          startedLocation: firstPoint
+                              ? {
+                                    lat: firstPoint.lat,
+                                    lng: firstPoint.lng,
+                                }
+                              : null,
+                          endedLocation: lastPoint
+                              ? {
+                                    lat: lastPoint.lat,
+                                    lng: lastPoint.lng,
+                                }
+                              : null,
+                          totalPoints: routePoints.length,
+                          totalDistanceKm: Number(
+                              calculatedDistanceKm.toFixed(4)
+                          ),
                           shiftDurationSeconds,
                       }
                     : null,
