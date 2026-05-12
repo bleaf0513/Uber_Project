@@ -747,6 +747,56 @@ const EnterpriseLogistics = () => {
     return date.toISOString().slice(0, 10);
   };
 
+  const getDeliveryStageIndex = (status) => {
+    if (status === "Finalizada") return 2;
+    if (status === "En curso") return 1;
+    return 0;
+  };
+
+  const getDeliveryStepVisual = (delivery) => {
+    const currentStage = getDeliveryStageIndex(String(delivery?.status || ""));
+
+    return [
+      {
+        key: "pending",
+        shortLabel: "A",
+        title: "Pendiente",
+        subtitle:
+          delivery?.optimizationStatus === "pending"
+            ? "Lista para asignar u optimizar"
+            : "Pedido registrado",
+        active: currentStage >= 0,
+        current: currentStage === 0,
+      },
+      {
+        key: "progress",
+        shortLabel: "B",
+        title: "En ruta",
+        subtitle:
+          delivery?.assignedDriverName ||
+          delivery?.assignedDriverId?.name ||
+          (getDeliveryAssignedId(delivery)
+            ? "Conductor asignado"
+            : "Esperando conductor"),
+        active: currentStage >= 1,
+        current: currentStage === 1,
+      },
+      {
+        key: "finished",
+        shortLabel: "C",
+        title: "Entregado",
+        subtitle: delivery?.finishedAt
+          ? new Date(delivery.finishedAt).toLocaleTimeString([], {
+              hour: "2-digit",
+              minute: "2-digit",
+            })
+          : "Pendiente de cierre",
+        active: currentStage >= 2,
+        current: currentStage === 2,
+      },
+    ];
+  };
+
   const normalizeAddressQuery = (query) => {
     const clean = String(query || "").trim();
     if (!clean) return "";
@@ -3955,6 +4005,7 @@ const EnterpriseLogistics = () => {
                 const deliveryId = delivery._id || delivery.id;
                 const assignedId = getDeliveryAssignedId(delivery);
                 const hasUnread = !!driverChatAlerts[String(assignedId || "")];
+                const stepVisual = getDeliveryStepVisual(delivery);
 
                 return (
                   <div
@@ -3993,74 +4044,152 @@ const EnterpriseLogistics = () => {
                       </div>
                     </div>
 
-                    <p className="text-sm text-gray-600 mt-3">
-                      Cliente: {delivery.clientName}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Dirección: {delivery.address}
-                    </p>
-                    <p className="text-sm text-gray-600">
-                      Teléfono: {delivery.clientPhone}
-                    </p>
+                    <div className="mt-4 grid grid-cols-1 xl:grid-cols-[minmax(0,1.35fr)_360px] gap-4 items-start">
+                      <div className="rounded-2xl border border-gray-200 bg-white/80 p-4 shadow-sm">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                          <div>
+                            <p className="text-gray-400 text-[11px] uppercase tracking-[0.14em] font-bold">Cliente</p>
+                            <p className="text-gray-700 font-semibold mt-1">{delivery.clientName}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-400 text-[11px] uppercase tracking-[0.14em] font-bold">Teléfono</p>
+                            <p className="text-gray-700 font-semibold mt-1">{delivery.clientPhone || "Sin teléfono"}</p>
+                          </div>
+                          <div className="md:col-span-2">
+                            <p className="text-gray-400 text-[11px] uppercase tracking-[0.14em] font-bold">Dirección</p>
+                            <p className="text-gray-700 font-semibold mt-1">{delivery.address || "Sin dirección"}</p>
+                          </div>
 
-                    {delivery.neighborhood ? (
-                      <p className="text-sm text-gray-600">
-                        Barrio: {delivery.neighborhood}
-                      </p>
-                    ) : null}
+                          {delivery.neighborhood ? (
+                            <div>
+                              <p className="text-gray-400 text-[11px] uppercase tracking-[0.14em] font-bold">Barrio</p>
+                              <p className="text-gray-700 font-semibold mt-1">{delivery.neighborhood}</p>
+                            </div>
+                          ) : null}
 
-                    {delivery.reference ? (
-                      <p className="text-sm text-gray-600">
-                        Referencia: {delivery.reference}
-                      </p>
-                    ) : null}
+                          {delivery.reference ? (
+                            <div>
+                              <p className="text-gray-400 text-[11px] uppercase tracking-[0.14em] font-bold">Referencia</p>
+                              <p className="text-gray-700 font-semibold mt-1">{delivery.reference}</p>
+                            </div>
+                          ) : null}
+                        </div>
 
-                    <p className="text-sm text-blue-600 font-semibold mt-2">
-                      Asignado a:{" "}
-                      {delivery.assignedDriverName ||
-                        delivery.assignedDriverId?.name ||
-                        (delivery.optimizationStatus === "pending"
-                          ? "Pendiente de ruta inteligente"
-                          : "Sin nombre")}
-                    </p>
+                        <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3">
+                          <div className="rounded-xl bg-blue-50 border border-blue-100 px-3 py-3">
+                            <p className="text-[11px] uppercase tracking-[0.14em] font-bold text-blue-500">Asignado a</p>
+                            <p className="text-sm font-bold text-blue-700 mt-1">
+                              {delivery.assignedDriverName ||
+                                delivery.assignedDriverId?.name ||
+                                (delivery.optimizationStatus === "pending"
+                                  ? "Pendiente de ruta inteligente"
+                                  : "Sin nombre")}
+                            </p>
+                          </div>
 
-                    <p className="text-sm text-gray-700 mt-1">
-                      Valor factura:{" "}
-                      <span className="font-semibold">
-                        ${Number(delivery.invoiceValue || 0).toLocaleString()}
-                      </span>
-                    </p>
+                          <div className="rounded-xl bg-emerald-50 border border-emerald-100 px-3 py-3">
+                            <p className="text-[11px] uppercase tracking-[0.14em] font-bold text-emerald-500">Valor factura</p>
+                            <p className="text-sm font-bold text-emerald-700 mt-1">
+                              ${Number(delivery.invoiceValue || 0).toLocaleString()}
+                            </p>
+                          </div>
 
-                    <p className="text-sm text-gray-700">
-                      Método de pago:{" "}
-                      <span className="font-semibold">
-                        {delivery.paymentMethod || "Efectivo"}
-                      </span>
-                    </p>
+                          <div className="rounded-xl bg-amber-50 border border-amber-100 px-3 py-3">
+                            <p className="text-[11px] uppercase tracking-[0.14em] font-bold text-amber-500">Método de pago</p>
+                            <p className="text-sm font-bold text-amber-700 mt-1">
+                              {delivery.paymentMethod || "Efectivo"}
+                            </p>
+                          </div>
+                        </div>
 
-                    {delivery.placeId ? (
-                      <p className="text-xs text-gray-500 mt-1">
-                        placeId: {delivery.placeId}
-                      </p>
-                    ) : null}
+                        {delivery.placeId ? (
+                          <p className="text-xs text-gray-500 mt-3">
+                            placeId: {delivery.placeId}
+                          </p>
+                        ) : null}
 
-                    {delivery.startedAt && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Inicio: {new Date(delivery.startedAt).toLocaleString()}
-                      </p>
-                    )}
+                        {delivery.startedAt && (
+                          <p className="text-xs text-gray-500 mt-2">
+                            Inicio: {new Date(delivery.startedAt).toLocaleString()}
+                          </p>
+                        )}
 
-                    {delivery.finishedAt && (
-                      <p className="text-xs text-gray-500 mt-1">
-                        Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
-                      </p>
-                    )}
+                        {delivery.finishedAt && (
+                          <p className="text-xs text-gray-500 mt-1">
+                            Finalizó: {new Date(delivery.finishedAt).toLocaleString()}
+                          </p>
+                        )}
 
-                    {delivery.notes ? (
-                      <p className="text-sm text-gray-500 mt-1">
-                        Observaciones: {delivery.notes}
-                      </p>
-                    ) : null}
+                        {delivery.notes ? (
+                          <p className="text-sm text-gray-500 mt-3">
+                            Observaciones: {delivery.notes}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 shadow-sm">
+                        <div className="flex items-center justify-between gap-2 mb-4">
+                          <div>
+                            <p className="text-[11px] uppercase tracking-[0.16em] font-bold text-slate-500">
+                              Progreso visual
+                            </p>
+                            <h4 className="text-sm font-extrabold text-slate-800 mt-1">
+                              Estado del pedido
+                            </h4>
+                          </div>
+                          <span className="text-[11px] px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-600 font-bold">
+                            A → B → C
+                          </span>
+                        </div>
+
+                        <div className="space-y-3">
+                          {stepVisual.map((step, index) => {
+                            const nextStep = stepVisual[index + 1];
+                            return (
+                              <div key={step.key} className="flex items-start gap-3">
+                                <div className="flex flex-col items-center shrink-0">
+                                  <div
+                                    className={`h-10 w-10 rounded-full border-2 flex items-center justify-center text-sm font-black transition-all ${
+                                      step.active
+                                        ? step.current
+                                          ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-200"
+                                          : "border-emerald-500 bg-emerald-500 text-white"
+                                        : "border-slate-300 bg-white text-slate-400"
+                                    }`}
+                                  >
+                                    {step.shortLabel}
+                                  </div>
+                                  {nextStep ? (
+                                    <div
+                                      className={`w-1 min-h-[34px] rounded-full mt-1 ${
+                                        step.active && nextStep.active ? "bg-emerald-400" : "bg-slate-200"
+                                      }`}
+                                    />
+                                  ) : null}
+                                </div>
+
+                                <div className="pt-1 min-w-0">
+                                  <p
+                                    className={`text-sm font-extrabold ${
+                                      step.current
+                                        ? "text-slate-900"
+                                        : step.active
+                                        ? "text-slate-700"
+                                        : "text-slate-500"
+                                    }`}
+                                  >
+                                    {step.title}
+                                  </p>
+                                  <p className="text-xs text-slate-500 mt-1 leading-relaxed">
+                                    {step.subtitle}
+                                  </p>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </div>
 
                     <div className="flex justify-end gap-2 mt-3 flex-wrap">
                       {assignedId ? (
