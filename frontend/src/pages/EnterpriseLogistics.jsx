@@ -566,6 +566,9 @@ const EnterpriseLogistics = () => {
 
   const [routeSummaryLoading, setRouteSummaryLoading] = useState(false);
   const [routeSummaryDate, setRouteSummaryDate] = useState(todayDate);
+  const [routeStartTime, setRouteStartTime] = useState("00:00");
+  const [routeEndTime, setRouteEndTime] = useState("23:59");
+  const [routeAuditMode, setRouteAuditMode] = useState(false);
   const [selectedDriverRouteSummary, setSelectedDriverRouteSummary] = useState(null);
   const [mapViewMode, setMapViewMode] = useState("current");
 
@@ -2416,6 +2419,9 @@ const EnterpriseLogistics = () => {
       return;
     }
 
+    setRouteAuditMode(false);
+    setRouteStartTime("00:00");
+    setRouteEndTime("23:59");
     setMapViewMode("day");
     await fetchDrivers(true);
     await fetchDeliveries(true);
@@ -2428,7 +2434,48 @@ const EnterpriseLogistics = () => {
     fetchSelectedDriverRouteSummary,
   ]);
 
+  const handleShowFilteredRoute = useCallback(async () => {
+    if (!selectedDriver?._id && !selectedDriver?.id) {
+      alert("Primero selecciona un conductor.");
+      return;
+    }
+
+    if (!routeSummaryDate) {
+      alert("Selecciona una fecha para consultar el recorrido.");
+      return;
+    }
+
+    if (!routeStartTime || !routeEndTime) {
+      alert("Selecciona hora inicial y hora final.");
+      return;
+    }
+
+    const start = new Date(`${routeSummaryDate}T${routeStartTime}:00`);
+    const end = new Date(`${routeSummaryDate}T${routeEndTime}:59`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+      alert("El rango horario no es válido. La hora inicial debe ser menor que la hora final.");
+      return;
+    }
+
+    setRouteAuditMode(true);
+    setMapViewMode("day");
+    await fetchDrivers(true);
+    await fetchDeliveries(true);
+    await fetchSelectedDriverRouteSummary({ silent: false });
+  }, [
+    selectedDriver?._id,
+    selectedDriver?.id,
+    routeSummaryDate,
+    routeStartTime,
+    routeEndTime,
+    fetchDrivers,
+    fetchDeliveries,
+    fetchSelectedDriverRouteSummary,
+  ]);
+
   const handleShowCurrentLocation = useCallback(async () => {
+    setRouteAuditMode(false);
     setMapViewMode("current");
     setSelectedDriverRouteSummary(null);
 
@@ -2471,12 +2518,169 @@ const EnterpriseLogistics = () => {
     return `${hours} h ${minutes} min`;
   };
 
+  const getRoutePointTimestamp = (point) => {
+    const raw =
+      point?.createdAt ||
+      point?.recordedAt ||
+      point?.timestamp ||
+      point?.updatedAt ||
+      point?.time ||
+      "";
+
+    if (!raw) return null;
+
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
+  };
+
+  const normalizeRoutePointForAudit = (point) => {
+    const lat = Number(point?.lat ?? point?.latitude ?? point?.location?.lat);
+    const lng = Number(point?.lng ?? point?.longitude ?? point?.location?.lng);
+    const timestamp = getRoutePointTimestamp(point);
+
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !timestamp) return null;
+
+    return {
+      ...point,
+      lat,
+      lng,
+      timestamp,
+    };
+  };
+
+  const calculateDistanceKm = (a, b) => {
+    if (!a || !b) return 0;
+
+    const toRad = (value) => (Number(value) * Math.PI) / 180;
+    const earthKm = 6371;
+    const dLat = toRad(b.lat - a.lat);
+    const dLng = toRad(b.lng - a.lng);
+    const lat1 = toRad(a.lat);
+    const lat2 = toRad(b.lat);
+
+    const h =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+
+    return 2 * earthKm * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+  };
+
   const routeSummary = selectedDriverRouteSummary?.summary || null;
   const routeShift = routeSummary?.shift || null;
   const routeDeliveries = routeSummary?.deliveries || null;
   const routePoints = Array.isArray(routeSummary?.routePoints)
     ? routeSummary.routePoints
     : [];
+
+  const routeAuditWindow = useMemo(() => {
+    const start = new Date(`${routeSummaryDate}T${routeStartTime || "00:00"}:00`);
+    const end = new Date(`${routeSummaryDate}T${routeEndTime || "23:59"}:59`);
+
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || start >= end) {
+      return null;
+    }
+
+    return { start, end };
+  }, [routeSummaryDate, routeStartTime, routeEndTime]);
+
+  const normalizedRoutePoints = useMemo(() => {
+    return (Array.isArray(routePoints) ? routePoints : [])
+      .map(normalizeRoutePointForAudit)
+      .filter(Boolean)
+      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }, [routePoints]);
+
+  const routePointsForMap = useMemo(() => {
+    if (!routeAuditMode || !routeAuditWindow) return normalizedRoutePoints;
+
+    return normalizedRoutePoints.filter((point) => {
+      const time = point.timestamp.getTime();
+      return time >= routeAuditWindow.start.getTime() && time <= routeAuditWindow.end.getTime();
+    });
+  }, [normalizedRoutePoints, routeAuditMode, routeAuditWindow]);
+
+  const routeAuditMetrics = useMemo(() => {
+    const points = routePointsForMap;
+    let distanceKm = 0;
+
+    for (let i = 1; i < points.length; i += 1) {
+      const segmentDistance = calculateDistanceKm(points[i - 1], points[i]);
+      if (Number.isFinite(segmentDistance) && segmentDistance < 5) {
+        distanceKm += segmentDistance;
+      }
+    }
+
+    const firstPoint = points[0] || null;
+    const lastPoint = points[points.length - 1] || null;
+    const operationSeconds =
+      firstPoint && lastPoint
+        ? Math.max(0, Math.round((lastPoint.timestamp.getTime() - firstPoint.timestamp.getTime()) / 1000))
+        : 0;
+
+    const possibleStops = [];
+    let stopStart = null;
+    let lastStopPoint = null;
+
+    points.forEach((point, index) => {
+      if (index === 0) return;
+
+      const previous = points[index - 1];
+      const distanceMeters = calculateDistanceKm(previous, point) * 1000;
+      const minutesBetween = Math.max(
+        0,
+        (point.timestamp.getTime() - previous.timestamp.getTime()) / 60000
+      );
+
+      if (distanceMeters <= 80 && minutesBetween >= 5) {
+        if (!stopStart) stopStart = previous;
+        lastStopPoint = point;
+      } else if (stopStart && lastStopPoint) {
+        const stoppedMinutes = Math.round(
+          (lastStopPoint.timestamp.getTime() - stopStart.timestamp.getTime()) / 60000
+        );
+
+        if (stoppedMinutes >= 8) {
+          possibleStops.push({
+            lat: stopStart.lat,
+            lng: stopStart.lng,
+            start: stopStart.timestamp,
+            end: lastStopPoint.timestamp,
+            minutes: stoppedMinutes,
+          });
+        }
+
+        stopStart = null;
+        lastStopPoint = null;
+      }
+    });
+
+    if (stopStart && lastStopPoint) {
+      const stoppedMinutes = Math.round(
+        (lastStopPoint.timestamp.getTime() - stopStart.timestamp.getTime()) / 60000
+      );
+
+      if (stoppedMinutes >= 8) {
+        possibleStops.push({
+          lat: stopStart.lat,
+          lng: stopStart.lng,
+          start: stopStart.timestamp,
+          end: lastStopPoint.timestamp,
+          minutes: stoppedMinutes,
+        });
+      }
+    }
+
+    return {
+      pointsCount: points.length,
+      distanceKm,
+      firstPoint,
+      lastPoint,
+      operationSeconds,
+      possibleStops: possibleStops.slice(0, 8),
+      recentPoints: points.slice(-6).reverse(),
+    };
+  }, [routePointsForMap]);
 
   const totalUnreadDrivers = Object.keys(driverChatAlerts).length;
 
@@ -3679,7 +3883,7 @@ const EnterpriseLogistics = () => {
               selectedDriver={selectedDriver}
               activeOrLastDelivery={activeOrLastDelivery}
               driverPendingDeliveriesCount={selectedDriverPendingDeliveries.length}
-              routePoints={routePoints}
+              routePoints={routePointsForMap}
               mapViewMode={mapViewMode}
             />
 
@@ -3739,57 +3943,115 @@ const EnterpriseLogistics = () => {
           <div className="bg-white rounded-2xl shadow p-5 mb-5">
             <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
               <div>
+                <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 border border-blue-100 px-3 py-1 mb-3">
+                  <span className="h-2 w-2 rounded-full bg-blue-600" />
+                  <span className="text-xs font-black text-blue-700 uppercase tracking-[0.16em]">
+                    Auditoría GPS
+                  </span>
+                </div>
                 <h2 className="text-xl font-bold text-gray-900">
                   Recorrido total del conductor
                 </h2>
                 <p className="text-sm text-gray-500 mt-1">
-                  Jornada, puntos GPS y tiempos reales acumulados del día.
+                  Supervisa el trazado del día, revisa horarios específicos y detecta posibles paradas.
                 </p>
               </div>
 
-              <div className="flex gap-3 flex-wrap">
-                <input
-                  type="date"
-                  value={routeSummaryDate}
-                  onChange={(e) => setRouteSummaryDate(e.target.value)}
-                  className="bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
-                />
+              <div className="w-full lg:w-auto">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                  <label className="block">
+                    <span className="block text-[11px] font-black text-gray-500 uppercase tracking-[0.14em] mb-1">
+                      Fecha
+                    </span>
+                    <input
+                      type="date"
+                      value={routeSummaryDate}
+                      onChange={(e) => setRouteSummaryDate(e.target.value)}
+                      className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                    />
+                  </label>
 
-                <button
-                  type="button"
-                  onClick={handleShowDayRoute}
-                  disabled={routeSummaryLoading}
-                  className={`px-4 py-3 rounded-xl font-semibold ${
-                    mapViewMode === "day"
-                      ? "bg-emerald-600 text-white"
-                      : "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                  } ${routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""}`}
-                >
-                  {routeSummaryLoading ? "Cargando recorrido..." : "Ver recorrido del día"}
-                </button>
+                  <label className="block">
+                    <span className="block text-[11px] font-black text-gray-500 uppercase tracking-[0.14em] mb-1">
+                      Desde
+                    </span>
+                    <input
+                      type="time"
+                      value={routeStartTime}
+                      onChange={(e) => {
+                        setRouteStartTime(e.target.value);
+                        setRouteAuditMode(true);
+                      }}
+                      className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                    />
+                  </label>
 
-                <button
-                  type="button"
-                  onClick={handleShowCurrentLocation}
-                  className={`px-4 py-3 rounded-xl font-semibold ${
-                    mapViewMode === "current"
-                      ? "bg-blue-600 text-white"
-                      : "bg-blue-100 text-blue-700 border border-blue-200"
-                  }`}
-                >
-                  Ver ubicación actual
-                </button>
+                  <label className="block">
+                    <span className="block text-[11px] font-black text-gray-500 uppercase tracking-[0.14em] mb-1">
+                      Hasta
+                    </span>
+                    <input
+                      type="time"
+                      value={routeEndTime}
+                      onChange={(e) => {
+                        setRouteEndTime(e.target.value);
+                        setRouteAuditMode(true);
+                      }}
+                      className="w-full bg-gray-100 rounded-xl px-4 py-3 outline-none border border-gray-200"
+                    />
+                  </label>
+                </div>
 
-                <button
-                  type="button"
-                  onClick={() => fetchSelectedDriverRouteSummary({ silent: false })}
-                  disabled={routeSummaryLoading}
-                  className={`bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold ${
-                    routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""
-                  }`}
-                >
-                  {routeSummaryLoading ? "Actualizando..." : "Actualizar recorrido"}
-                </button>
+                <div className="flex gap-3 flex-wrap justify-start lg:justify-end">
+                  <button
+                    type="button"
+                    onClick={handleShowDayRoute}
+                    disabled={routeSummaryLoading}
+                    className={`px-4 py-3 rounded-xl font-semibold ${
+                      mapViewMode === "day" && !routeAuditMode
+                        ? "bg-emerald-600 text-white"
+                        : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                    } ${routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    {routeSummaryLoading ? "Cargando..." : "Ver día completo"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShowFilteredRoute}
+                    disabled={routeSummaryLoading}
+                    className={`px-4 py-3 rounded-xl font-semibold ${
+                      mapViewMode === "day" && routeAuditMode
+                        ? "bg-purple-600 text-white"
+                        : "bg-purple-100 text-purple-700 border border-purple-200"
+                    } ${routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    Ver rango horario
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={handleShowCurrentLocation}
+                    className={`px-4 py-3 rounded-xl font-semibold ${
+                      mapViewMode === "current"
+                        ? "bg-blue-600 text-white"
+                        : "bg-blue-100 text-blue-700 border border-blue-200"
+                    }`}
+                  >
+                    Ubicación actual
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => fetchSelectedDriverRouteSummary({ silent: false })}
+                    disabled={routeSummaryLoading}
+                    className={`bg-slate-800 text-white px-4 py-3 rounded-xl font-semibold ${
+                      routeSummaryLoading ? "opacity-60 cursor-not-allowed" : ""
+                    }`}
+                  >
+                    {routeSummaryLoading ? "Actualizando..." : "Actualizar"}
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -3876,15 +4138,151 @@ const EnterpriseLogistics = () => {
                   </div>
                 </div>
 
-                <div className="rounded-xl border border-gray-200 bg-gray-50 p-4">
-                  <p className="text-sm font-semibold text-gray-700 mb-2">
-                    Puntos registrados en la ruta
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    {routePoints.length > 0
-                      ? `Se registraron ${routePoints.length} puntos GPS para esta jornada.`
-                      : "Aún no hay puntos GPS guardados para esta jornada."}
-                  </p>
+                <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 mb-5">
+                  <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-3 mb-4">
+                    <div>
+                      <p className="text-sm font-black text-slate-800">
+                        Resumen del recorrido mostrado en el mapa
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {routeAuditMode
+                          ? `Filtro aplicado: ${routeSummaryDate} de ${routeStartTime} a ${routeEndTime}`
+                          : `Mostrando recorrido completo del ${routeSummaryDate}`}
+                      </p>
+                    </div>
+                    <span className={`inline-flex w-fit px-3 py-1 rounded-full text-xs font-black ${
+                      routeAuditMode
+                        ? "bg-purple-100 text-purple-700 border border-purple-200"
+                        : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                    }`}>
+                      {routeAuditMode ? "Modo auditoría por horas" : "Día completo"}
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-3">
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 font-bold">Km estimados</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">
+                        {routeAuditMetrics.distanceKm.toFixed(2)} km
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 font-bold">Puntos filtrados</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">
+                        {routeAuditMetrics.pointsCount}
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 font-bold">Primera señal</p>
+                      <p className="text-sm font-black text-slate-900 mt-1">
+                        {routeAuditMetrics.firstPoint
+                          ? routeAuditMetrics.firstPoint.timestamp.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "Sin dato"}
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 font-bold">Última señal</p>
+                      <p className="text-sm font-black text-slate-900 mt-1">
+                        {routeAuditMetrics.lastPoint
+                          ? routeAuditMetrics.lastPoint.timestamp.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })
+                          : "Sin dato"}
+                      </p>
+                    </div>
+                    <div className="bg-white rounded-xl border border-slate-200 p-4">
+                      <p className="text-xs text-slate-500 font-bold">Posibles paradas</p>
+                      <p className="text-xl font-black text-slate-900 mt-1">
+                        {routeAuditMetrics.possibleStops.length}
+                      </p>
+                    </div>
+                  </div>
+
+                  {routeAuditMetrics.pointsCount === 0 ? (
+                    <div className="mt-4 rounded-xl bg-white border border-dashed border-slate-300 px-4 py-6 text-center">
+                      <p className="text-sm font-bold text-slate-700">
+                        No hay puntos GPS para el rango seleccionado.
+                      </p>
+                      <p className="text-xs text-slate-500 mt-1">
+                        Prueba ampliando la hora inicial y final, o revisa otro día.
+                      </p>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-sm font-black text-gray-900">Posibles paradas detectadas</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Se marcan cuando hay puntos muy cercanos durante varios minutos.
+                        </p>
+                      </div>
+                      <span className="text-xs font-black px-2 py-1 rounded-full bg-amber-100 text-amber-700">
+                        {routeAuditMetrics.possibleStops.length}
+                      </span>
+                    </div>
+
+                    {routeAuditMetrics.possibleStops.length === 0 ? (
+                      <p className="text-sm text-gray-500 rounded-xl bg-gray-50 border border-gray-100 p-4">
+                        No se detectaron paradas relevantes en este rango.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                        {routeAuditMetrics.possibleStops.map((stop, index) => (
+                          <div key={`${stop.lat}-${stop.lng}-${index}`} className="rounded-xl bg-amber-50 border border-amber-100 p-3">
+                            <p className="text-sm font-bold text-amber-800">
+                              Parada #{index + 1} · {stop.minutes} min aprox.
+                            </p>
+                            <p className="text-xs text-amber-700 mt-1">
+                              {stop.start.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} - {stop.end.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {Number(stop.lat).toFixed(6)}, {Number(stop.lng).toFixed(6)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-2xl border border-gray-200 bg-white p-4">
+                    <div className="flex items-center justify-between gap-3 mb-3">
+                      <div>
+                        <p className="text-sm font-black text-gray-900">Últimos puntos GPS del rango</p>
+                        <p className="text-xs text-gray-500 mt-1">
+                          Útil para revisar pérdida de señal o última zona reportada.
+                        </p>
+                      </div>
+                      <span className="text-xs font-black px-2 py-1 rounded-full bg-blue-100 text-blue-700">
+                        GPS
+                      </span>
+                    </div>
+
+                    {routeAuditMetrics.recentPoints.length === 0 ? (
+                      <p className="text-sm text-gray-500 rounded-xl bg-gray-50 border border-gray-100 p-4">
+                        No hay puntos para mostrar.
+                      </p>
+                    ) : (
+                      <div className="space-y-2 max-h-64 overflow-auto pr-1">
+                        {routeAuditMetrics.recentPoints.map((point, index) => (
+                          <div key={`${point.lat}-${point.lng}-${point.timestamp.getTime()}-${index}`} className="rounded-xl bg-gray-50 border border-gray-100 p-3">
+                            <p className="text-sm font-bold text-gray-800">
+                              {point.timestamp.toLocaleString()}
+                            </p>
+                            <p className="text-xs text-gray-500 mt-1">
+                              {Number(point.lat).toFixed(6)}, {Number(point.lng).toFixed(6)}
+                            </p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </>
             )}
