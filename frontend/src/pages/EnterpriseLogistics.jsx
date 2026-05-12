@@ -590,6 +590,7 @@ const EnterpriseLogistics = () => {
   );
 
   const [formData, setFormData] = useState(emptyFormData);
+  const [activeModule, setActiveModule] = useState("crear");
 
   const [smartRoutesLoading, setSmartRoutesLoading] = useState(false);
   const [smartRoutesOptimizing, setSmartRoutesOptimizing] = useState(false);
@@ -2429,28 +2430,76 @@ const EnterpriseLogistics = () => {
 
   const totalUnreadDrivers = Object.keys(driverChatAlerts).length;
 
+  const operationalDashboard = useMemo(() => {
+    const todayDeliveries = deliveries.filter(
+      (delivery) => getDeliveryReferenceDate(delivery) === todayDate
+    );
+
+    const todayCash = todayDeliveries
+      .filter((delivery) => String(delivery?.paymentMethod || "") === "Efectivo")
+      .reduce((total, delivery) => total + Number(delivery?.invoiceValue || 0), 0);
+
+    return {
+      totalToday: todayDeliveries.length,
+      pendingToday: todayDeliveries.filter((delivery) => delivery.status === "Pendiente").length,
+      inProgressToday: todayDeliveries.filter((delivery) => delivery.status === "En curso").length,
+      finishedToday: todayDeliveries.filter((delivery) => delivery.status === "Finalizada").length,
+      cashToday: todayCash,
+      driversOnline: drivers.filter((driver) => driver?.active !== false).length,
+    };
+  }, [deliveries, drivers, todayDate]);
+
+  const moneyCOP = (value) =>
+    Number(value || 0).toLocaleString("es-CO", {
+      style: "currency",
+      currency: "COP",
+      maximumFractionDigits: 0,
+    });
+
+  const moduleButtonClass = (moduleKey) =>
+    `group rounded-2xl border px-4 py-4 text-left transition-all duration-200 ${
+      activeModule === moduleKey
+        ? "border-blue-600 bg-blue-600 text-white shadow-lg shadow-blue-200 scale-[1.01]"
+        : "border-gray-200 bg-white text-gray-800 shadow-sm hover:-translate-y-0.5 hover:border-blue-200 hover:shadow-md"
+    }`;
+
+  const moduleBadgeClass = (moduleKey) =>
+    `h-11 w-11 rounded-2xl flex items-center justify-center text-xl ${
+      activeModule === moduleKey
+        ? "bg-white/20 text-white"
+        : "bg-blue-50 text-blue-700 group-hover:bg-blue-100"
+    }`;
+
   return (
-    <div className="min-h-screen bg-gray-100">
-      <div className="bg-blue-700 text-white px-6 py-5 shadow-lg">
-        <div className="flex items-center justify-between">
+    <div className="min-h-screen bg-slate-100">
+      <div className="relative overflow-hidden bg-gradient-to-br from-slate-950 via-blue-950 to-blue-700 text-white px-5 md:px-8 py-7 shadow-xl">
+        <div className="absolute -right-16 -top-16 h-56 w-56 rounded-full bg-white/10 blur-2xl" />
+        <div className="absolute left-1/3 bottom-0 h-28 w-28 rounded-full bg-blue-300/10 blur-xl" />
+
+        <div className="relative flex flex-col gap-5 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <h1 className="text-2xl font-bold">Panel de Logística</h1>
-            <p className="text-sm text-blue-100 mt-1">
-              Asigna pedidos y supervisa conductores en operación
+            <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-bold text-blue-100">
+              🚚 Central Go Empresas
+            </div>
+            <h1 className="mt-3 text-2xl md:text-4xl font-black tracking-tight">
+              Panel logístico operativo
+            </h1>
+            <p className="text-sm md:text-base text-blue-100 mt-2 max-w-3xl">
+              Controla entregas, rutas inteligentes, conductores, seguimiento en vivo e historial desde un panel más limpio y profesional.
             </p>
           </div>
 
           <div className="flex gap-2 flex-wrap">
             <Link
               to="/enterprise-clients"
-              className="bg-blue-900 text-white px-4 py-2 rounded-xl font-semibold"
+              className="bg-white/10 hover:bg-white/20 text-white px-4 py-2 rounded-xl font-bold border border-white/15"
             >
               Clientes
             </Link>
 
             <Link
               to="/enterprise-dashboard"
-              className="bg-white text-blue-700 px-4 py-2 rounded-xl font-semibold"
+              className="bg-white text-blue-700 px-4 py-2 rounded-xl font-bold shadow"
             >
               Volver
             </Link>
@@ -2458,7 +2507,7 @@ const EnterpriseLogistics = () => {
         </div>
       </div>
 
-      <div className="p-5">
+      <div className="p-4 md:p-6 max-w-[1600px] mx-auto">
         {globalIncomingBanner ? (
           <div className="mb-5 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-4 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
@@ -2494,14 +2543,144 @@ const EnterpriseLogistics = () => {
           </div>
         ) : null}
 
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
+        <div className="mb-5 grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          <div className="rounded-3xl border border-blue-100 bg-white p-4 shadow-sm">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-gray-500">Pedidos hoy</p>
+            <p className="mt-2 text-3xl font-black text-gray-900">{operationalDashboard.totalToday}</p>
+            <p className="mt-1 text-xs text-gray-500">Total creados</p>
+          </div>
+
+          <div className="rounded-3xl border border-amber-100 bg-amber-50 p-4 shadow-sm">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-amber-700">Pendientes</p>
+            <p className="mt-2 text-3xl font-black text-amber-700">{operationalDashboard.pendingToday}</p>
+            <p className="mt-1 text-xs text-amber-700/80">Por iniciar</p>
+          </div>
+
+          <div className="rounded-3xl border border-blue-100 bg-blue-50 p-4 shadow-sm">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-blue-700">En curso</p>
+            <p className="mt-2 text-3xl font-black text-blue-700">{operationalDashboard.inProgressToday}</p>
+            <p className="mt-1 text-xs text-blue-700/80">Rodando ahora</p>
+          </div>
+
+          <div className="rounded-3xl border border-emerald-100 bg-emerald-50 p-4 shadow-sm">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-emerald-700">Finalizadas</p>
+            <p className="mt-2 text-3xl font-black text-emerald-700">{operationalDashboard.finishedToday}</p>
+            <p className="mt-1 text-xs text-emerald-700/80">Entregadas hoy</p>
+          </div>
+
+          <div className="rounded-3xl border border-purple-100 bg-purple-50 p-4 shadow-sm">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-purple-700">Conductores</p>
+            <p className="mt-2 text-3xl font-black text-purple-700">{operationalDashboard.driversOnline}</p>
+            <p className="mt-1 text-xs text-purple-700/80">Activos</p>
+          </div>
+
+          <div className="rounded-3xl border border-slate-200 bg-slate-900 p-4 shadow-sm text-white">
+            <p className="text-xs font-extrabold uppercase tracking-wide text-slate-300">Efectivo hoy</p>
+            <p className="mt-2 text-xl font-black">{moneyCOP(operationalDashboard.cashToday)}</p>
+            <p className="mt-1 text-xs text-slate-300">Control recaudo</p>
+          </div>
+        </div>
+
+        <div className="mb-5 rounded-3xl border border-gray-200 bg-white p-4 shadow-sm">
+          <div className="flex flex-col gap-2 md:flex-row md:items-end md:justify-between mb-4">
+            <div>
+              <h2 className="text-xl font-black text-gray-900">Centro de operación</h2>
+              <p className="text-sm text-gray-500">
+                Abre solo el módulo que necesitas y evita saturar la pantalla.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                fetchDrivers(true);
+                fetchDeliveries(true);
+                fetchClients(true);
+              }}
+              className="rounded-xl bg-slate-900 px-4 py-3 text-sm font-bold text-white hover:bg-slate-800"
+            >
+              Actualizar datos
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+            <button
+              type="button"
+              onClick={() => setActiveModule("crear")}
+              className={moduleButtonClass("crear")}
+            >
+              <div className="flex items-center gap-3">
+                <span className={moduleBadgeClass("crear")}>➕</span>
+                <span>
+                  <span className="block text-base font-black">Crear entrega</span>
+                  <span className={`block text-xs ${activeModule === "crear" ? "text-blue-100" : "text-gray-500"}`}>
+                    Registrar factura y asignar conductor o ruta.
+                  </span>
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule("rutas")}
+              className={moduleButtonClass("rutas")}
+            >
+              <div className="flex items-center gap-3">
+                <span className={moduleBadgeClass("rutas")}>🧠</span>
+                <span>
+                  <span className="block text-base font-black">Rutas inteligentes</span>
+                  <span className={`block text-xs ${activeModule === "rutas" ? "text-blue-100" : "text-gray-500"}`}>
+                    Optimizar, recalcular y asignar rutas.
+                  </span>
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule("seguimiento")}
+              className={moduleButtonClass("seguimiento")}
+            >
+              <div className="flex items-center gap-3">
+                <span className={moduleBadgeClass("seguimiento")}>📍</span>
+                <span>
+                  <span className="block text-base font-black">
+                    Seguimiento {totalUnreadDrivers > 0 ? `(${totalUnreadDrivers})` : ""}
+                  </span>
+                  <span className={`block text-xs ${activeModule === "seguimiento" ? "text-blue-100" : "text-gray-500"}`}>
+                    Conductores, mapa, chat y recorrido.
+                  </span>
+                </span>
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveModule("historial")}
+              className={moduleButtonClass("historial")}
+            >
+              <div className="flex items-center gap-3">
+                <span className={moduleBadgeClass("historial")}>📋</span>
+                <span>
+                  <span className="block text-base font-black">Historial</span>
+                  <span className={`block text-xs ${activeModule === "historial" ? "text-blue-100" : "text-gray-500"}`}>
+                    Filtros por fecha, estado y conductor.
+                  </span>
+                </span>
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {activeModule === "crear" ? (
+        <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 mb-5">
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <div>
               <h2 className="text-xl font-bold text-gray-900">
                 Crear nueva entrega
               </h2>
               <p className="text-sm text-gray-500 mt-1">
-                Selecciona un cliente y el sistema autollena la información principal.
+                Registra la factura, selecciona cliente y decide si se asigna de inmediato o queda para ruta inteligente.
               </p>
             </div>
 
@@ -2671,7 +2850,7 @@ const EnterpriseLogistics = () => {
             <button
               type="submit"
               disabled={savingDelivery}
-              className="w-full bg-blue-600 text-white py-3 rounded-xl text-lg font-semibold disabled:opacity-60"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl text-lg font-extrabold disabled:opacity-60 shadow"
             >
               {savingDelivery
                 ? "Guardando..."
@@ -2681,7 +2860,9 @@ const EnterpriseLogistics = () => {
             </button>
           </form>
         </div>
+        ) : null}
 
+        {activeModule === "rutas" ? (
         <div
           id="rutas-inteligentes"
           className="relative overflow-hidden rounded-3xl border border-blue-100 bg-white shadow p-5 mb-5"
@@ -3302,8 +3483,13 @@ const EnterpriseLogistics = () => {
               </div>
             ) : null}
           </div>
+        </div>
+        ) : null}
 
-        <div className="bg-white rounded-2xl shadow p-5 mb-5">
+        {activeModule === "seguimiento" ? (
+        <>
+
+        <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5 mb-5">
           <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
             <h2 className="text-xl font-bold text-gray-900">
               Supervisar por conductor
@@ -3664,8 +3850,11 @@ const EnterpriseLogistics = () => {
             />
           </div>
         ) : null}
+        </>
+        ) : null}
 
-        <div className="bg-white rounded-2xl shadow p-5">
+        {activeModule === "historial" ? (
+        <div className="bg-white rounded-3xl border border-gray-200 shadow-sm p-5">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-4 mb-4">
             <div>
               <h2 className="text-xl font-bold text-gray-900">
@@ -3901,8 +4090,8 @@ const EnterpriseLogistics = () => {
             </div>
           )}
         </div>
+        ) : null}
       </div>
-    </div>
     </div>
   );
 };
