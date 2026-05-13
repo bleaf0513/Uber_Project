@@ -192,8 +192,6 @@ const EnterpriseDriverMap = ({
   const mapInstanceRef = useRef(null);
   const driverMarkerRef = useRef(null);
   const directionsRendererRef = useRef(null);
-  const fallbackRoutePolylineRef = useRef(null);
-  const fallbackDestinationMarkerRef = useRef(null);
   const geocoderRef = useRef(null);
   const watchIdRef = useRef(null);
   const lastSignatureRef = useRef("");
@@ -205,6 +203,7 @@ const EnterpriseDriverMap = ({
   const lastPersistedAtRef = useRef(0);
 
   const [geoError, setGeoError] = useState("");
+  const [routeWarning, setRouteWarning] = useState("");
   const [isTracking, setIsTracking] = useState(false);
   const [routeInfo, setRouteInfo] = useState({
     orderedStops: [],
@@ -253,48 +252,11 @@ const EnterpriseDriverMap = ({
   }, []);
 
 
-  const clearFallbackRoute = useCallback(() => {
-    if (fallbackRoutePolylineRef.current) {
-      fallbackRoutePolylineRef.current.setMap(null);
-      fallbackRoutePolylineRef.current = null;
-    }
-
-    if (fallbackDestinationMarkerRef.current) {
-      fallbackDestinationMarkerRef.current.setMap(null);
-      fallbackDestinationMarkerRef.current = null;
+  const clearMapRoute = useCallback(() => {
+    if (directionsRendererRef.current) {
+      directionsRendererRef.current.set("directions", null);
     }
   }, []);
-
-  const drawFallbackRoute = useCallback((originCoords, destinationCoords, label = "Destino activo") => {
-    if (!mapInstanceRef.current || !window.google?.maps) return;
-
-    clearFallbackRoute();
-
-    fallbackRoutePolylineRef.current = new window.google.maps.Polyline({
-      path: [originCoords, destinationCoords],
-      geodesic: true,
-      strokeColor: "#2563eb",
-      strokeOpacity: 0.9,
-      strokeWeight: 5,
-      map: mapInstanceRef.current,
-    });
-
-    fallbackDestinationMarkerRef.current = new window.google.maps.Marker({
-      map: mapInstanceRef.current,
-      position: destinationCoords,
-      title: label,
-      label: {
-        text: "D",
-        color: "#ffffff",
-        fontWeight: "bold",
-      },
-    });
-
-    const bounds = new window.google.maps.LatLngBounds();
-    bounds.extend(originCoords);
-    bounds.extend(destinationCoords);
-    mapInstanceRef.current.fitBounds(bounds);
-  }, [clearFallbackRoute]);
 
   const persistDriverLocation = useCallback(
     async (coords, meta = {}) => {
@@ -592,7 +554,9 @@ const EnterpriseDriverMap = ({
     const driverLocation = selectedDriver?.currentLocation;
     if (!driverLocation?.lat || !driverLocation?.lng) {
       directionsRendererRef.current.set("directions", null);
-      clearFallbackRoute();
+      clearMapRoute();
+      setRouteWarning("");
+
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
@@ -609,8 +573,10 @@ const EnterpriseDriverMap = ({
 
     if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
-      clearFallbackRoute();
+      clearMapRoute();
       lastSignatureRef.current = "";
+
+      setRouteWarning("");
 
       setRouteInfo({
         orderedStops: [],
@@ -693,73 +659,109 @@ const EnterpriseDriverMap = ({
         if (buildId !== routeBuildIdRef.current) return;
 
         const directionsService = new window.google.maps.DirectionsService();
-        const destination = activeRouteStop.routeLocation || activeRouteStop.formattedAddress || activeRouteStop.address;
 
-        directionsService.route(
-          {
-            origin: originCoords,
-            destination,
-            waypoints: [],
-            optimizeWaypoints: false,
-            travelMode: window.google.maps.TravelMode.DRIVING,
-          },
-          (result, status) => {
-            if (buildId !== routeBuildIdRef.current) return;
+        const destinationCandidates = [
+          activeRouteStop.formattedAddress,
+          normalizeColombiaAddress(activeRouteStop.address),
+          activeRouteStop.routeLocation,
+        ].filter(Boolean);
 
-            if (status === "OK" && result) {
-              clearFallbackRoute();
-              directionsRendererRef.current.setDirections(result);
-
-              const route = result.routes?.[0];
-              const legs = route?.legs || [];
-
-              const totalDistanceMeters = legs.reduce(
-                (sum, leg) => sum + (leg.distance?.value || 0),
-                0
-              );
-
-              const totalDurationSeconds = legs.reduce(
-                (sum, leg) => sum + (leg.duration?.value || 0),
-                0
-              );
-
-              const totalKm = (totalDistanceMeters / 1000).toFixed(1);
-              const totalMin = Math.round(totalDurationSeconds / 60);
-
-              setRouteInfo({
-                orderedStops: [activeRouteStop],
-                totalStops: 1,
-                totalDistanceText: `${totalKm} km`,
-                totalDurationText:
-                  totalMin >= 60
-                    ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
-                    : `${totalMin} min`,
-              });
-            } else {
-              console.error("Error trazando la ruta activa:", status);
-              directionsRendererRef.current.set("directions", null);
-
-              if (activeRouteStop.coords) {
-                drawFallbackRoute(
-                  originCoords,
-                  activeRouteStop.coords,
-                  activeRouteStop.clientName || "Destino activo"
-                );
-              }
-
-              setRouteInfo({
-                orderedStops: [activeRouteStop],
-                totalStops: 1,
-                totalDistanceText: "",
-                totalDurationText: "",
-              });
-            }
+        const uniqueDestinationCandidates = [];
+        destinationCandidates.forEach((candidate) => {
+          const key = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
+          if (!uniqueDestinationCandidates.some((item) => item.key === key)) {
+            uniqueDestinationCandidates.push({ key, value: candidate });
           }
+        });
+
+        const requestDirections = (destination) =>
+          new Promise((resolve, reject) => {
+            directionsService.route(
+              {
+                origin: originCoords,
+                destination,
+                waypoints: [],
+                optimizeWaypoints: false,
+                travelMode: window.google.maps.TravelMode.DRIVING,
+                region: "co",
+              },
+              (result, status) => {
+                if (status === "OK" && result) {
+                  resolve(result);
+                } else {
+                  reject(new Error(status || "UNKNOWN_ERROR"));
+                }
+              }
+            );
+          });
+
+        let directionsResult = null;
+        let lastDirectionsError = null;
+
+        for (const candidate of uniqueDestinationCandidates) {
+          try {
+            directionsResult = await requestDirections(candidate.value);
+            break;
+          } catch (error) {
+            lastDirectionsError = error;
+            console.warn("Google Directions no pudo trazar con candidato:", candidate.value, error.message);
+          }
+        }
+
+        if (buildId !== routeBuildIdRef.current) return;
+
+        if (!directionsResult) {
+          clearMapRoute();
+          setRouteWarning(
+            "Google no logró trazar una ruta por calles para esta entrega. Revisa que la dirección esté bien geocodificada o abre Waze/Maps."
+          );
+
+          console.error("Error trazando ruta activa por calles:", lastDirectionsError?.message || "Sin detalle");
+
+          setRouteInfo({
+            orderedStops: [activeRouteStop],
+            totalStops: 1,
+            totalDistanceText: "",
+            totalDurationText: "",
+          });
+
+          return;
+        }
+
+        setRouteWarning("");
+        directionsRendererRef.current.setDirections(directionsResult);
+
+        const route = directionsResult.routes?.[0];
+        const legs = route?.legs || [];
+
+        const totalDistanceMeters = legs.reduce(
+          (sum, leg) => sum + (leg.distance?.value || 0),
+          0
         );
+
+        const totalDurationSeconds = legs.reduce(
+          (sum, leg) => sum + (leg.duration?.value || 0),
+          0
+        );
+
+        const totalKm = (totalDistanceMeters / 1000).toFixed(1);
+        const totalMin = Math.round(totalDurationSeconds / 60);
+
+        setRouteInfo({
+          orderedStops: [activeRouteStop],
+          totalStops: 1,
+          totalDistanceText: `${totalKm} km`,
+          totalDurationText:
+            totalMin >= 60
+              ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
+              : `${totalMin} min`,
+        });
       } catch (error) {
         console.error("Error construyendo ruta activa:", error);
-        directionsRendererRef.current.set("directions", null);
-        clearFallbackRoute();
+        clearMapRoute();
+        setRouteWarning(
+          error.message || "No se pudo preparar la ruta activa por calles."
+        );
 
         setRouteInfo({
           orderedStops: activeDelivery?.address ? [activeDelivery] : [],
@@ -776,8 +778,7 @@ const EnterpriseDriverMap = ({
     selectedDriver?.currentLocation,
     pendingStops,
     activeDelivery,
-    clearFallbackRoute,
-    drawFallbackRoute,
+    clearMapRoute,
   ]);
 
   const openExternalGoogleMaps = () => {
@@ -921,6 +922,12 @@ const EnterpriseDriverMap = ({
           {geoError ? (
             <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
               {geoError}
+            </div>
+          ) : null}
+
+          {routeWarning ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-semibold text-amber-800">
+              {routeWarning}
             </div>
           ) : null}
 
