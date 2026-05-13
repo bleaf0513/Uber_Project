@@ -294,7 +294,7 @@ const EnterpriseDriverMap = ({
     routeBoundsRef.current = null;
   }, []);
 
-  const createLetterMarker = useCallback(({ position, label, title, active = false }) => {
+  const createNumberMarker = useCallback(({ position, label, title, active = false }) => {
     if (!mapInstanceRef.current || !window.google?.maps) return null;
 
     return new window.google.maps.Marker({
@@ -479,7 +479,7 @@ const EnterpriseDriverMap = ({
       });
 
       // No usamos Geocoding ni Directions en el mapa interno para evitar costos.
-      // El mapa interno solo muestra puntos A, B, C... con coordenadas ya guardadas.
+      // El mapa interno solo muestra puntos numerados 1, 2, 3... con coordenadas ya guardadas.
       geocoderRef.current = null;
       directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
         suppressMarkers: true,
@@ -657,10 +657,10 @@ const EnterpriseDriverMap = ({
     const bounds = new window.google.maps.LatLngBounds();
     bounds.extend(originCoords);
 
-    const originMarker = createLetterMarker({
+    const originMarker = createNumberMarker({
       position: originCoords,
-      label: "A",
-      title: `A - Tu ubicación actual`,
+      label: "YO",
+      title: `Tu ubicación actual`,
       active: true,
     });
 
@@ -679,15 +679,15 @@ const EnterpriseDriverMap = ({
     const stopsWithoutCoords = pendingStops.length - stopsWithCoords.length;
 
     stopsWithCoords.forEach(({ delivery, index, coords }, markerIndex) => {
-      const letter = String.fromCharCode(66 + markerIndex); // B, C, D...
+      const stopNumber = String(markerIndex + 1);
       const isActiveStop =
         String(activeDelivery?._id || activeDelivery?.id || "") ===
         String(delivery?._id || delivery?.id || "");
 
-      const marker = createLetterMarker({
+      const marker = createNumberMarker({
         position: coords,
-        label: letter,
-        title: `${letter} - ${delivery?.clientName || "Entrega"}`,
+        label: stopNumber,
+        title: `Parada ${stopNumber} - ${delivery?.clientName || "Entrega"}`,
         active: isActiveStop,
       });
 
@@ -695,7 +695,7 @@ const EnterpriseDriverMap = ({
         const infoWindow = new window.google.maps.InfoWindow({
           content: `
             <div style="min-width:220px;padding:4px 6px;">
-              <div style="font-weight:800;margin-bottom:6px;">${letter} - ${delivery?.clientName || "Entrega"}</div>
+              <div style="font-weight:800;margin-bottom:6px;">Parada ${stopNumber} - ${delivery?.clientName || "Entrega"}</div>
               <div style="font-size:12px;margin-bottom:4px;">Estado: <b>${delivery?.status || "Pendiente"}</b></div>
               <div style="font-size:12px;margin-bottom:4px;">Factura: ${delivery?.invoiceNumber || "-"}</div>
               <div style="font-size:12px;">${getDeliveryAddressText(delivery) || "Sin dirección"}</div>
@@ -753,7 +753,7 @@ const EnterpriseDriverMap = ({
     activeDelivery,
     clearMapRoute,
     clearStopMarkers,
-    createLetterMarker,
+    createNumberMarker,
     getMapStopOrder,
   ]);
 
@@ -822,7 +822,7 @@ const EnterpriseDriverMap = ({
             </h3>
 
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Seguimiento GPS con puntos A, B, C... sin usar geocoding.
+              Seguimiento GPS con puntos numerados 1, 2, 3... sin usar geocoding.
             </p>
           </div>
 
