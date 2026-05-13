@@ -94,11 +94,53 @@ const getDeliveryDestinationForMap = (delivery) => {
   return address || null;
 };
 
+const getDeliveryCoordinateForMap = (delivery) => {
+  if (!delivery) return null;
+
+  const lat =
+    delivery?.deliveryLocation?.lat ??
+    delivery?.location?.lat ??
+    delivery?.lat ??
+    delivery?.clientLocation?.lat ??
+    null;
+
+  const lng =
+    delivery?.deliveryLocation?.lng ??
+    delivery?.location?.lng ??
+    delivery?.lng ??
+    delivery?.clientLocation?.lng ??
+    null;
+
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    return null;
+  }
+
+  return {
+    lat: Number(lat),
+    lng: Number(lng),
+  };
+};
+
+const getDeliveryMapOrder = (delivery, fallbackIndex = 0) => {
+  const possibleOrder =
+    delivery?.routeOrder ??
+    delivery?.smartRouteOrder ??
+    delivery?.optimizedOrder ??
+    delivery?.stopOrder ??
+    delivery?.sequence ??
+    delivery?.order ??
+    delivery?.position;
+
+  const numericOrder = Number(possibleOrder);
+  return Number.isFinite(numericOrder) ? numericOrder : fallbackIndex + 1;
+};
+
 const EnterpriseLogisticsDriverMap = ({
   selectedDriver,
   activeOrLastDelivery,
   driverPendingDeliveriesCount,
   routePoints = [],
+  routeStopDeliveries = [],
   mapViewMode = "current",
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
@@ -106,6 +148,7 @@ const EnterpriseLogisticsDriverMap = ({
   const mapRef = useRef(null);
   const mapInstanceRef = useRef(null);
   const markerRef = useRef(null);
+  const stopMarkersRef = useRef([]);
   const infoWindowRef = useRef(null);
   const directionsRendererRef = useRef(null);
   const lastCoordsRef = useRef(null);
@@ -115,6 +158,13 @@ const EnterpriseLogisticsDriverMap = ({
   const dayMarkersRef = useRef([]);
   const dayRouteSignatureRef = useRef("");
   const lastDriverIdRef = useRef("");
+
+  const clearStopMarkers = useCallback(() => {
+    if (stopMarkersRef.current.length > 0) {
+      stopMarkersRef.current.forEach((marker) => marker.setMap(null));
+      stopMarkersRef.current = [];
+    }
+  }, []);
 
   const clearDayRouteArtifacts = useCallback(() => {
     if (dayPolylineRef.current) {
@@ -178,8 +228,9 @@ const EnterpriseLogisticsDriverMap = ({
       }
 
       clearDayRouteArtifacts();
+      clearStopMarkers();
     }
-  }, [selectedDriver?._id, selectedDriver?.id, clearDayRouteArtifacts]);
+  }, [selectedDriver?._id, selectedDriver?.id, clearDayRouteArtifacts, clearStopMarkers]);
 
   useEffect(() => {
     if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
@@ -198,6 +249,7 @@ const EnterpriseLogisticsDriverMap = ({
       }
 
       clearDayRouteArtifacts();
+      clearStopMarkers();
 
       if (infoWindowRef.current) {
         infoWindowRef.current.close();
@@ -312,6 +364,90 @@ const EnterpriseLogisticsDriverMap = ({
     selectedDriver?.currentLocation?.updatedAt,
     driverPendingDeliveriesCount,
     clearDayRouteArtifacts,
+    clearStopMarkers,
+  ]);
+
+  useEffect(() => {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) return;
+
+    clearStopMarkers();
+
+    if (mapViewMode !== "current") return;
+
+    const deliveriesWithCoords = (Array.isArray(routeStopDeliveries)
+      ? routeStopDeliveries
+      : [])
+      .filter((delivery) => delivery && delivery.status !== "Finalizada")
+      .map((delivery, index) => ({
+        delivery,
+        index,
+        coords: getDeliveryCoordinateForMap(delivery),
+        order: getDeliveryMapOrder(delivery, index),
+      }))
+      .filter((item) => item.coords)
+      .sort((a, b) => {
+        if (a.order !== b.order) return a.order - b.order;
+        return a.index - b.index;
+      });
+
+    if (deliveriesWithCoords.length === 0) return;
+
+    const bounds = new window.google.maps.LatLngBounds();
+    let hasBounds = false;
+
+    const currentLat = Number(selectedDriver?.currentLocation?.lat);
+    const currentLng = Number(selectedDriver?.currentLocation?.lng);
+
+    if (Number.isFinite(currentLat) && Number.isFinite(currentLng)) {
+      bounds.extend({ lat: currentLat, lng: currentLng });
+      hasBounds = true;
+    }
+
+    stopMarkersRef.current = deliveriesWithCoords.map((item, positionIndex) => {
+      const delivery = item.delivery;
+      const labelNumber = String(positionIndex + 1);
+      bounds.extend(item.coords);
+      hasBounds = true;
+
+      return new window.google.maps.Marker({
+        map: mapInstanceRef.current,
+        position: item.coords,
+        label: {
+          text: labelNumber,
+          color: "#ffffff",
+          fontWeight: "bold",
+          fontSize: "14px",
+        },
+        title: `${labelNumber}. ${delivery?.clientName || "Parada"}`,
+      });
+    });
+
+    if (hasBounds) {
+      mapInstanceRef.current.fitBounds(bounds);
+
+      const fitListener = window.google.maps.event.addListenerOnce(
+        mapInstanceRef.current,
+        "bounds_changed",
+        () => {
+          if (mapInstanceRef.current.getZoom() > 16) {
+            mapInstanceRef.current.setZoom(16);
+          }
+        }
+      );
+
+      return () => {
+        if (fitListener) {
+          window.google.maps.event.removeListener(fitListener);
+        }
+      };
+    }
+  }, [
+    mapsApiLoaded,
+    mapViewMode,
+    routeStopDeliveries,
+    selectedDriver?.currentLocation?.lat,
+    selectedDriver?.currentLocation?.lng,
+    clearStopMarkers,
   ]);
 
   useEffect(() => {
@@ -336,7 +472,10 @@ const EnterpriseLogisticsDriverMap = ({
     const lng = Number(selectedDriver?.currentLocation?.lng);
     const activeRouteDelivery =
       activeOrLastDelivery?.status === "En curso" ? activeOrLastDelivery : null;
-    const destination = getDeliveryDestinationForMap(activeRouteDelivery);
+
+    // Para evitar geocoding/costos y líneas raras, solo intentamos ruta por calles
+    // cuando el pedido ya trae coordenadas guardadas.
+    const destination = getDeliveryCoordinateForMap(activeRouteDelivery);
 
     if (!Number.isFinite(lat) || !Number.isFinite(lng) || !destination) {
       directionsRendererRef.current.set("directions", null);
@@ -391,6 +530,7 @@ const EnterpriseLogisticsDriverMap = ({
     activeOrLastDelivery?.id,
     activeOrLastDelivery?.status,
     clearDayRouteArtifacts,
+    clearStopMarkers,
   ]);
 
   useEffect(() => {
@@ -400,6 +540,8 @@ const EnterpriseLogisticsDriverMap = ({
       clearDayRouteArtifacts();
       return;
     }
+
+    clearStopMarkers();
 
     if (directionsRendererRef.current) {
       directionsRendererRef.current.set("directions", null);
@@ -542,6 +684,7 @@ const EnterpriseLogisticsDriverMap = ({
   useEffect(() => {
     return () => {
       clearDayRouteArtifacts();
+      clearStopMarkers();
 
       if (directionsRendererRef.current) {
         directionsRendererRef.current.setMap(null);
@@ -555,7 +698,7 @@ const EnterpriseLogisticsDriverMap = ({
         infoWindowRef.current.close();
       }
     };
-  }, [clearDayRouteArtifacts]);
+  }, [clearDayRouteArtifacts, clearStopMarkers]);
 
   return (
     <div
@@ -801,7 +944,7 @@ const EnterpriseLogistics = () => {
     return [
       {
         key: "pending",
-        shortLabel: "A",
+        shortLabel: "1",
         title: "Pendiente",
         subtitle:
           delivery?.optimizationStatus === "pending"
@@ -812,7 +955,7 @@ const EnterpriseLogistics = () => {
       },
       {
         key: "progress",
-        shortLabel: "B",
+        shortLabel: "2",
         title: "En ruta",
         subtitle:
           delivery?.assignedDriverName ||
@@ -825,7 +968,7 @@ const EnterpriseLogistics = () => {
       },
       {
         key: "finished",
-        shortLabel: "C",
+        shortLabel: "3",
         title: "Entregado",
         subtitle: delivery?.finishedAt
           ? new Date(delivery.finishedAt).toLocaleTimeString([], {
@@ -4073,6 +4216,7 @@ const EnterpriseLogistics = () => {
               activeOrLastDelivery={activeOrLastDelivery}
               driverPendingDeliveriesCount={selectedDriverPendingDeliveries.length}
               routePoints={routePointsForMap}
+              routeStopDeliveries={selectedDriverPendingDeliveries}
               mapViewMode={mapViewMode}
             />
 
@@ -4728,7 +4872,7 @@ const EnterpriseLogistics = () => {
                             </h4>
                           </div>
                           <span className="text-[11px] px-2.5 py-1 rounded-full bg-white border border-slate-200 text-slate-600 font-bold">
-                            A → B → C
+                            1 → 2 → 3
                           </span>
                         </div>
 
