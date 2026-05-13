@@ -79,8 +79,60 @@ const getDeliveryAddressText = (delivery) => {
   return String(delivery?.address || "").trim();
 };
 
+const normalizeColombiaAddress = (address) => {
+  const clean = String(address || "").trim();
+  if (!clean) return "";
+
+  const lowered = clean.toLowerCase();
+  if (
+    lowered.includes("colombia") ||
+    lowered.includes("antioquia") ||
+    lowered.includes("medellín") ||
+    lowered.includes("medellin") ||
+    lowered.includes("itagüí") ||
+    lowered.includes("itagui") ||
+    lowered.includes("envigado") ||
+    lowered.includes("sabaneta")
+  ) {
+    return clean;
+  }
+
+  return `${clean}, Antioquia, Colombia`;
+};
+
+const getDeliveryCoordinates = (delivery) => {
+  const lat =
+    delivery?.deliveryLocation?.lat ??
+    delivery?.location?.lat ??
+    delivery?.coordinates?.lat ??
+    delivery?.lat ??
+    null;
+
+  const lng =
+    delivery?.deliveryLocation?.lng ??
+    delivery?.location?.lng ??
+    delivery?.coordinates?.lng ??
+    delivery?.lng ??
+    null;
+
+  if (!Number.isFinite(Number(lat)) || !Number.isFinite(Number(lng))) {
+    return null;
+  }
+
+  return {
+    lat: Number(lat),
+    lng: Number(lng),
+  };
+};
+
+const getDeliveryNavigationDestination = (delivery) => {
+  const coords = getDeliveryCoordinates(delivery);
+  if (coords) return `${coords.lat},${coords.lng}`;
+  return normalizeColombiaAddress(getDeliveryAddressText(delivery));
+};
+
 const buildGoogleMapsDeliveryUrl = (delivery, selectedDriver) => {
-  const destination = getDeliveryAddressText(delivery);
+  const destination = getDeliveryNavigationDestination(delivery);
 
   if (!destination) return "";
 
@@ -103,7 +155,7 @@ const buildGoogleMapsDeliveryUrl = (delivery, selectedDriver) => {
 };
 
 const buildWazeDeliveryUrl = (delivery) => {
-  const destination = getDeliveryAddressText(delivery);
+  const destination = getDeliveryNavigationDestination(delivery);
 
   if (!destination) return "";
 
@@ -140,6 +192,8 @@ const EnterpriseDriverMap = ({
   const mapInstanceRef = useRef(null);
   const driverMarkerRef = useRef(null);
   const directionsRendererRef = useRef(null);
+  const fallbackRoutePolylineRef = useRef(null);
+  const fallbackDestinationMarkerRef = useRef(null);
   const geocoderRef = useRef(null);
   const watchIdRef = useRef(null);
   const lastSignatureRef = useRef("");
@@ -164,23 +218,19 @@ const EnterpriseDriverMap = ({
   }, [selectedDriver]);
 
   const pendingStops = useMemo(() => {
-    const base = assignedDeliveries.filter(
-      (delivery) =>
-        delivery &&
-        delivery.status !== "Finalizada" &&
-        delivery.address &&
-        String(delivery.address).trim() !== ""
-    );
-
-    if (activeDelivery?._id || activeDelivery?.id) {
-      const activeId = String(activeDelivery._id || activeDelivery.id);
-      const current = base.find((d) => String(d._id || d.id) === activeId);
-      const others = base.filter((d) => String(d._id || d.id) !== activeId);
-      return current ? [current, ...others] : [activeDelivery, ...others];
+    if (!activeDelivery || activeDelivery.status !== "En curso") {
+      return [];
     }
 
-    return base;
-  }, [assignedDeliveries, activeDelivery]);
+    const hasAddress = Boolean(getDeliveryAddressText(activeDelivery));
+    const hasCoords = Boolean(getDeliveryCoordinates(activeDelivery));
+
+    if (!hasAddress && !hasCoords) {
+      return [];
+    }
+
+    return [activeDelivery];
+  }, [activeDelivery]);
 
   const updateDriverMarker = useCallback((coords) => {
     if (!mapInstanceRef.current || !window.google?.maps) return;
@@ -201,6 +251,50 @@ const EnterpriseDriverMap = ({
       );
     }
   }, []);
+
+
+  const clearFallbackRoute = useCallback(() => {
+    if (fallbackRoutePolylineRef.current) {
+      fallbackRoutePolylineRef.current.setMap(null);
+      fallbackRoutePolylineRef.current = null;
+    }
+
+    if (fallbackDestinationMarkerRef.current) {
+      fallbackDestinationMarkerRef.current.setMap(null);
+      fallbackDestinationMarkerRef.current = null;
+    }
+  }, []);
+
+  const drawFallbackRoute = useCallback((originCoords, destinationCoords, label = "Destino activo") => {
+    if (!mapInstanceRef.current || !window.google?.maps) return;
+
+    clearFallbackRoute();
+
+    fallbackRoutePolylineRef.current = new window.google.maps.Polyline({
+      path: [originCoords, destinationCoords],
+      geodesic: true,
+      strokeColor: "#2563eb",
+      strokeOpacity: 0.9,
+      strokeWeight: 5,
+      map: mapInstanceRef.current,
+    });
+
+    fallbackDestinationMarkerRef.current = new window.google.maps.Marker({
+      map: mapInstanceRef.current,
+      position: destinationCoords,
+      title: label,
+      label: {
+        text: "D",
+        color: "#ffffff",
+        fontWeight: "bold",
+      },
+    });
+
+    const bounds = new window.google.maps.LatLngBounds();
+    bounds.extend(originCoords);
+    bounds.extend(destinationCoords);
+    mapInstanceRef.current.fitBounds(bounds);
+  }, [clearFallbackRoute]);
 
   const persistDriverLocation = useCallback(
     async (coords, meta = {}) => {
@@ -497,11 +591,26 @@ const EnterpriseDriverMap = ({
 
     const driverLocation = selectedDriver?.currentLocation;
     if (!driverLocation?.lat || !driverLocation?.lng) {
+      directionsRendererRef.current.set("directions", null);
+      clearFallbackRoute();
+      setRouteInfo({
+        orderedStops: [],
+        totalStops: 0,
+        totalDistanceText: "",
+        totalDurationText: "",
+      });
       return;
     }
 
+    const originCoords = {
+      lat: Number(driverLocation.lat),
+      lng: Number(driverLocation.lng),
+    };
+
     if (!pendingStops.length) {
       directionsRendererRef.current.set("directions", null);
+      clearFallbackRoute();
+      lastSignatureRef.current = "";
 
       setRouteInfo({
         orderedStops: [],
@@ -510,36 +619,67 @@ const EnterpriseDriverMap = ({
         totalDurationText: "",
       });
 
+      if (mapInstanceRef.current) {
+        mapInstanceRef.current.setCenter(originCoords);
+        mapInstanceRef.current.setZoom(15);
+      }
+
       return;
     }
+
+    const activeStop = pendingStops[0];
+    const activeStopCoords = getDeliveryCoordinates(activeStop);
+    const activeStopAddress = normalizeColombiaAddress(getDeliveryAddressText(activeStop));
 
     const signature = JSON.stringify({
       driverLat: Number(driverLocation.lat).toFixed(6),
       driverLng: Number(driverLocation.lng).toFixed(6),
-      activeDeliveryId: activeDelivery?._id || activeDelivery?.id || null,
-      stops: pendingStops.map((s) => ({
-        id: s._id || s.id,
-        address: s.address,
-        status: s.status,
-      })),
+      activeDeliveryId: activeStop?._id || activeStop?.id || null,
+      activeDeliveryStatus: activeStop?.status || "",
+      destinationLat: activeStopCoords?.lat ? Number(activeStopCoords.lat).toFixed(6) : "",
+      destinationLng: activeStopCoords?.lng ? Number(activeStopCoords.lng).toFixed(6) : "",
+      destinationAddress: activeStopAddress,
     });
 
     if (signature === lastSignatureRef.current) return;
     lastSignatureRef.current = signature;
 
-    const geocodeAddress = (address) =>
+    const geocodeDelivery = (delivery) =>
       new Promise((resolve, reject) => {
-        geocoderRef.current.geocode({ address }, (results, status) => {
+        const coords = getDeliveryCoordinates(delivery);
+        const address = normalizeColombiaAddress(getDeliveryAddressText(delivery));
+
+        if (coords) {
+          resolve({
+            ...delivery,
+            coords,
+            routeLocation: coords,
+            formattedAddress: address || `${coords.lat},${coords.lng}`,
+          });
+          return;
+        }
+
+        if (!address) {
+          reject(new Error("La entrega activa no tiene dirección ni coordenadas."));
+          return;
+        }
+
+        geocoderRef.current.geocode({ address, region: "co" }, (results, status) => {
           if (status === "OK" && results?.[0]?.geometry?.location) {
             const location = results[0].geometry.location;
-
-            resolve({
+            const resolvedCoords = {
               lat: location.lat(),
               lng: location.lng(),
+            };
+
+            resolve({
+              ...delivery,
+              coords: resolvedCoords,
+              routeLocation: resolvedCoords,
               formattedAddress: results[0].formatted_address || address,
             });
           } else {
-            reject(new Error(`No se pudo geocodificar: ${address}`));
+            reject(new Error(`No se pudo geocodificar: ${address}. Estado: ${status}`));
           }
         });
       });
@@ -548,47 +688,18 @@ const EnterpriseDriverMap = ({
       const buildId = ++routeBuildIdRef.current;
 
       try {
-        const geocodedStops = await Promise.all(
-          pendingStops.map(async (delivery) => {
-            const coords = await geocodeAddress(delivery.address);
-
-            return {
-              ...delivery,
-              coords,
-              formattedAddress: coords.formattedAddress,
-            };
-          })
-        );
+        const activeRouteStop = await geocodeDelivery(activeStop);
 
         if (buildId !== routeBuildIdRef.current) return;
 
-        const originCoords = {
-          lat: Number(driverLocation.lat),
-          lng: Number(driverLocation.lng),
-        };
-
-        const orderedStops = [...geocodedStops];
         const directionsService = new window.google.maps.DirectionsService();
-
-        const destination =
-          orderedStops.length === 1
-            ? orderedStops[0].formattedAddress || orderedStops[0].address
-            : orderedStops[orderedStops.length - 1].formattedAddress ||
-              orderedStops[orderedStops.length - 1].address;
-
-        const waypoints =
-          orderedStops.length > 1
-            ? orderedStops.slice(0, -1).map((stop) => ({
-                location: stop.formattedAddress || stop.address,
-                stopover: true,
-              }))
-            : [];
+        const destination = activeRouteStop.routeLocation || activeRouteStop.formattedAddress || activeRouteStop.address;
 
         directionsService.route(
           {
             origin: originCoords,
             destination,
-            waypoints,
+            waypoints: [],
             optimizeWaypoints: false,
             travelMode: window.google.maps.TravelMode.DRIVING,
           },
@@ -596,6 +707,7 @@ const EnterpriseDriverMap = ({
             if (buildId !== routeBuildIdRef.current) return;
 
             if (status === "OK" && result) {
+              clearFallbackRoute();
               directionsRendererRef.current.setDirections(result);
 
               const route = result.routes?.[0];
@@ -615,8 +727,8 @@ const EnterpriseDriverMap = ({
               const totalMin = Math.round(totalDurationSeconds / 60);
 
               setRouteInfo({
-                orderedStops,
-                totalStops: orderedStops.length,
+                orderedStops: [activeRouteStop],
+                totalStops: 1,
                 totalDistanceText: `${totalKm} km`,
                 totalDurationText:
                   totalMin >= 60
@@ -624,11 +736,20 @@ const EnterpriseDriverMap = ({
                     : `${totalMin} min`,
               });
             } else {
-              console.error("Error trazando la ruta:", status);
+              console.error("Error trazando la ruta activa:", status);
+              directionsRendererRef.current.set("directions", null);
+
+              if (activeRouteStop.coords) {
+                drawFallbackRoute(
+                  originCoords,
+                  activeRouteStop.coords,
+                  activeRouteStop.clientName || "Destino activo"
+                );
+              }
 
               setRouteInfo({
-                orderedStops: geocodedStops,
-                totalStops: geocodedStops.length,
+                orderedStops: [activeRouteStop],
+                totalStops: 1,
                 totalDistanceText: "",
                 totalDurationText: "",
               });
@@ -636,7 +757,9 @@ const EnterpriseDriverMap = ({
           }
         );
       } catch (error) {
-        console.error("Error construyendo ruta:", error);
+        console.error("Error construyendo ruta activa:", error);
+        directionsRendererRef.current.set("directions", null);
+        clearFallbackRoute();
 
         setRouteInfo({
           orderedStops: activeDelivery?.address ? [activeDelivery] : [],
@@ -648,7 +771,14 @@ const EnterpriseDriverMap = ({
     };
 
     buildRoute();
-  }, [mapsApiLoaded, selectedDriver?.currentLocation, pendingStops, activeDelivery]);
+  }, [
+    mapsApiLoaded,
+    selectedDriver?.currentLocation,
+    pendingStops,
+    activeDelivery,
+    clearFallbackRoute,
+    drawFallbackRoute,
+  ]);
 
   const openExternalGoogleMaps = () => {
     const driverLocation = selectedDriver?.currentLocation;
@@ -713,7 +843,7 @@ const EnterpriseDriverMap = ({
             </h3>
 
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Seguimiento GPS, ruta optimizada y paradas asignadas.
+              Seguimiento GPS y ruta activa hacia la entrega en curso.
             </p>
           </div>
 
@@ -854,16 +984,16 @@ const EnterpriseDriverMap = ({
               <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-base font-extrabold text-slate-900">
-                    Orden visual en el mapa
+                    Ruta activa en el mapa
                   </p>
 
                   <p className="text-xs font-semibold text-slate-500">
-                    El detalle y acciones están abajo en Orden de la ruta.
+                    Solo se dibuja la entrega que está actualmente en curso.
                   </p>
                 </div>
 
                 <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-extrabold text-slate-600">
-                  {visibleStops.length} paradas
+                  {visibleStops.length} destino activo
                 </span>
               </div>
 
@@ -916,7 +1046,7 @@ const EnterpriseDriverMap = ({
             </div>
           ) : (
             <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4 text-sm font-semibold text-slate-500">
-              Aún no hay direcciones pendientes para dibujar la ruta.
+              No hay una entrega activa en curso para dibujar ruta en el mapa.
             </div>
           )}
         </div>
@@ -1158,8 +1288,18 @@ const EnterpriseDriverPanel = () => {
   }, [deliveries, selectedDriver]);
 
   const activeDelivery = useMemo(() => {
-    return assignedDeliveries.find(
-      (delivery) => String(delivery._id || delivery.id) === String(activeDeliveryId)
+    const byId = activeDeliveryId
+      ? assignedDeliveries.find(
+          (delivery) => String(delivery._id || delivery.id) === String(activeDeliveryId)
+        )
+      : null;
+
+    if (byId && byId.status === "En curso") return byId;
+
+    return (
+      assignedDeliveries.find((delivery) => delivery.status === "En curso") ||
+      byId ||
+      null
     );
   }, [assignedDeliveries, activeDeliveryId]);
 
