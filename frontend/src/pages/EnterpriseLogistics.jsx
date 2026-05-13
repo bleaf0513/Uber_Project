@@ -2566,6 +2566,149 @@ const EnterpriseLogistics = () => {
     return 2 * earthKm * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
   };
 
+  const calculateSpeedKmh = (a, b) => {
+    if (!a || !b?.timestamp || !a?.timestamp) return 0;
+
+    const seconds = Math.max(
+      1,
+      Math.round((b.timestamp.getTime() - a.timestamp.getTime()) / 1000)
+    );
+
+    return (calculateDistanceKm(a, b) / seconds) * 3600;
+  };
+
+  const simplifyRoutePoints = (points, toleranceMeters = 12) => {
+    if (!Array.isArray(points) || points.length <= 2) return points || [];
+
+    const toleranceKm = toleranceMeters / 1000;
+
+    const pointToSegmentDistanceKm = (point, start, end) => {
+      const x = point.lng;
+      const y = point.lat;
+      const x1 = start.lng;
+      const y1 = start.lat;
+      const x2 = end.lng;
+      const y2 = end.lat;
+
+      const dx = x2 - x1;
+      const dy = y2 - y1;
+
+      if (dx === 0 && dy === 0) return calculateDistanceKm(point, start);
+
+      const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));
+      const projected = {
+        lat: y1 + t * dy,
+        lng: x1 + t * dx,
+      };
+
+      return calculateDistanceKm(point, projected);
+    };
+
+    const rdp = (items) => {
+      if (items.length <= 2) return items;
+
+      let maxDistance = 0;
+      let index = 0;
+      const first = items[0];
+      const last = items[items.length - 1];
+
+      for (let i = 1; i < items.length - 1; i += 1) {
+        const distance = pointToSegmentDistanceKm(items[i], first, last);
+        if (distance > maxDistance) {
+          maxDistance = distance;
+          index = i;
+        }
+      }
+
+      if (maxDistance > toleranceKm) {
+        const left = rdp(items.slice(0, index + 1));
+        const right = rdp(items.slice(index));
+        return left.slice(0, -1).concat(right);
+      }
+
+      return [first, last];
+    };
+
+    return rdp(points);
+  };
+
+  const cleanRoutePointsForDisplay = (points) => {
+    const sorted = (Array.isArray(points) ? points : [])
+      .filter((point) => Number.isFinite(Number(point?.lat)) && Number.isFinite(Number(point?.lng)))
+      .sort((a, b) => {
+        const aTime = a?.timestamp ? a.timestamp.getTime() : new Date(a?.recordedAt || a?.createdAt || 0).getTime();
+        const bTime = b?.timestamp ? b.timestamp.getTime() : new Date(b?.recordedAt || b?.createdAt || 0).getTime();
+        return aTime - bTime;
+      });
+
+    if (sorted.length <= 2) return sorted;
+
+    const withoutDuplicates = [];
+
+    sorted.forEach((point, index) => {
+      const lastKept = withoutDuplicates[withoutDuplicates.length - 1];
+
+      if (!lastKept) {
+        withoutDuplicates.push(point);
+        return;
+      }
+
+      const distanceMeters = calculateDistanceKm(lastKept, point) * 1000;
+      const minutesBetween =
+        point?.timestamp && lastKept?.timestamp
+          ? Math.abs(point.timestamp.getTime() - lastKept.timestamp.getTime()) / 60000
+          : 0;
+
+      const isLastPoint = index === sorted.length - 1;
+
+      if (distanceMeters < 18 && minutesBetween < 3 && !isLastPoint) {
+        return;
+      }
+
+      withoutDuplicates.push(point);
+    });
+
+    const withoutSpikes = [];
+
+    for (let i = 0; i < withoutDuplicates.length; i += 1) {
+      const previous = withoutSpikes[withoutSpikes.length - 1];
+      const current = withoutDuplicates[i];
+      const next = withoutDuplicates[i + 1];
+
+      if (!previous || !next) {
+        withoutSpikes.push(current);
+        continue;
+      }
+
+      const prevToCurrent = calculateDistanceKm(previous, current);
+      const currentToNext = calculateDistanceKm(current, next);
+      const prevToNext = calculateDistanceKm(previous, next);
+      const speedToCurrent = calculateSpeedKmh(previous, current);
+      const speedToNext = calculateSpeedKmh(current, next);
+
+      const looksLikeGpsBounce =
+        prevToCurrent > 0.06 &&
+        currentToNext > 0.06 &&
+        prevToNext < Math.max(prevToCurrent, currentToNext) * 0.55;
+
+      const looksImpossible = speedToCurrent > 140 || speedToNext > 140;
+
+      if (looksLikeGpsBounce || looksImpossible) {
+        continue;
+      }
+
+      withoutSpikes.push(current);
+    }
+
+    const simplified = simplifyRoutePoints(withoutSpikes, 10);
+
+    if (simplified.length < 2 && sorted.length >= 2) {
+      return [sorted[0], sorted[sorted.length - 1]];
+    }
+
+    return simplified;
+  };
+
   const routeSummary = selectedDriverRouteSummary?.summary || null;
   const routeShift = routeSummary?.shift || null;
   const routeDeliveries = routeSummary?.deliveries || null;
@@ -2591,7 +2734,7 @@ const EnterpriseLogistics = () => {
       .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
   }, [routePoints]);
 
-  const routePointsForMap = useMemo(() => {
+  const routeRawPointsForSelectedWindow = useMemo(() => {
     if (!routeAuditMode || !routeAuditWindow) return normalizedRoutePoints;
 
     return normalizedRoutePoints.filter((point) => {
@@ -2599,6 +2742,10 @@ const EnterpriseLogistics = () => {
       return time >= routeAuditWindow.start.getTime() && time <= routeAuditWindow.end.getTime();
     });
   }, [normalizedRoutePoints, routeAuditMode, routeAuditWindow]);
+
+  const routePointsForMap = useMemo(() => {
+    return cleanRoutePointsForDisplay(routeRawPointsForSelectedWindow);
+  }, [routeRawPointsForSelectedWindow]);
 
   const routeAuditMetrics = useMemo(() => {
     const points = routePointsForMap;
@@ -2673,6 +2820,9 @@ const EnterpriseLogistics = () => {
 
     return {
       pointsCount: points.length,
+      rawPointsCount: routeRawPointsForSelectedWindow.length,
+      cleanedPointsCount: points.length,
+      hiddenNoisePoints: Math.max(0, routeRawPointsForSelectedWindow.length - points.length),
       distanceKm,
       firstPoint,
       lastPoint,
@@ -2680,7 +2830,7 @@ const EnterpriseLogistics = () => {
       possibleStops: possibleStops.slice(0, 8),
       recentPoints: points.slice(-6).reverse(),
     };
-  }, [routePointsForMap]);
+  }, [routePointsForMap, routeRawPointsForSelectedWindow]);
 
   const totalUnreadDrivers = Object.keys(driverChatAlerts).length;
 
@@ -4167,9 +4317,12 @@ const EnterpriseLogistics = () => {
                       </p>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-4">
-                      <p className="text-xs text-slate-500 font-bold">Puntos filtrados</p>
+                      <p className="text-xs text-slate-500 font-bold">Puntos usados en mapa</p>
                       <p className="text-xl font-black text-slate-900 mt-1">
-                        {routeAuditMetrics.pointsCount}
+                        {routeAuditMetrics.cleanedPointsCount}
+                      </p>
+                      <p className="text-[11px] text-slate-400 mt-1">
+                        Originales: {routeAuditMetrics.rawPointsCount} · Ruido filtrado: {routeAuditMetrics.hiddenNoisePoints}
                       </p>
                     </div>
                     <div className="bg-white rounded-xl border border-slate-200 p-4">
