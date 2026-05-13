@@ -192,6 +192,8 @@ const EnterpriseDriverMap = ({
   const mapInstanceRef = useRef(null);
   const driverMarkerRef = useRef(null);
   const directionsRendererRef = useRef(null);
+  const stopMarkersRef = useRef([]);
+  const routeBoundsRef = useRef(null);
   const geocoderRef = useRef(null);
   const watchIdRef = useRef(null);
   const lastSignatureRef = useRef("");
@@ -216,20 +218,48 @@ const EnterpriseDriverMap = ({
     selectedDriverRef.current = selectedDriver;
   }, [selectedDriver]);
 
+  const getMapStopOrder = useCallback((delivery, fallbackIndex = 0) => {
+    const possibleOrder =
+      delivery?.routeOrder ??
+      delivery?.smartRouteOrder ??
+      delivery?.optimizedOrder ??
+      delivery?.stopOrder ??
+      delivery?.sequence ??
+      delivery?.order ??
+      delivery?.position;
+
+    const numericOrder = Number(possibleOrder);
+    return Number.isFinite(numericOrder) ? numericOrder : fallbackIndex + 1;
+  }, []);
+
   const pendingStops = useMemo(() => {
-    if (!activeDelivery || activeDelivery.status !== "En curso") {
-      return [];
-    }
+    return assignedDeliveries
+      .map((delivery, index) => ({ delivery, originalIndex: index }))
+      .filter(({ delivery }) => {
+        if (!delivery || delivery.status === "Finalizada") return false;
+        return Boolean(getDeliveryAddressText(delivery) || getDeliveryCoordinates(delivery));
+      })
+      .sort((a, b) => {
+        const aActive =
+          String(activeDelivery?._id || activeDelivery?.id || "") ===
+          String(a.delivery?._id || a.delivery?.id || "");
+        const bActive =
+          String(activeDelivery?._id || activeDelivery?.id || "") ===
+          String(b.delivery?._id || b.delivery?.id || "");
 
-    const hasAddress = Boolean(getDeliveryAddressText(activeDelivery));
-    const hasCoords = Boolean(getDeliveryCoordinates(activeDelivery));
+        // La entrega activa debe verse primero para el conductor.
+        if (aActive && !bActive) return -1;
+        if (!aActive && bActive) return 1;
 
-    if (!hasAddress && !hasCoords) {
-      return [];
-    }
+        const orderDiff =
+          getMapStopOrder(a.delivery, a.originalIndex) -
+          getMapStopOrder(b.delivery, b.originalIndex);
 
-    return [activeDelivery];
-  }, [activeDelivery]);
+        if (orderDiff !== 0) return orderDiff;
+        return a.originalIndex - b.originalIndex;
+      })
+      .map(({ delivery }) => delivery);
+  }, [assignedDeliveries, activeDelivery, getMapStopOrder]);
 
   const updateDriverMarker = useCallback((coords) => {
     if (!mapInstanceRef.current || !window.google?.maps) return;
@@ -256,6 +286,37 @@ const EnterpriseDriverMap = ({
     if (directionsRendererRef.current) {
       directionsRendererRef.current.set("directions", null);
     }
+  }, []);
+
+  const clearStopMarkers = useCallback(() => {
+    stopMarkersRef.current.forEach((marker) => marker.setMap(null));
+    stopMarkersRef.current = [];
+    routeBoundsRef.current = null;
+  }, []);
+
+  const createLetterMarker = useCallback(({ position, label, title, active = false }) => {
+    if (!mapInstanceRef.current || !window.google?.maps) return null;
+
+    return new window.google.maps.Marker({
+      map: mapInstanceRef.current,
+      position,
+      title,
+      label: {
+        text: label,
+        color: "#ffffff",
+        fontWeight: "900",
+        fontSize: "14px",
+      },
+      icon: {
+        path: window.google.maps.SymbolPath.CIRCLE,
+        scale: active ? 15 : 13,
+        fillColor: active ? "#2563eb" : "#0f172a",
+        fillOpacity: 1,
+        strokeColor: "#ffffff",
+        strokeWeight: 3,
+      },
+      zIndex: active ? 50 : 30,
+    });
   }, []);
 
   const persistDriverLocation = useCallback(
@@ -417,13 +478,13 @@ const EnterpriseDriverMap = ({
         zoomControl: true,
       });
 
-      geocoderRef.current = new window.google.maps.Geocoder();
-
+      // No usamos Geocoding ni Directions en el mapa interno para evitar costos.
+      // El mapa interno solo muestra puntos A, B, C... con coordenadas ya guardadas.
+      geocoderRef.current = null;
       directionsRendererRef.current = new window.google.maps.DirectionsRenderer({
-        suppressMarkers: false,
+        suppressMarkers: true,
         preserveViewport: false,
       });
-
       directionsRendererRef.current.setMap(mapInstanceRef.current);
 
       if (
@@ -541,22 +602,16 @@ const EnterpriseDriverMap = ({
   ]);
 
   useEffect(() => {
-    if (
-      !mapsApiLoaded ||
-      !window.google?.maps ||
-      !mapInstanceRef.current ||
-      !geocoderRef.current ||
-      !directionsRendererRef.current
-    ) {
+    if (!mapsApiLoaded || !window.google?.maps || !mapInstanceRef.current) {
       return;
     }
 
     const driverLocation = selectedDriver?.currentLocation;
-    if (!driverLocation?.lat || !driverLocation?.lng) {
-      directionsRendererRef.current.set("directions", null);
-      clearMapRoute();
-      setRouteWarning("");
 
+    if (!driverLocation?.lat || !driverLocation?.lng) {
+      clearMapRoute();
+      clearStopMarkers();
+      setRouteWarning("");
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
@@ -571,13 +626,93 @@ const EnterpriseDriverMap = ({
       lng: Number(driverLocation.lng),
     };
 
-    if (!pendingStops.length) {
-      directionsRendererRef.current.set("directions", null);
+    if (!Number.isFinite(originCoords.lat) || !Number.isFinite(originCoords.lng)) {
       clearMapRoute();
-      lastSignatureRef.current = "";
+      clearStopMarkers();
+      return;
+    }
 
-      setRouteWarning("");
+    const signature = JSON.stringify({
+      driverLat: Number(originCoords.lat).toFixed(6),
+      driverLng: Number(originCoords.lng).toFixed(6),
+      stops: pendingStops.map((stop, index) => {
+        const coords = getDeliveryCoordinates(stop);
+        return {
+          id: stop?._id || stop?.id || index,
+          status: stop?.status || "",
+          order: getMapStopOrder(stop, index),
+          lat: coords ? Number(coords.lat).toFixed(6) : "",
+          lng: coords ? Number(coords.lng).toFixed(6) : "",
+        };
+      }),
+    });
 
+    if (signature === lastSignatureRef.current) return;
+    lastSignatureRef.current = signature;
+
+    clearMapRoute();
+    clearStopMarkers();
+    setRouteWarning("");
+
+    const bounds = new window.google.maps.LatLngBounds();
+    bounds.extend(originCoords);
+
+    const originMarker = createLetterMarker({
+      position: originCoords,
+      label: "A",
+      title: `A - Tu ubicación actual`,
+      active: true,
+    });
+
+    if (originMarker) {
+      stopMarkersRef.current.push(originMarker);
+    }
+
+    const stopsWithCoords = pendingStops
+      .map((delivery, index) => ({
+        delivery,
+        index,
+        coords: getDeliveryCoordinates(delivery),
+      }))
+      .filter((item) => item.coords);
+
+    const stopsWithoutCoords = pendingStops.length - stopsWithCoords.length;
+
+    stopsWithCoords.forEach(({ delivery, index, coords }, markerIndex) => {
+      const letter = String.fromCharCode(66 + markerIndex); // B, C, D...
+      const isActiveStop =
+        String(activeDelivery?._id || activeDelivery?.id || "") ===
+        String(delivery?._id || delivery?.id || "");
+
+      const marker = createLetterMarker({
+        position: coords,
+        label: letter,
+        title: `${letter} - ${delivery?.clientName || "Entrega"}`,
+        active: isActiveStop,
+      });
+
+      if (marker) {
+        const infoWindow = new window.google.maps.InfoWindow({
+          content: `
+            <div style="min-width:220px;padding:4px 6px;">
+              <div style="font-weight:800;margin-bottom:6px;">${letter} - ${delivery?.clientName || "Entrega"}</div>
+              <div style="font-size:12px;margin-bottom:4px;">Estado: <b>${delivery?.status || "Pendiente"}</b></div>
+              <div style="font-size:12px;margin-bottom:4px;">Factura: ${delivery?.invoiceNumber || "-"}</div>
+              <div style="font-size:12px;">${getDeliveryAddressText(delivery) || "Sin dirección"}</div>
+            </div>
+          `,
+        });
+
+        marker.addListener("click", () => {
+          infoWindow.open({ anchor: marker, map: mapInstanceRef.current });
+        });
+
+        stopMarkersRef.current.push(marker);
+        bounds.extend(coords);
+      }
+    });
+
+    if (pendingStops.length === 0) {
       setRouteInfo({
         orderedStops: [],
         totalStops: 0,
@@ -585,200 +720,41 @@ const EnterpriseDriverMap = ({
         totalDurationText: "",
       });
 
-      if (mapInstanceRef.current) {
-        mapInstanceRef.current.setCenter(originCoords);
-        mapInstanceRef.current.setZoom(15);
-      }
-
+      mapInstanceRef.current.setCenter(originCoords);
+      mapInstanceRef.current.setZoom(15);
       return;
     }
 
-    const activeStop = pendingStops[0];
-    const activeStopCoords = getDeliveryCoordinates(activeStop);
-    const activeStopAddress = normalizeColombiaAddress(getDeliveryAddressText(activeStop));
+    if (stopsWithCoords.length === 0) {
+      setRouteWarning(
+        "Esta ruta no tiene coordenadas guardadas en los pedidos. Se muestran los pedidos en la lista, pero no se pueden marcar en el mapa sin usar geocoding."
+      );
+      mapInstanceRef.current.setCenter(originCoords);
+      mapInstanceRef.current.setZoom(15);
+    } else {
+      setRouteWarning(
+        stopsWithoutCoords > 0
+          ? `${stopsWithoutCoords} pedido(s) no tienen coordenadas guardadas y no se marcaron en el mapa para evitar usar geocoding.`
+          : ""
+      );
+      mapInstanceRef.current.fitBounds(bounds);
+    }
 
-    const signature = JSON.stringify({
-      driverLat: Number(driverLocation.lat).toFixed(6),
-      driverLng: Number(driverLocation.lng).toFixed(6),
-      activeDeliveryId: activeStop?._id || activeStop?.id || null,
-      activeDeliveryStatus: activeStop?.status || "",
-      destinationLat: activeStopCoords?.lat ? Number(activeStopCoords.lat).toFixed(6) : "",
-      destinationLng: activeStopCoords?.lng ? Number(activeStopCoords.lng).toFixed(6) : "",
-      destinationAddress: activeStopAddress,
+    setRouteInfo({
+      orderedStops: pendingStops,
+      totalStops: pendingStops.length,
+      totalDistanceText: "Sin cálculo interno",
+      totalDurationText: "Usa Waze/Maps",
     });
-
-    if (signature === lastSignatureRef.current) return;
-    lastSignatureRef.current = signature;
-
-    const geocodeDelivery = (delivery) =>
-      new Promise((resolve, reject) => {
-        const coords = getDeliveryCoordinates(delivery);
-        const address = normalizeColombiaAddress(getDeliveryAddressText(delivery));
-
-        if (coords) {
-          resolve({
-            ...delivery,
-            coords,
-            routeLocation: coords,
-            formattedAddress: address || `${coords.lat},${coords.lng}`,
-          });
-          return;
-        }
-
-        if (!address) {
-          reject(new Error("La entrega activa no tiene dirección ni coordenadas."));
-          return;
-        }
-
-        geocoderRef.current.geocode({ address, region: "co" }, (results, status) => {
-          if (status === "OK" && results?.[0]?.geometry?.location) {
-            const location = results[0].geometry.location;
-            const resolvedCoords = {
-              lat: location.lat(),
-              lng: location.lng(),
-            };
-
-            resolve({
-              ...delivery,
-              coords: resolvedCoords,
-              routeLocation: resolvedCoords,
-              formattedAddress: results[0].formatted_address || address,
-            });
-          } else {
-            reject(new Error(`No se pudo geocodificar: ${address}. Estado: ${status}`));
-          }
-        });
-      });
-
-    const buildRoute = async () => {
-      const buildId = ++routeBuildIdRef.current;
-
-      try {
-        const activeRouteStop = await geocodeDelivery(activeStop);
-
-        if (buildId !== routeBuildIdRef.current) return;
-
-        const directionsService = new window.google.maps.DirectionsService();
-
-        const destinationCandidates = [
-          activeRouteStop.formattedAddress,
-          normalizeColombiaAddress(activeRouteStop.address),
-          activeRouteStop.routeLocation,
-        ].filter(Boolean);
-
-        const uniqueDestinationCandidates = [];
-        destinationCandidates.forEach((candidate) => {
-          const key = typeof candidate === "string" ? candidate : JSON.stringify(candidate);
-          if (!uniqueDestinationCandidates.some((item) => item.key === key)) {
-            uniqueDestinationCandidates.push({ key, value: candidate });
-          }
-        });
-
-        const requestDirections = (destination) =>
-          new Promise((resolve, reject) => {
-            directionsService.route(
-              {
-                origin: originCoords,
-                destination,
-                waypoints: [],
-                optimizeWaypoints: false,
-                travelMode: window.google.maps.TravelMode.DRIVING,
-                region: "co",
-              },
-              (result, status) => {
-                if (status === "OK" && result) {
-                  resolve(result);
-                } else {
-                  reject(new Error(status || "UNKNOWN_ERROR"));
-                }
-              }
-            );
-          });
-
-        let directionsResult = null;
-        let lastDirectionsError = null;
-
-        for (const candidate of uniqueDestinationCandidates) {
-          try {
-            directionsResult = await requestDirections(candidate.value);
-            break;
-          } catch (error) {
-            lastDirectionsError = error;
-            console.warn("Google Directions no pudo trazar con candidato:", candidate.value, error.message);
-          }
-        }
-
-        if (buildId !== routeBuildIdRef.current) return;
-
-        if (!directionsResult) {
-          clearMapRoute();
-          setRouteWarning(
-            "Google no logró trazar una ruta por calles para esta entrega. Revisa que la dirección esté bien geocodificada o abre Waze/Maps."
-          );
-
-          console.error("Error trazando ruta activa por calles:", lastDirectionsError?.message || "Sin detalle");
-
-          setRouteInfo({
-            orderedStops: [activeRouteStop],
-            totalStops: 1,
-            totalDistanceText: "",
-            totalDurationText: "",
-          });
-
-          return;
-        }
-
-        setRouteWarning("");
-        directionsRendererRef.current.setDirections(directionsResult);
-
-        const route = directionsResult.routes?.[0];
-        const legs = route?.legs || [];
-
-        const totalDistanceMeters = legs.reduce(
-          (sum, leg) => sum + (leg.distance?.value || 0),
-          0
-        );
-
-        const totalDurationSeconds = legs.reduce(
-          (sum, leg) => sum + (leg.duration?.value || 0),
-          0
-        );
-
-        const totalKm = (totalDistanceMeters / 1000).toFixed(1);
-        const totalMin = Math.round(totalDurationSeconds / 60);
-
-        setRouteInfo({
-          orderedStops: [activeRouteStop],
-          totalStops: 1,
-          totalDistanceText: `${totalKm} km`,
-          totalDurationText:
-            totalMin >= 60
-              ? `${Math.floor(totalMin / 60)} h ${totalMin % 60} min`
-              : `${totalMin} min`,
-        });
-      } catch (error) {
-        console.error("Error construyendo ruta activa:", error);
-        clearMapRoute();
-        setRouteWarning(
-          error.message || "No se pudo preparar la ruta activa por calles."
-        );
-
-        setRouteInfo({
-          orderedStops: activeDelivery?.address ? [activeDelivery] : [],
-          totalStops: activeDelivery?.address ? 1 : 0,
-          totalDistanceText: "",
-          totalDurationText: "",
-        });
-      }
-    };
-
-    buildRoute();
   }, [
     mapsApiLoaded,
     selectedDriver?.currentLocation,
     pendingStops,
     activeDelivery,
     clearMapRoute,
+    clearStopMarkers,
+    createLetterMarker,
+    getMapStopOrder,
   ]);
 
   const openExternalGoogleMaps = () => {
@@ -796,15 +772,17 @@ const EnterpriseDriverMap = ({
 
     const origin = `${driverLocation.lat},${driverLocation.lng}`;
 
-    const destination =
-      stopsForNavigation[stopsForNavigation.length - 1].formattedAddress ||
-      stopsForNavigation[stopsForNavigation.length - 1].address;
+    const destination = getDeliveryNavigationDestination(
+      stopsForNavigation[stopsForNavigation.length - 1]
+    );
+
+    if (!destination) return;
 
     const waypoints =
       stopsForNavigation.length > 1
         ? stopsForNavigation
             .slice(0, -1)
-            .map((stop) => encodeURIComponent(stop.formattedAddress || stop.address))
+            .map((stop) => encodeURIComponent(getDeliveryNavigationDestination(stop)))
             .join("|")
         : "";
 
@@ -820,13 +798,13 @@ const EnterpriseDriverMap = ({
   const canNavigate =
     !!selectedDriver?.currentLocation?.lat &&
     !!selectedDriver?.currentLocation?.lng &&
-    (routeInfo.orderedStops.length > 0 || !!activeDelivery?.address);
+    (routeInfo.orderedStops.length > 0 || pendingStops.length > 0 || !!activeDelivery?.address);
 
   const visibleStops =
     routeInfo.orderedStops.length > 0
       ? routeInfo.orderedStops
-      : activeDelivery?.address
-      ? [activeDelivery]
+      : pendingStops.length > 0
+      ? pendingStops
       : [];
 
   return (
@@ -836,7 +814,7 @@ const EnterpriseDriverMap = ({
           <div>
             <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-700">
               <span>🗺️</span>
-              <span>Ruta en vivo</span>
+              <span>Ruta visual</span>
             </div>
 
             <h3 className="text-xl font-extrabold text-slate-900">
@@ -844,7 +822,7 @@ const EnterpriseDriverMap = ({
             </h3>
 
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Seguimiento GPS y ruta activa hacia la entrega en curso.
+              Seguimiento GPS con puntos A, B, C... sin usar geocoding.
             </p>
           </div>
 
@@ -982,7 +960,7 @@ const EnterpriseDriverMap = ({
                   : "cursor-not-allowed bg-gray-300 text-gray-500"
               }`}
             >
-              Abrir ruta completa en Google Maps
+              Abrir navegación en Google Maps
             </button>
           </div>
 
