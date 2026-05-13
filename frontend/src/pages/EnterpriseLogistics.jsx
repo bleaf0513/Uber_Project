@@ -63,6 +63,37 @@ const areCoordsMeaningfullyDifferent = (a, b, threshold = 0.0003) => {
   );
 };
 
+const getDeliveryDestinationForMap = (delivery) => {
+  if (!delivery) return null;
+
+  const lat =
+    delivery?.deliveryLocation?.lat ??
+    delivery?.location?.lat ??
+    delivery?.lat ??
+    delivery?.clientLocation?.lat ??
+    null;
+
+  const lng =
+    delivery?.deliveryLocation?.lng ??
+    delivery?.location?.lng ??
+    delivery?.lng ??
+    delivery?.clientLocation?.lng ??
+    null;
+
+  if (Number.isFinite(Number(lat)) && Number.isFinite(Number(lng))) {
+    return { lat: Number(lat), lng: Number(lng) };
+  }
+
+  const address = String(
+    delivery?.deliveryLocation?.formattedAddress ||
+      delivery?.formattedAddress ||
+      delivery?.address ||
+      ""
+  ).trim();
+
+  return address || null;
+};
+
 const EnterpriseLogisticsDriverMap = ({
   selectedDriver,
   activeOrLastDelivery,
@@ -303,9 +334,11 @@ const EnterpriseLogisticsDriverMap = ({
 
     const lat = Number(selectedDriver?.currentLocation?.lat);
     const lng = Number(selectedDriver?.currentLocation?.lng);
-    const destinationAddress = activeOrLastDelivery?.address?.trim();
+    const activeRouteDelivery =
+      activeOrLastDelivery?.status === "En curso" ? activeOrLastDelivery : null;
+    const destination = getDeliveryDestinationForMap(activeRouteDelivery);
 
-    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !destinationAddress) {
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || !destination) {
       directionsRendererRef.current.set("directions", null);
       routeSignatureRef.current = "";
       return;
@@ -314,9 +347,12 @@ const EnterpriseLogisticsDriverMap = ({
     const signature = JSON.stringify({
       lat: Number(lat).toFixed(5),
       lng: Number(lng).toFixed(5),
-      address: destinationAddress,
-      deliveryId: activeOrLastDelivery?._id || activeOrLastDelivery?.id || "",
-      status: activeOrLastDelivery?.status || "",
+      destination:
+        typeof destination === "string"
+          ? destination
+          : `${Number(destination.lat).toFixed(5)},${Number(destination.lng).toFixed(5)}`,
+      deliveryId: activeRouteDelivery?._id || activeRouteDelivery?.id || "",
+      status: activeRouteDelivery?.status || "",
       mode: mapViewMode,
     });
 
@@ -328,7 +364,7 @@ const EnterpriseLogisticsDriverMap = ({
     directionsService.route(
       {
         origin: { lat, lng },
-        destination: destinationAddress,
+        destination,
         travelMode: window.google.maps.TravelMode.DRIVING,
       },
       (result, status) => {
@@ -337,7 +373,7 @@ const EnterpriseLogisticsDriverMap = ({
         if (status === "OK" && result) {
           directionsRendererRef.current.setDirections(result);
         } else {
-          console.error("No se pudo dibujar la ruta en logística:", status);
+          console.error("No se pudo dibujar la ruta activa en logística:", status, destination);
           directionsRendererRef.current.set("directions", null);
         }
       }
@@ -348,6 +384,9 @@ const EnterpriseLogisticsDriverMap = ({
     selectedDriver?.currentLocation?.lat,
     selectedDriver?.currentLocation?.lng,
     activeOrLastDelivery?.address,
+    activeOrLastDelivery?.deliveryLocation?.lat,
+    activeOrLastDelivery?.deliveryLocation?.lng,
+    activeOrLastDelivery?.formattedAddress,
     activeOrLastDelivery?._id,
     activeOrLastDelivery?.id,
     activeOrLastDelivery?.status,
@@ -2323,8 +2362,8 @@ const EnterpriseLogistics = () => {
       currentSmartRoute?.routeMeta?.modifiedAfterOptimization
   );
 
-  const activeOrLastDelivery =
-    selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
+  const activeOrLastDelivery = selectedDriverActiveDelivery || null;
+  const referenceDeliveryOnMap = selectedDriverActiveDelivery || selectedDriverLastFinishedDelivery || null;
 
   const selectedDriverChatDelivery = useMemo(() => {
     if (!activeOrLastDelivery) return null;
