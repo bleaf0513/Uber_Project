@@ -29,6 +29,11 @@ const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
 const GPS_SOFT = "linear-gradient(135deg, #FAF5FF 0%, #FDF4FF 100%)";
 const DARK_GLASS = "rgba(17, 24, 39, 0.94)";
 
+const getCaptainToken = () =>
+  localStorage.getItem("captainToken") ||
+  localStorage.getItem("token") ||
+  "";
+
 const CaptainHome = () => {
   const ridePopupRef = useRef(null);
   const rideDetailsRef = useRef(null);
@@ -66,7 +71,7 @@ const CaptainHome = () => {
 
   useEffect(() => {
     const token =
-      localStorage.getItem("captainToken") || localStorage.getItem("token");
+      getCaptainToken();
 
     if (!token || !captain?._id) return;
 
@@ -288,7 +293,7 @@ const CaptainHome = () => {
   const fetchCaptainActiveRide = useCallback(
     async ({ redirect = false } = {}) => {
       try {
-        const token = localStorage.getItem("token");
+        const token = getCaptainToken();
 
         if (!token) return null;
 
@@ -589,7 +594,7 @@ const CaptainHome = () => {
     try {
       if (!captain?._id) return;
 
-      const token = localStorage.getItem("token");
+      const token = getCaptainToken();
       if (!token) return;
 
       const activeRide = await fetchCaptainActiveRide({ redirect: false });
@@ -859,7 +864,7 @@ const CaptainHome = () => {
         },
         {
           headers: {
-            Authorization: `Bearer ${localStorage.getItem("token")}`,
+            Authorization: `Bearer ${getCaptainToken()}`,
           },
         }
       );
@@ -960,7 +965,7 @@ const CaptainHome = () => {
     navigate("/captain/offers/goods");
   };
 
-  const goToSpaceOffer = () => {
+  const goToLoadMarketplace = () => {
     navigate("/captain/offers/space");
   };
 
@@ -1446,87 +1451,142 @@ const CaptainHome = () => {
           </div>
 
           <div className="px-4 pb-5">
-            <div className="rounded-[24px] border border-gray-200 bg-gray-50 p-4 mt-2">
-              <div className="flex items-center justify-between gap-3 mb-3">
+            <div className="relative overflow-hidden rounded-[30px] border border-purple-100 bg-white p-4 mt-2 shadow-[0_20px_55px_rgba(76,29,149,0.14)]">
+              <div className="absolute -top-16 -right-12 w-40 h-40 rounded-full bg-purple-200/45 blur-3xl" />
+              <div className="absolute -bottom-20 -left-12 w-44 h-44 rounded-full bg-fuchsia-200/35 blur-3xl" />
+
+              <div className="relative z-10 flex items-start justify-between gap-3 mb-4">
                 <div>
-                  <h3 className="text-lg font-bold text-gray-900">
-                    Oportunidades en ruta
+                  <div className="inline-flex items-center gap-2 rounded-full bg-purple-50 border border-purple-100 px-3 py-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="text-[10px] uppercase tracking-[0.16em] font-black text-purple-700">
+                      Marketplace activo
+                    </span>
+                  </div>
+
+                  <h3 className="text-xl font-black text-gray-950 mt-3">
+                    Oportunidades de trabajo
                   </h3>
-                  <p className="text-sm text-gray-600">
-                    Publica mercancía, espacio libre o cupos disponibles.
+
+                  <p className="text-sm text-gray-600 mt-1 leading-5">
+                    Encuentra cargas, publica mercancía o comparte cupos desde un solo lugar.
                   </p>
                 </div>
 
-                <div className="w-12 h-12 rounded-2xl bg-violet-100 flex items-center justify-center">
-                  <i className="ri-road-map-line text-2xl text-violet-700"></i>
+                <div
+                  className="w-14 h-14 rounded-[20px] text-white flex items-center justify-center shadow-lg shrink-0"
+                  style={{ background: PURPLE_GRADIENT }}
+                >
+                  <i className="ri-route-line text-3xl"></i>
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={goToLoadMarketplace}
+                className="relative z-10 w-full overflow-hidden rounded-[24px] p-4 text-left text-white shadow-xl active:scale-[0.99] transition"
+                style={{ background: PURPLE_DEEP_GRADIENT }}
+              >
+                <div className="absolute -top-10 -right-8 w-32 h-32 rounded-full bg-white/15 blur-2xl" />
+
+                <div className="relative z-10 flex items-center gap-4">
+                  <div className="w-14 h-14 rounded-[20px] bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
+                    <i className="ri-truck-line text-3xl"></i>
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <h4 className="text-lg font-black">
+                        Buscar cargas
+                      </h4>
+
+                      <span className="rounded-full bg-emerald-400/20 border border-emerald-300/30 px-2 py-0.5 text-[9px] font-black text-emerald-100">
+                        DESTACADO
+                      </span>
+                    </div>
+
+                    <p className="text-xs text-white/80 mt-1 leading-5">
+                      Revisa cargas publicadas por clientes y envía tu mejor propuesta.
+                    </p>
+                  </div>
+
+                  <div className="w-10 h-10 rounded-full bg-white text-purple-800 flex items-center justify-center shadow-lg shrink-0">
+                    <i className="ri-arrow-right-line text-xl"></i>
+                  </div>
+                </div>
+              </button>
+
+              <div className="relative z-10 grid grid-cols-2 gap-3 mt-3">
                 <button
                   type="button"
                   onClick={goToGoodsOffer}
-                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
+                  className="group rounded-[22px] bg-gradient-to-br from-orange-50 to-amber-50 border border-orange-100 p-4 text-left shadow-sm active:scale-[0.99] transition"
                 >
-                  <div className="w-11 h-11 rounded-2xl bg-orange-100 flex items-center justify-center mb-2">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-orange-100 flex items-center justify-center mb-3 shadow-sm">
                     <i className="ri-shopping-basket-2-line text-xl text-orange-600"></i>
                   </div>
-                  <h4 className="text-base font-bold text-gray-900">
+
+                  <h4 className="text-sm font-black text-gray-950">
                     Publicar mercancía
                   </h4>
-                  <p className="text-xs text-gray-600 mt-1">
-                    Vende productos que llevas en ruta.
-                  </p>
-                </button>
 
-                <button
-                  type="button"
-                  onClick={goToSpaceOffer}
-                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
-                >
-                  <div className="w-11 h-11 rounded-2xl bg-blue-100 flex items-center justify-center mb-2">
-                    <i className="ri-inbox-archive-line text-xl text-blue-600"></i>
-                  </div>
-                  <h4 className="text-base font-bold text-gray-900">
-                    Publicar espacio
-                  </h4>
-                  <p className="text-xs text-gray-600 mt-1">
-                    Ofrece capacidad libre para carga.
+                  <p className="text-[11px] text-gray-600 mt-1 leading-4">
+                    Vende productos que llevas en tu ruta.
                   </p>
+
+                  <div className="mt-3 flex items-center text-[10px] font-black text-orange-700">
+                    Crear publicación
+                    <i className="ri-arrow-right-s-line text-lg ml-1"></i>
+                  </div>
                 </button>
 
                 <button
                   type="button"
                   onClick={goToSeatOffer}
-                  className="rounded-2xl bg-white border border-gray-200 p-4 text-left shadow-sm"
+                  className="group rounded-[22px] bg-gradient-to-br from-emerald-50 to-teal-50 border border-emerald-100 p-4 text-left shadow-sm active:scale-[0.99] transition"
                 >
-                  <div className="w-11 h-11 rounded-2xl bg-emerald-100 flex items-center justify-center mb-2">
+                  <div className="w-11 h-11 rounded-2xl bg-white border border-emerald-100 flex items-center justify-center mb-3 shadow-sm">
                     <i className="ri-user-3-line text-xl text-emerald-600"></i>
                   </div>
-                  <h4 className="text-base font-bold text-gray-900">
+
+                  <h4 className="text-sm font-black text-gray-950">
                     Publicar cupos
                   </h4>
-                  <p className="text-xs text-gray-600 mt-1">
-                    Comparte puestos para pasajeros.
-                  </p>
-                </button>
 
-                <button
-                  type="button"
-                  onClick={goToReceivedBids}
-                  className="rounded-2xl bg-black p-4 text-left shadow-sm"
-                >
-                  <div className="w-11 h-11 rounded-2xl bg-white/15 flex items-center justify-center mb-2">
-                    <i className="ri-mail-open-line text-xl text-white"></i>
-                  </div>
-                  <h4 className="text-base font-bold text-white">
-                    Ofertas recibidas
-                  </h4>
-                  <p className="text-xs text-white/80 mt-1">
-                    Revisa, acepta o contraoferta.
+                  <p className="text-[11px] text-gray-600 mt-1 leading-4">
+                    Comparte puestos disponibles para pasajeros.
                   </p>
+
+                  <div className="mt-3 flex items-center text-[10px] font-black text-emerald-700">
+                    Crear publicación
+                    <i className="ri-arrow-right-s-line text-lg ml-1"></i>
+                  </div>
                 </button>
               </div>
+
+              <button
+                type="button"
+                onClick={goToReceivedBids}
+                className="relative z-10 w-full mt-3 rounded-[22px] bg-slate-950 text-white p-4 text-left shadow-lg active:scale-[0.99] transition"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-11 h-11 rounded-2xl bg-white/10 border border-white/10 flex items-center justify-center shrink-0">
+                    <i className="ri-mail-open-line text-xl text-white"></i>
+                  </div>
+
+                  <div className="flex-1 min-w-0">
+                    <h4 className="text-sm font-black">
+                      Ofertas recibidas
+                    </h4>
+
+                    <p className="text-[11px] text-white/65 mt-1">
+                      Revisa solicitudes, acepta o envía una contraoferta.
+                    </p>
+                  </div>
+
+                  <i className="ri-arrow-right-s-line text-2xl text-white/70"></i>
+                </div>
+              </button>
             </div>
           </div>
         </div>

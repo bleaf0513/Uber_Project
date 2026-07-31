@@ -822,7 +822,7 @@ const EnterpriseDriverMap = ({
             </h3>
 
             <p className="mt-1 text-sm font-medium text-slate-500">
-              Seguimiento GPS con puntos numerados 1, 2, 3... sin usar geocoding.
+              Seguimiento GPS con puntos numerados.
             </p>
           </div>
 

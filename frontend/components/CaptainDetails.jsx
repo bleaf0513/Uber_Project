@@ -10,6 +10,14 @@ const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
 const DEFAULT_PROFILE_IMAGE =
   "https://encrypted-tbn0.gstatic.com/images?q=tbn:ANd9GcRV-zbJg0P98SwYoQJCjzTONpVf1dB9pB9VCQ&s";
 
+const getCaptainToken = () => {
+  return (
+    localStorage.getItem("captainToken") ||
+    localStorage.getItem("token") ||
+    ""
+  );
+};
+
 const CaptainDetails = () => {
   const { captain } = useContext(CaptainDataContext);
 
@@ -137,7 +145,7 @@ const CaptainDetails = () => {
       setStatsLoading(true);
       setStatsError("");
 
-      const token = localStorage.getItem("token");
+      const token = getCaptainToken();
 
       if (!token) {
         setStatsError("No hay sesión activa del conductor.");
@@ -155,10 +163,18 @@ const CaptainDetails = () => {
         Array.isArray(response?.data?.rides) ? response.data.rides : []
       );
     } catch (error) {
-      setStatsError(
-        error?.response?.data?.message ||
-          "No se pudieron cargar las estadísticas del conductor."
-      );
+      const status = error?.response?.status;
+
+      if (status === 401) {
+        setStatsError(
+          "La sesión del conductor venció o no es válida. Cierra sesión e inicia nuevamente."
+        );
+      } else {
+        setStatsError(
+          error?.response?.data?.message ||
+            "No se pudieron cargar las estadísticas del conductor."
+        );
+      }
     } finally {
       setStatsLoading(false);
     }
@@ -169,7 +185,7 @@ const CaptainDetails = () => {
       setHistoryLoading(true);
       setHistoryError("");
 
-      const token = localStorage.getItem("token");
+      const token = getCaptainToken();
 
       if (!token) {
         setHistoryError("No hay sesión activa del conductor.");
@@ -189,21 +205,46 @@ const CaptainDetails = () => {
         Array.isArray(response?.data?.rides) ? response.data.rides : []
       );
     } catch (error) {
-      setHistoryError(
-        error?.response?.data?.message ||
-          "No se pudo cargar el historial de viajes."
-      );
+      const status = error?.response?.status;
+
+      if (status === 401) {
+        setHistoryError(
+          "La sesión del conductor venció o no es válida. Cierra sesión e inicia nuevamente."
+        );
+      } else {
+        setHistoryError(
+          error?.response?.data?.message ||
+            "No se pudo cargar el historial de viajes."
+        );
+      }
     } finally {
       setHistoryLoading(false);
     }
   };
 
   useEffect(() => {
+    const captainToken =
+      getCaptainToken();
+
+    if (!captainToken) {
+      setStatsError(
+        "No hay sesión activa del conductor."
+      );
+
+      setHistoryError(
+        "No hay sesión activa del conductor."
+      );
+
+      return undefined;
+    }
+
     fetchCaptainStats();
     fetchCaptainHistory();
 
     const interval = setInterval(() => {
-      fetchCaptainStats();
+      if (getCaptainToken()) {
+        fetchCaptainStats();
+      }
     }, 30000);
 
     return () => clearInterval(interval);

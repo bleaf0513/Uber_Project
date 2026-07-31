@@ -112,6 +112,9 @@ const normalizeLatLngFromObject = (value) => {
   if (lat == null || lng == null) return null;
   if (lat < -90 || lat > 90) return null;
   if (lng < -180 || lng > 180) return null;
+  if (Math.abs(lat) < 0.000001 && Math.abs(lng) < 0.000001) {
+    return null;
+  }
 
   return {
     lat,
@@ -131,6 +134,41 @@ const normalizePositionInput = (value) => {
   return parseLatLngFromText(value);
 };
 
+const samePosition = (first, second) => {
+  if (!first && !second) return true;
+  if (!first || !second) return false;
+
+  return (
+    roundCoord(first.lat, 6) ===
+      roundCoord(second.lat, 6) &&
+    roundCoord(first.lng, 6) ===
+      roundCoord(second.lng, 6) &&
+    String(first.address || "") ===
+      String(second.address || "")
+  );
+};
+
+const samePositionList = (
+  firstList,
+  secondList
+) => {
+  const first = Array.isArray(firstList)
+    ? firstList
+    : [];
+
+  const second = Array.isArray(secondList)
+    ? secondList
+    : [];
+
+  if (first.length !== second.length) {
+    return false;
+  }
+
+  return first.every((item, index) =>
+    samePosition(item, second[index])
+  );
+};
+
 const LiveTracking = ({
   pickup = "",
   destination = "",
@@ -143,6 +181,8 @@ const LiveTracking = ({
   selectedCaptainId = null,
   showRouteToPickup = false,
   onEtaUpdate = null,
+  useViewerGeolocation = true,
+  enableDirections = true,
 }) => {
   const { isLoaded: mapsApiLoaded } = useGoogleMapsScript();
 
@@ -357,6 +397,14 @@ const LiveTracking = ({
   }, [stableMapFocusKey]);
 
   useEffect(() => {
+    if (!useViewerGeolocation) {
+      setIsGeolocationAvailable(true);
+      setIsLoading(false);
+      setError(null);
+      setCurrentPosition(null);
+      return;
+    }
+
     if (!navigator.geolocation) {
       setError("La geolocalización no es compatible con este navegador.");
       setIsGeolocationAvailable(false);
@@ -418,34 +466,65 @@ const LiveTracking = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
       }
     };
-  }, []);
+  }, [useViewerGeolocation]);
 
   useEffect(() => {
     /*
-     * HOTFIX ANTI-COBRO GOOGLE:
+     * MODO SEGURO ANTI-COBRO Y ANTI-BUCLE:
      *
-     * Antes este componente usaba:
-     * new window.google.maps.Geocoder()
-     * geocoder.geocode({ address })
+     * - No usa Geocoding API.
+     * - No convierte direcciones escritas en coordenadas.
+     * - Solo acepta coordenadas ya guardadas.
+     * - Evita actualizar React cuando las coordenadas
+     *   realmente no cambiaron.
      *
-     * Eso consumía Geocoding API para pickup, destination y paradas.
-     *
-     * Ahora NO geocodificamos direcciones aquí.
-     * Solo pintamos posiciones si ya vienen como coordenadas:
-     * "6.244200, -75.581200"
-     * o como objeto { lat, lng }.
+     * Esto impide el error:
+     * "Maximum update depth exceeded".
      */
-    const nextPickupPosition = normalizePositionInput(pickup);
-    const nextDestinationPosition = normalizePositionInput(destination);
+    const nextPickupPosition =
+      normalizePositionInput(pickup);
 
-    const nextStopPositions = safeRouteStops
-      .map((stop) => normalizePositionInput(stop))
-      .filter(Boolean);
+    const nextDestinationPosition =
+      normalizePositionInput(destination);
 
-    setPickupPosition(nextPickupPosition);
-    setDestinationPosition(nextDestinationPosition);
-    setStopPositions(nextStopPositions);
-  }, [pickup, destination, safeRouteStops]);
+    const nextStopPositions =
+      safeRouteStops
+        .map((stop) =>
+          normalizePositionInput(stop)
+        )
+        .filter(Boolean);
+
+    setPickupPosition((previous) =>
+      samePosition(
+        previous,
+        nextPickupPosition
+      )
+        ? previous
+        : nextPickupPosition
+    );
+
+    setDestinationPosition((previous) =>
+      samePosition(
+        previous,
+        nextDestinationPosition
+      )
+        ? previous
+        : nextDestinationPosition
+    );
+
+    setStopPositions((previous) =>
+      samePositionList(
+        previous,
+        nextStopPositions
+      )
+        ? previous
+        : nextStopPositions
+    );
+  }, [
+    pickup,
+    destination,
+    safeRouteStops,
+  ]);
 
   useEffect(() => {
     if (!showPickupRadar) return;
@@ -510,6 +589,21 @@ const LiveTracking = ({
   ]);
 
   useEffect(() => {
+    if (!enableDirections) {
+      setDirections(null);
+      setEtaText("");
+      setDistanceText("");
+
+      if (typeof onEtaUpdate === "function") {
+        onEtaUpdate({
+          etaText: "",
+          distanceText: "",
+        });
+      }
+
+      return;
+    }
+
     if (!mapsApiLoaded || !window.google?.maps) {
       setDirections(null);
       setEtaText("");
@@ -664,6 +758,7 @@ const LiveTracking = ({
       }
     );
   }, [
+    enableDirections,
     mapsApiLoaded,
     pickupPosition,
     destinationPosition,
@@ -734,6 +829,13 @@ const LiveTracking = ({
       map.panTo({ lat: pickupPosition.lat, lng: pickupPosition.lng });
       map.setZoom(15);
       hasPoints = true;
+    } else if (selectedDriver) {
+      map.panTo({
+        lat: selectedDriver.lat,
+        lng: selectedDriver.lng,
+      });
+      map.setZoom(15);
+      hasPoints = true;
     } else if (currentPosition) {
       map.panTo(currentPosition);
       map.setZoom(zoom);
@@ -756,6 +858,7 @@ const LiveTracking = ({
     stopPositions,
     currentPosition,
     safeNearbyDrivers,
+    selectedDriver,
     zoom,
   ]);
 
@@ -987,7 +1090,7 @@ const LiveTracking = ({
     };
   };
 
-  if (!isGeolocationAvailable) {
+  if (useViewerGeolocation && !isGeolocationAvailable) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-100 text-sm text-gray-700 px-4 text-center">
         La geolocalización no es compatible con este navegador.
@@ -995,7 +1098,7 @@ const LiveTracking = ({
     );
   }
 
-  if (error && !currentPosition) {
+  if (useViewerGeolocation && error && !currentPosition) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-100 text-sm text-gray-700 px-4 text-center">
         Error: {error}. Verifica que el GPS del celular esté activado y que la
@@ -1004,7 +1107,10 @@ const LiveTracking = ({
     );
   }
 
-  if (!mapsApiLoaded || (isLoading && !currentPosition)) {
+  if (
+    !mapsApiLoaded ||
+    (useViewerGeolocation && isLoading && !currentPosition)
+  ) {
     return (
       <div className="w-full h-full flex items-center justify-center bg-gray-100 text-sm text-gray-700">
         Cargando mapa...

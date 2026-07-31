@@ -15,6 +15,13 @@ const formatCOP = (value) => {
   }).format(Number.isFinite(numeric) ? numeric : 0);
 };
 
+const formatKg = (value) => {
+  const numeric = Number(value || 0);
+  return new Intl.NumberFormat("es-CO", {
+    maximumFractionDigits: 2,
+  }).format(Number.isFinite(numeric) ? numeric : 0);
+};
+
 const formatDate = (value) => {
   if (!value) return "Sin fecha";
 
@@ -47,15 +54,124 @@ const getVehicleTypeLabel = (value) => {
   const labels = {
     motorcycle: "Moto",
     car: "Carro",
-    light_cargo: "Carga liviana",
-    van: "Furgón / camioneta",
-    truck: "Camión",
     motocarro: "Motocarro",
     pickup: "Pickup",
+    van: "Van / furgón pequeño",
+    light_cargo: "Carga liviana",
+    truck: "Camión",
     moving: "Mudanza",
+    light_truck: "Camión liviano",
+    medium_truck: "Camión mediano",
+    heavy_truck: "Camión pesado",
+    simple_truck: "Camión sencillo",
+    double_troque: "Doble troque",
+    dump_truck: "Volqueta",
+    mini_trailer: "Minimula",
+    tractor_trailer: "Tractomula",
+    lowboy: "Cama baja",
+    special_vehicle: "Vehículo especial",
   };
 
   return labels[value] || value || "Sin tipo";
+};
+
+const getBodyTypeLabel = (value) => {
+  const labels = {
+    not_specified: "No especificada",
+    closed_van: "Furgón cerrado",
+    stakes: "Estacas",
+    platform: "Plataforma",
+    refrigerated: "Refrigerada",
+    dump: "Volco / volqueta",
+    tank: "Tanque",
+    container_carrier: "Portacontenedor",
+    lowboy: "Cama baja",
+    open_body: "Carrocería abierta",
+    other: "Otra",
+  };
+
+  return labels[value] || value || "No especificada";
+};
+
+const getDocumentValue = (application, path, legacyPath = "") => {
+  const readPath = (object, valuePath) =>
+    String(valuePath || "")
+      .split(".")
+      .filter(Boolean)
+      .reduce((current, key) => current?.[key], object);
+
+  return readPath(application, path) ||
+    (legacyPath ? readPath(application, legacyPath) : "") ||
+    "";
+};
+
+const getMarketplaceStatusLabel = (status) => {
+  const labels = {
+    active: "Activa",
+    paused: "Pausada",
+    recibiendo_propuestas: "Recibiendo propuestas",
+    assigned: "Asignada",
+    reserved: "Reservada",
+    recogida: "Recogida",
+    in_transit: "En tránsito",
+    delivered: "Entregada",
+    completed: "Completada",
+    cancelled: "Cancelada",
+    pending: "Pendiente",
+    accepted: "Aceptada",
+    rejected: "Rechazada",
+    countered: "Contraoferta",
+    pending_confirmation: "Pendiente de confirmación",
+    confirmed: "Confirmada",
+    driver_heading_to_pickup: "Conductor en camino",
+    arrived_at_pickup: "Llegó a recoger",
+    loading: "Cargando",
+    picked_up: "Carga recogida",
+    near_destination: "Cerca del destino",
+    arrived_at_destination: "Llegó al destino",
+    unloading: "Descargando",
+    disputed: "En disputa",
+  };
+
+  return labels[status] || status || "Sin estado";
+};
+
+const getMarketplaceStatusClass = (status) => {
+  if (
+    [
+      "completed",
+      "delivered",
+      "accepted",
+      "confirmed",
+    ].includes(status)
+  ) {
+    return "bg-emerald-50 text-emerald-700 border-emerald-200";
+  }
+
+  if (
+    [
+      "cancelled",
+      "rejected",
+      "disputed",
+    ].includes(status)
+  ) {
+    return "bg-red-50 text-red-700 border-red-200";
+  }
+
+  if (
+    [
+      "in_transit",
+      "picked_up",
+      "driver_heading_to_pickup",
+      "arrived_at_pickup",
+      "loading",
+      "unloading",
+    ].includes(status)
+  ) {
+    return "bg-blue-50 text-blue-700 border-blue-200";
+  }
+
+  return "bg-amber-50 text-amber-700 border-amber-200";
 };
 
 const getApplicationStatusLabel = (status) => {
@@ -208,6 +324,8 @@ const SuperAdminDashboard = () => {
   const [dashboard, setDashboard] = useState(null);
   const [driverApplications, setDriverApplications] = useState([]);
   const [applicationFilter, setApplicationFilter] = useState("pending");
+  const [selectedApplication, setSelectedApplication] = useState(null);
+  const [applicationDetailLoading, setApplicationDetailLoading] = useState(false);
 
   const [enterprisesOverview, setEnterprisesOverview] = useState([]);
   const [enterprisesLoading, setEnterprisesLoading] = useState(false);
@@ -521,9 +639,9 @@ const SuperAdminDashboard = () => {
     await loadDriverApplications({ status, silent: false });
   };
 
-  const openDocument = (imageData) => {
+  const openDocument = (imageData, documentTitle = "Documento del conductor") => {
     if (!imageData) {
-      alert("No hay documento disponible.");
+      alert("Este documento no está disponible en la respuesta del backend.");
       return;
     }
 
@@ -537,7 +655,7 @@ const SuperAdminDashboard = () => {
     win.document.write(`
       <html>
         <head>
-          <title>Documento conductor - Central Go</title>
+          <title>${documentTitle} - Central Go</title>
           <style>
             body {
               margin: 0;
@@ -571,7 +689,7 @@ const SuperAdminDashboard = () => {
         </head>
         <body>
           <div class="wrap">
-            <p>Documento cargado por el conductor</p>
+            <p>${documentTitle}</p>
             <img src="${imageData}" alt="Documento conductor" />
           </div>
         </body>
@@ -579,6 +697,66 @@ const SuperAdminDashboard = () => {
     `);
 
     win.document.close();
+  };
+
+  const openApplicationDetail = async (application) => {
+    const applicationId =
+      application?._id ||
+      application?.id;
+
+    if (!applicationId) {
+      alert("Solicitud inválida.");
+      return;
+    }
+
+    try {
+      setApplicationDetailLoading(true);
+
+      const response = await fetch(
+        `${API_BASE}/super-admin/driver-applications/${applicationId}`,
+        {
+          method: "GET",
+          headers: getHeaders(),
+          credentials: "include",
+          cache: "no-store",
+        }
+      );
+
+      const data =
+        await parseJsonSafe(response);
+
+      if (!response.ok) {
+        throw new Error(
+          data.message ||
+            "No se pudo cargar el expediente."
+        );
+      }
+
+      setSelectedApplication(
+        data.application
+      );
+    } catch (error) {
+      console.error(
+        "Error cargando expediente:",
+        error
+      );
+
+      if (
+        isUnauthorizedMessage(
+          error.message
+        )
+      ) {
+        handleUnauthorized();
+        return;
+      }
+
+      alert(
+        error.message ||
+          "No se pudo cargar el expediente."
+      );
+    } finally {
+      setApplicationDetailLoading(false);
+    }
   };
 
   const approveApplication = async (application) => {
@@ -1324,91 +1502,134 @@ const SuperAdminDashboard = () => {
         <SectionShell
           id="conductores"
           title="Solicitudes de conductores"
-          description="Revisa documentos, aprueba conductores o rechaza solicitudes con motivo."
+          description="Expedientes organizados para revisar identidad, vehículo y documentos antes de aprobar."
           action={
             <div className="flex flex-wrap gap-2">
-              <button type="button" onClick={() => handleChangeApplicationFilter("pending")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "pending" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
+              <button type="button" onClick={() => handleChangeApplicationFilter("pending")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "pending" ? "bg-amber-500 text-white shadow-lg" : "bg-amber-50 text-amber-700 border border-amber-200"}`}>
                 Pendientes ({driverApplicationsStats.pendingDriverApplications || 0})
               </button>
-              <button type="button" onClick={() => handleChangeApplicationFilter("approved")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "approved" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
+              <button type="button" onClick={() => handleChangeApplicationFilter("approved")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "approved" ? "bg-emerald-600 text-white shadow-lg" : "bg-emerald-50 text-emerald-700 border border-emerald-200"}`}>
                 Aprobadas ({driverApplicationsStats.approvedDriverApplications || 0})
               </button>
-              <button type="button" onClick={() => handleChangeApplicationFilter("rejected")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "rejected" ? "bg-red-600 text-white" : "bg-red-50 text-red-700 border border-red-200"}`}>
+              <button type="button" onClick={() => handleChangeApplicationFilter("rejected")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "rejected" ? "bg-red-600 text-white shadow-lg" : "bg-red-50 text-red-700 border border-red-200"}`}>
                 Rechazadas ({driverApplicationsStats.rejectedDriverApplications || 0})
               </button>
-              <button type="button" onClick={() => handleChangeApplicationFilter("all")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "all" ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
+              <button type="button" onClick={() => handleChangeApplicationFilter("all")} className={`rounded-2xl px-4 py-2 text-sm font-bold ${applicationFilter === "all" ? "bg-slate-900 text-white shadow-lg" : "bg-slate-100 text-slate-700 border border-slate-200"}`}>
                 Todas
               </button>
             </div>
           }
         >
           {applicationsLoading ? (
-            <EmptyState title="Cargando solicitudes..." />
+            <EmptyState title="Cargando expedientes de conductores..." />
           ) : driverApplications.length === 0 ? (
             <EmptyState title="No hay solicitudes para este filtro." />
           ) : (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
               {driverApplications.map((application) => {
                 const applicationId = application._id || application.id;
                 const isActionLoading = actionLoadingId === applicationId;
+                const capacityKg = Number(application?.vehicle?.capacityKg || application?.vehicle?.capacity || 0);
+                const documentChecks = [
+                  getDocumentValue(application, "documents.identificationCard.front"),
+                  getDocumentValue(application, "documents.identificationCard.back"),
+                  getDocumentValue(application, "documents.drivingLicense.front", "documents.drivingLicenseImage"),
+                  getDocumentValue(application, "documents.drivingLicense.back"),
+                  getDocumentValue(application, "documents.vehicleRegistration.front", "documents.vehicleRegistrationImage"),
+                  getDocumentValue(application, "documents.vehicleRegistration.back"),
+                ];
+                const receivedDocuments = documentChecks.filter(Boolean).length;
 
                 return (
-                  <div key={applicationId} className="rounded-[28px] border border-slate-200 bg-slate-50 p-4">
-                    <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <h3 className="text-lg font-black text-slate-900">
-                            {application?.fullname?.firstname || "Sin nombre"} {application?.fullname?.lastname || ""}
-                          </h3>
+                  <article key={applicationId} className="overflow-hidden rounded-[30px] border border-slate-200 bg-white shadow-[0_16px_45px_rgba(15,23,42,0.08)]">
+                    <div className="h-2 bg-gradient-to-r from-cyan-400 via-blue-600 to-purple-700" />
 
-                          <span className={`rounded-full px-3 py-1 text-xs font-bold ${getApplicationStatusClass(application.status)}`}>
-                            {getApplicationStatusLabel(application.status)}
-                          </span>
-                        </div>
-
-                        <p className="mt-1 text-sm text-slate-600">{application.email}</p>
-
-                        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                          <MiniStat title="Vehículo" value={getVehicleTypeLabel(application?.vehicle?.vehicleType)} />
-                          <MiniStat title="Placa" value={application?.vehicle?.plate || "Sin placa"} />
-                          <MiniStat title="Color" value={application?.vehicle?.color || "Sin color"} />
-                          <MiniStat title="Fecha solicitud" value={formatDate(application.createdAt)} />
-                        </div>
-
-                        {application.status === "rejected" && application.rejectionReason ? (
-                          <div className="mt-3 rounded-2xl border border-red-200 bg-red-50 p-3 text-sm text-red-700">
-                            <b>Motivo rechazo:</b> {application.rejectionReason}
+                    <div className="p-5">
+                      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+                        <div className="flex min-w-0 items-start gap-3">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-lg font-black text-white">
+                            {(application?.fullname?.firstname || "C").slice(0, 1).toUpperCase()}
                           </div>
-                        ) : null}
+
+                          <div className="min-w-0">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <h3 className="text-xl font-black text-slate-950">
+                                {application?.fullname?.firstname || "Sin nombre"} {application?.fullname?.lastname || ""}
+                              </h3>
+                              <span className={`rounded-full px-3 py-1 text-xs font-black ${getApplicationStatusClass(application.status)}`}>
+                                {getApplicationStatusLabel(application.status)}
+                              </span>
+                            </div>
+                            <p className="mt-1 truncate text-sm text-slate-500">{application.email || "Sin correo"}</p>
+                            <p className="mt-1 text-xs font-semibold text-slate-500">
+                              {application?.identification?.type || "Documento"}: {application?.identification?.number || "No informado"}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-left sm:text-right">
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-slate-400">Expediente</p>
+                          <p className="mt-1 text-sm font-black text-slate-900">{receivedDocuments}/6 documentos</p>
+                          <p className="mt-1 text-[11px] text-slate-500">{formatDate(application.createdAt)}</p>
+                        </div>
                       </div>
 
-                      <div className="flex flex-col gap-2 xl:min-w-[260px]">
-                        <button type="button" onClick={() => openDocument(application?.documents?.drivingLicenseImage)} className="rounded-2xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white">
-                          Ver licencia
-                        </button>
+                      <div className="mt-5 rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-purple-600">Vehículo registrado</p>
+                            <p className="mt-1 text-lg font-black text-slate-950">{getVehicleTypeLabel(application?.vehicle?.vehicleType)}</p>
+                          </div>
+                          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-purple-100 text-2xl text-purple-700">
+                            <i className="ri-truck-line" />
+                          </div>
+                        </div>
 
-                        <button type="button" onClick={() => openDocument(application?.documents?.vehicleRegistrationImage)} className="rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm font-bold text-white">
-                          Ver matrícula
+                        <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                          <MiniStat title="Placa" value={application?.vehicle?.plate || "Sin placa"} />
+                          <MiniStat title="Capacidad" value={`${formatKg(capacityKg)} kg`} />
+                          <MiniStat title="Carrocería" value={getBodyTypeLabel(application?.vehicle?.bodyType)} />
+                          <MiniStat title="Marca" value={application?.vehicle?.brand || "No informada"} />
+                          <MiniStat title="Referencia" value={application?.vehicle?.reference || "No informada"} />
+                          <MiniStat title="Modelo" value={application?.vehicle?.model || "No informado"} />
+                        </div>
+                      </div>
+
+                      {application.status === "rejected" && application.rejectionReason ? (
+                        <div className="mt-4 rounded-2xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">
+                          <b>Motivo del rechazo:</b> {application.rejectionReason}
+                        </div>
+                      ) : null}
+
+                      <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                        <button
+                          type="button"
+                          onClick={() => openApplicationDetail(application)}
+                          className="rounded-2xl bg-slate-950 px-4 py-3.5 text-sm font-black text-white shadow-lg"
+                        >
+                          <i className="ri-folder-user-line mr-2" />
+                          {applicationDetailLoading
+                            ? "Cargando expediente..."
+                            : "Revisar expediente completo"}
                         </button>
 
                         {application.status === "pending" ? (
-                          <>
-                            <button type="button" onClick={() => approveApplication(application)} disabled={isActionLoading} className="rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-                              {isActionLoading ? "Procesando..." : "Aprobar"}
-                            </button>
-
-                            <button type="button" onClick={() => rejectApplication(application)} disabled={isActionLoading} className="rounded-2xl bg-red-600 px-4 py-2.5 text-sm font-bold text-white disabled:opacity-60">
-                              {isActionLoading ? "Procesando..." : "Rechazar"}
-                            </button>
-                          </>
+                          <button
+                            type="button"
+                            onClick={() => approveApplication(application)}
+                            disabled={isActionLoading}
+                            className="rounded-2xl bg-emerald-500 px-4 py-3.5 text-sm font-black text-slate-950 shadow-lg disabled:opacity-60"
+                          >
+                            {isActionLoading ? "Procesando..." : "Aprobar conductor"}
+                          </button>
                         ) : (
-                          <div className="rounded-2xl bg-white px-4 py-3 text-center text-xs font-semibold text-slate-500 border border-slate-200">
+                          <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3.5 text-center text-sm font-black text-slate-500">
                             Solicitud ya revisada
                           </div>
                         )}
                       </div>
                     </div>
-                  </div>
+                  </article>
                 );
               })}
             </div>
@@ -1418,14 +1639,465 @@ const SuperAdminDashboard = () => {
         <SectionShell
           id="marketplace"
           title="Marketplace logístico"
-          description="Módulo de mercancía, cupos, espacios y negociaciones logísticas."
+          description="Control en tiempo real de mercancías, cargas, cupos, propuestas, servicios y comisiones."
         >
-          <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
-            <p className="text-lg font-black">Estado: {marketplace.status || "pendiente"}</p>
-            <p className="mt-1 text-sm">
-              {marketplace.note || "El módulo está visible, pero falta conectar modelos backend específicos."}
-            </p>
-          </div>
+          {marketplace.status !== "connected" ? (
+            <div className="rounded-3xl border border-amber-200 bg-amber-50 p-5 text-amber-800">
+              <p className="text-lg font-black">
+                Marketplace sin conexión completa
+              </p>
+
+              <p className="mt-1 text-sm">
+                {marketplace.note ||
+                  "No se pudieron consultar los modelos del marketplace."}
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+                <StatCard
+                  title="Publicaciones totales"
+                  value={
+                    marketplace?.listings?.total || 0
+                  }
+                  subtitle={`${marketplace?.listings?.active || 0} activas actualmente`}
+                  tone="purple"
+                />
+
+                <StatCard
+                  title="Propuestas pendientes"
+                  value={
+                    marketplace?.bids?.pending || 0
+                  }
+                  subtitle={`${marketplace?.bids?.total || 0} propuestas históricas`}
+                  tone="amber"
+                />
+
+                <StatCard
+                  title="Servicios activos"
+                  value={
+                    marketplace?.tracking?.active || 0
+                  }
+                  subtitle={`${marketplace?.tracking?.inTransit || 0} en tránsito`}
+                  tone="emerald"
+                />
+
+                <StatCard
+                  title="Ingreso de plataforma"
+                  value={formatCOP(
+                    marketplace?.financial
+                      ?.platformIncome || 0
+                  )}
+                  subtitle="Comisiones + seguimiento"
+                  tone="dark"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-3">
+                <div className="rounded-[28px] border border-purple-200 bg-purple-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-purple-700">
+                    Mercancías
+                  </p>
+
+                  <h3 className="mt-2 text-2xl font-black text-purple-950">
+                    {marketplace?.listings?.goods?.total || 0}
+                  </h3>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MiniStat
+                      title="Activas"
+                      value={
+                        marketplace?.listings?.goods?.active ||
+                        0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Completadas"
+                      value={
+                        marketplace?.listings?.goods
+                          ?.completed || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Pausadas"
+                      value={
+                        marketplace?.listings?.goods?.paused ||
+                        0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Canceladas"
+                      value={
+                        marketplace?.listings?.goods
+                          ?.cancelled || 0
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-[28px] border border-blue-200 bg-blue-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-blue-700">
+                    Cargas y espacios
+                  </p>
+
+                  <h3 className="mt-2 text-2xl font-black text-blue-950">
+                    {marketplace?.listings?.spaces?.total || 0}
+                  </h3>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MiniStat
+                      title="Activas"
+                      value={
+                        marketplace?.listings?.spaces?.active ||
+                        0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Recibiendo ofertas"
+                      value={
+                        marketplace?.listings?.spaces
+                          ?.receivingBids || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Asignadas"
+                      value={
+                        marketplace?.listings?.spaces
+                          ?.assigned || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="En tránsito"
+                      value={
+                        marketplace?.listings?.spaces
+                          ?.inTransit || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Completadas"
+                      value={
+                        marketplace?.listings?.spaces
+                          ?.completed || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Canceladas"
+                      value={
+                        marketplace?.listings?.spaces
+                          ?.cancelled || 0
+                      }
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-[28px] border border-emerald-200 bg-emerald-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.16em] text-emerald-700">
+                    Cupos
+                  </p>
+
+                  <h3 className="mt-2 text-2xl font-black text-emerald-950">
+                    {marketplace?.listings?.seats?.total || 0}
+                  </h3>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MiniStat
+                      title="Activos"
+                      value={
+                        marketplace?.listings?.seats?.active ||
+                        0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Llenos"
+                      value={
+                        marketplace?.listings?.seats?.full ||
+                        0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Completados"
+                      value={
+                        marketplace?.listings?.seats
+                          ?.completed || 0
+                      }
+                    />
+
+                    <MiniStat
+                      title="Cancelados"
+                      value={
+                        marketplace?.listings?.seats
+                          ?.cancelled || 0
+                      }
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                  <h3 className="text-xl font-black text-slate-950">
+                    Negociaciones
+                  </h3>
+
+                  <p className="mt-1 text-sm text-slate-500">
+                    Estados de las propuestas enviadas.
+                  </p>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-3">
+                    <MiniStat
+                      title="Pendientes"
+                      value={marketplace?.bids?.pending || 0}
+                    />
+                    <MiniStat
+                      title="Aceptadas"
+                      value={marketplace?.bids?.accepted || 0}
+                    />
+                    <MiniStat
+                      title="Contraofertas"
+                      value={marketplace?.bids?.countered || 0}
+                    />
+                    <MiniStat
+                      title="Rechazadas"
+                      value={marketplace?.bids?.rejected || 0}
+                    />
+                    <MiniStat
+                      title="Canceladas"
+                      value={marketplace?.bids?.cancelled || 0}
+                    />
+                    <MiniStat
+                      title="Completadas"
+                      value={marketplace?.bids?.completed || 0}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-[28px] border border-slate-200 bg-slate-950 p-5 text-white">
+                  <h3 className="text-xl font-black">
+                    Resumen económico
+                  </h3>
+
+                  <p className="mt-1 text-sm text-white/60">
+                    Valores registrados en el marketplace.
+                  </p>
+
+                  <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl bg-white/10 p-4">
+                      <p className="text-xs font-black uppercase text-white/50">
+                        Valor publicado
+                      </p>
+                      <p className="mt-2 text-xl font-black">
+                        {formatCOP(
+                          marketplace?.financial
+                            ?.publishedValue || 0
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white/10 p-4">
+                      <p className="text-xs font-black uppercase text-white/50">
+                        Propuestas aceptadas
+                      </p>
+                      <p className="mt-2 text-xl font-black">
+                        {formatCOP(
+                          marketplace?.financial
+                            ?.acceptedBidValue || 0
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-white/10 p-4">
+                      <p className="text-xs font-black uppercase text-white/50">
+                        Servicios completados
+                      </p>
+                      <p className="mt-2 text-xl font-black">
+                        {formatCOP(
+                          marketplace?.financial
+                            ?.completedServiceValue || 0
+                        )}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl bg-emerald-400 p-4 text-slate-950">
+                      <p className="text-xs font-black uppercase opacity-60">
+                        Ingreso Central Go
+                      </p>
+                      <p className="mt-2 text-xl font-black">
+                        {formatCOP(
+                          marketplace?.financial
+                            ?.platformIncome || 0
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="rounded-[28px] border border-slate-200 bg-white p-5">
+                <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-950">
+                      Seguimiento de cargas
+                    </h3>
+
+                    <p className="mt-1 text-sm text-slate-500">
+                      Estado operativo de los servicios asignados.
+                    </p>
+                  </div>
+
+                  <span className="rounded-full border border-blue-200 bg-blue-50 px-4 py-2 text-xs font-black text-blue-700">
+                    {marketplace?.tracking?.professional || 0} con seguimiento profesional
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+                  <MiniStat
+                    title="Total"
+                    value={marketplace?.tracking?.total || 0}
+                  />
+                  <MiniStat
+                    title="Activos"
+                    value={marketplace?.tracking?.active || 0}
+                  />
+                  <MiniStat
+                    title="En tránsito"
+                    value={marketplace?.tracking?.inTransit || 0}
+                  />
+                  <MiniStat
+                    title="Entregados"
+                    value={marketplace?.tracking?.delivered || 0}
+                  />
+                  <MiniStat
+                    title="Completados"
+                    value={marketplace?.tracking?.completed || 0}
+                  />
+                  <MiniStat
+                    title="Cancelados"
+                    value={marketplace?.tracking?.cancelled || 0}
+                  />
+                  <MiniStat
+                    title="Disputas"
+                    value={marketplace?.tracking?.disputed || 0}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+                <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                  <h3 className="text-xl font-black text-slate-950">
+                    Últimas cargas publicadas
+                  </h3>
+
+                  <div className="mt-4 space-y-3">
+                    {(latest.marketplaceSpaces || []).length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No hay cargas publicadas todavía.
+                      </p>
+                    ) : (
+                      latest.marketplaceSpaces.map((item) => (
+                        <div
+                          key={item._id || item.id}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
+                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <p className="font-black text-slate-950">
+                                {item.publicationCode || "Sin código"} ·{" "}
+                                {item.title || "Carga"}
+                              </p>
+
+                              <p className="mt-1 text-sm text-slate-600">
+                                {item.originCity || item.origin} →{" "}
+                                {item.destinationCity ||
+                                  item.destination}
+                              </p>
+
+                              <p className="mt-1 text-xs text-slate-500">
+                                {item.weightKg || 0} kg ·{" "}
+                                {formatCOP(item.suggestedPrice)}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${getMarketplaceStatusClass(
+                                item.status
+                              )}`}
+                            >
+                              {getMarketplaceStatusLabel(
+                                item.status
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                <div className="rounded-[28px] border border-slate-200 bg-slate-50 p-5">
+                  <h3 className="text-xl font-black text-slate-950">
+                    Últimos servicios
+                  </h3>
+
+                  <div className="mt-4 space-y-3">
+                    {(latest.marketplaceTrackings || []).length === 0 ? (
+                      <p className="text-sm text-slate-500">
+                        No hay servicios de carga asignados todavía.
+                      </p>
+                    ) : (
+                      latest.marketplaceTrackings.map((item) => (
+                        <div
+                          key={item._id || item.id}
+                          className="rounded-2xl border border-slate-200 bg-white p-4"
+                        >
+                          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+                            <div>
+                              <p className="font-black text-slate-950">
+                                {item?.spaceOffer?.publicationCode ||
+                                  "Servicio de carga"}
+                              </p>
+
+                              <p className="mt-1 text-sm text-slate-600">
+                                {item?.captain?.fullname?.firstname ||
+                                  "Conductor"}{" "}
+                                {item?.captain?.fullname?.lastname ||
+                                  ""}
+                              </p>
+
+                              <p className="mt-1 text-xs text-slate-500">
+                                Valor: {formatCOP(item.serviceValue)} ·{" "}
+                                Comisión:{" "}
+                                {formatCOP(item.platformCommission)}
+                              </p>
+                            </div>
+
+                            <span
+                              className={`inline-flex rounded-full border px-3 py-1 text-xs font-black ${getMarketplaceStatusClass(
+                                item.status
+                              )}`}
+                            >
+                              {getMarketplaceStatusLabel(
+                                item.status
+                              )}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </SectionShell>
 
         <SectionShell
@@ -1512,6 +2184,117 @@ const SuperAdminDashboard = () => {
           </div>
         </SectionShell>
       </main>
+
+      {selectedApplication ? (
+        <div className="fixed inset-0 z-[110] overflow-y-auto bg-slate-950/80 px-4 py-5 backdrop-blur-sm">
+          <div className="mx-auto max-w-6xl overflow-hidden rounded-[34px] bg-white shadow-2xl">
+            <div className="border-b border-slate-200 bg-slate-950 p-5 text-white">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-xs font-black uppercase tracking-[0.2em] text-cyan-300">Expediente de conductor</p>
+                  <h2 className="mt-1 text-2xl font-black">
+                    {selectedApplication?.fullname?.firstname || "Sin nombre"} {selectedApplication?.fullname?.lastname || ""}
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-300">{selectedApplication.email || "Sin correo"}</p>
+                </div>
+
+                <button type="button" onClick={() => setSelectedApplication(null)} className="rounded-2xl bg-white px-5 py-3 text-sm font-black text-slate-950">
+                  Cerrar expediente
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 gap-5 p-5 xl:grid-cols-[0.8fr_1.2fr]">
+              <div className="space-y-4">
+                <div className="rounded-[26px] border border-slate-200 bg-slate-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.15em] text-slate-500">Identidad</p>
+                  <h3 className="mt-2 text-xl font-black text-slate-950">
+                    {selectedApplication?.fullname?.firstname || ""} {selectedApplication?.fullname?.lastname || ""}
+                  </h3>
+                  <p className="mt-2 text-sm text-slate-600">{selectedApplication?.identification?.type || "Documento"}: <b>{selectedApplication?.identification?.number || "No informado"}</b></p>
+                  <p className="mt-1 text-sm text-slate-600">Correo: <b>{selectedApplication.email || "Sin correo"}</b></p>
+                  <p className="mt-1 text-sm text-slate-600">Solicitud: <b>{formatDate(selectedApplication.createdAt)}</b></p>
+                </div>
+
+                <div className="rounded-[26px] border border-purple-200 bg-purple-50 p-5">
+                  <p className="text-xs font-black uppercase tracking-[0.15em] text-purple-600">Vehículo</p>
+                  <h3 className="mt-2 text-xl font-black text-purple-950">{getVehicleTypeLabel(selectedApplication?.vehicle?.vehicleType)}</h3>
+                  <div className="mt-4 space-y-2 text-sm text-purple-900">
+                    <p><b>Placa:</b> {selectedApplication?.vehicle?.plate || "Sin placa"}</p>
+                    <p><b>Color:</b> {selectedApplication?.vehicle?.color || "No informado"}</p>
+                    <p><b>Capacidad:</b> {formatKg(selectedApplication?.vehicle?.capacityKg || selectedApplication?.vehicle?.capacity || 0)} kg</p>
+                    <p><b>Marca:</b> {selectedApplication?.vehicle?.brand || "No informada"}</p>
+                    <p><b>Referencia:</b> {selectedApplication?.vehicle?.reference || "No informada"}</p>
+                    <p><b>Modelo:</b> {selectedApplication?.vehicle?.model || "No informado"}</p>
+                    <p><b>Carrocería:</b> {getBodyTypeLabel(selectedApplication?.vehicle?.bodyType)}</p>
+                    <p><b>Ejes:</b> {selectedApplication?.vehicle?.axleCount || "No informados"}</p>
+                  </div>
+                </div>
+
+                {getDocumentValue(selectedApplication, "vehicle.photo") ? (
+                  <button type="button" onClick={() => openDocument(getDocumentValue(selectedApplication, "vehicle.photo"), "Foto del vehículo")} className="w-full rounded-2xl bg-cyan-600 px-4 py-3.5 text-sm font-black text-white">
+                    Ver foto del vehículo
+                  </button>
+                ) : null}
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="text-xl font-black text-slate-950">Documentos recibidos</h3>
+                    <p className="mt-1 text-sm text-slate-500">Abre cada imagen y valida que sea legible y corresponda al conductor.</p>
+                  </div>
+                  <span className={`rounded-full px-3 py-1 text-xs font-black ${getApplicationStatusClass(selectedApplication.status)}`}>
+                    {getApplicationStatusLabel(selectedApplication.status)}
+                  </span>
+                </div>
+
+                <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                  {[
+                    ["Cédula — delante", "documents.identificationCard.front", "", "ri-id-card-line", "bg-cyan-50 text-cyan-700 border-cyan-200"],
+                    ["Cédula — detrás", "documents.identificationCard.back", "", "ri-id-card-line", "bg-cyan-50 text-cyan-700 border-cyan-200"],
+                    ["Licencia — delante", "documents.drivingLicense.front", "documents.drivingLicenseImage", "ri-steering-2-line", "bg-blue-50 text-blue-700 border-blue-200"],
+                    ["Licencia — detrás", "documents.drivingLicense.back", "", "ri-steering-2-line", "bg-blue-50 text-blue-700 border-blue-200"],
+                    ["Tarjeta de propiedad — delante", "documents.vehicleRegistration.front", "documents.vehicleRegistrationImage", "ri-file-list-3-line", "bg-purple-50 text-purple-700 border-purple-200"],
+                    ["Tarjeta de propiedad — detrás", "documents.vehicleRegistration.back", "", "ri-file-list-3-line", "bg-purple-50 text-purple-700 border-purple-200"],
+                  ].map(([label, path, legacyPath, icon, tone]) => {
+                    const documentValue = getDocumentValue(selectedApplication, path, legacyPath);
+                    return (
+                      <button
+                        key={path}
+                        type="button"
+                        onClick={() => openDocument(documentValue, label)}
+                        className={`rounded-[22px] border p-4 text-left transition hover:-translate-y-0.5 ${tone} ${!documentValue ? "opacity-55" : "shadow-sm"}`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-white/80">
+                            <i className={`${icon} text-xl`} />
+                          </div>
+                          <div>
+                            <p className="text-sm font-black">{label}</p>
+                            <p className="mt-1 text-xs opacity-75">{documentValue ? "Documento disponible" : "No recibido por el backend"}</p>
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {selectedApplication.status === "pending" ? (
+                  <div className="mt-5 grid grid-cols-1 gap-3 md:grid-cols-2">
+                    <button type="button" onClick={() => approveApplication(selectedApplication)} disabled={actionLoadingId === (selectedApplication._id || selectedApplication.id)} className="rounded-2xl bg-emerald-500 px-5 py-4 font-black text-slate-950 shadow-lg disabled:opacity-60">
+                      Aprobar conductor
+                    </button>
+                    <button type="button" onClick={() => rejectApplication(selectedApplication)} disabled={actionLoadingId === (selectedApplication._id || selectedApplication.id)} className="rounded-2xl bg-red-600 px-5 py-4 font-black text-white shadow-lg disabled:opacity-60">
+                      Rechazar con motivo
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {topupModalOpen && selectedCaptainWallet ? (
         <div className="fixed inset-0 z-[100] bg-slate-950/70 px-4 py-5 backdrop-blur-sm overflow-y-auto">

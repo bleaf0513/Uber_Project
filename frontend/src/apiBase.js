@@ -1,36 +1,47 @@
 import { Capacitor } from "@capacitor/core";
 
 const PROD_API = "https://uber-project-psfi.onrender.com";
+const LOCAL_API = "http://localhost:4000";
 
 function cleanUrl(value) {
-  return String(value || "").trim().replace(/\/+$/, "");
+  return String(value || "")
+    .trim()
+    .replace(/\/+$/, "");
 }
 
 function isBadProductionApiBase(value) {
   const cleaned = cleanUrl(value);
 
-  if (!cleaned) return true;
+  if (!cleaned) {
+    return true;
+  }
 
-  /**
-   * En producción NO queremos que la API apunte al mismo dominio del frontend,
-   * porque eso causa errores como:
-   *
-   * Cannot POST /enterprise-deliveries/optimize-routes
-   *
-   * ya que centralgo.mercalan.com.co sirve el frontend, no el backend Express.
+  /*
+   * En producción no queremos que la API apunte
+   * al mismo dominio donde está servido el frontend.
    */
   if (typeof window !== "undefined") {
-    const currentOrigin = cleanUrl(window.location.origin);
+    const currentOrigin = cleanUrl(
+      window.location.origin
+    );
 
     if (cleaned === currentOrigin) {
       return true;
     }
 
-    if (cleaned.includes("centralgo.mercalan.com.co")) {
+    if (
+      cleaned.includes(
+        "centralgo.mercalan.com.co"
+      )
+    ) {
       return true;
     }
 
-    if (cleaned === "/" || cleaned === "." || cleaned === "./") {
+    if (
+      cleaned === "/" ||
+      cleaned === "." ||
+      cleaned === "./"
+    ) {
       return true;
     }
   }
@@ -39,37 +50,39 @@ function isBadProductionApiBase(value) {
 }
 
 export function getApiBaseUrl() {
-  /**
-   * App nativa Android/iOS con Capacitor:
-   * siempre debe usar el backend público de Render.
+  /*
+   * Aplicación móvil instalada con Capacitor:
+   * debe usar el backend público.
    */
   if (Capacitor.isNativePlatform()) {
     return PROD_API;
   }
 
-  /**
-   * Desarrollo local:
-   * permite usar VITE_BASE_URL si lo configuraste.
-   * Si no existe, retorna vacío para usar el proxy de Vite.
+  /*
+   * Desarrollo local con Vite:
+   * siempre utiliza el backend local.
+   *
+   * Esto evita que localhost:5173 termine enviando
+   * las peticiones al backend antiguo de Render.
    */
   if (import.meta.env.DEV) {
-    const devBaseUrl = cleanUrl(import.meta.env.VITE_BASE_URL);
-
-    if (devBaseUrl) {
-      return devBaseUrl;
-    }
-
-    return "";
+    return LOCAL_API;
   }
 
-  /**
+  /*
    * Producción web:
-   * siempre usamos Render, excepto si VITE_BASE_URL trae una URL válida
-   * y diferente al dominio del frontend.
+   * permite una URL configurada mediante VITE_BASE_URL,
+   * siempre que sea válida.
    */
-  const productionEnvBaseUrl = cleanUrl(import.meta.env.VITE_BASE_URL);
+  const productionEnvBaseUrl = cleanUrl(
+    import.meta.env.VITE_BASE_URL
+  );
 
-  if (!isBadProductionApiBase(productionEnvBaseUrl)) {
+  if (
+    !isBadProductionApiBase(
+      productionEnvBaseUrl
+    )
+  ) {
     return productionEnvBaseUrl;
   }
 
