@@ -6,8 +6,17 @@ const SeatOffer = require("../models/seatOffer.model");
 const OfferBid = require("../models/offerBid.model");
 const User = require("../models/user.model");
 const Captain = require("../models/captain.model");
+
 const { sendMessageToSocketId } = require("../socket");
 const pushService = require("../services/push.service");
+
+const {
+    createTrackingFromAcceptedBid,
+} = require("./marketplaceLoadTracking.controller");
+
+/* =========================================================
+ * CONFIGURACIÓN GENERAL
+ * ========================================================= */
 
 const PRICE_TYPE_LABELS = {
     por_kg: "por kg",
@@ -21,6 +30,40 @@ const PRICE_TYPE_LABELS = {
     por_unidad: "por unidad",
     por_m3: "por m³",
     precio_total: "precio total",
+};
+
+const VEHICLE_LABELS = {
+    moto: "Moto",
+    carro: "Carro",
+    motocarro: "Motocarro",
+    camioneta: "Camioneta",
+    van: "Van",
+    camion_ultraliviano: "Camión ultraliviano",
+    camion_liviano: "Camión liviano",
+    camion_mediano: "Camión mediano",
+    camion_pesado: "Camión pesado",
+    camion_sencillo: "Camión sencillo",
+    doble_troque: "Doble troque",
+    volqueta: "Volqueta",
+    minimula: "Minimula",
+    tractomula: "Tractomula",
+    cama_baja: "Cama baja",
+    vehiculo_especial: "Vehículo especial",
+    otro: "Otro",
+};
+
+const BODY_TYPE_LABELS = {
+    no_especificada: "No especificada",
+    furgon_cerrado: "Furgón cerrado",
+    estacas: "Estacas",
+    plataforma: "Plataforma",
+    refrigerada: "Refrigerada",
+    volco: "Volco",
+    tanque: "Tanque",
+    portacontenedor: "Portacontenedor",
+    cama_baja: "Cama baja",
+    carroceria_abierta: "Carrocería abierta",
+    otro: "Otro",
 };
 
 const formatCOP = (value) => {
@@ -43,297 +86,207 @@ const buildPriceLabel = (suggestedPrice, priceType) => {
     return `${formatCOP(suggestedPrice)} ${label}`;
 };
 
-const getCustomerNameFromBid = (bid) => {
-    const first = bid?.customer?.fullname?.firstname || "";
-    const last = bid?.customer?.fullname?.lastname || "";
+const getCustomerName = (customer) => {
+    const first = customer?.fullname?.firstname || "";
+    const last = customer?.fullname?.lastname || "";
     const full = `${first} ${last}`.trim();
 
-    return full || bid?.customer?.email || "Cliente";
+    return full || customer?.email || "Cliente";
 };
 
 const getCaptainName = (captain) => {
     const first = captain?.fullname?.firstname || "";
     const last = captain?.fullname?.lastname || "";
-    return `${first} ${last}`.trim() || "Transportador";
+    const full = `${first} ${last}`.trim();
+
+    return full || "Transportador";
 };
 
-const getListingTitleFromBid = (bid) => {
-    if (bid?.listingType === "goods") {
-        return bid?.goodsOffer?.productName || "Mercancía";
-    }
-
-    if (bid?.listingType === "space") {
-        return bid?.spaceOffer?.cargoType
-            ? `Espacio para ${bid.spaceOffer.cargoType}`
-            : "Espacio disponible";
-    }
-
-    if (bid?.listingType === "seat") {
-        return "Cupos disponibles";
-    }
-
-    return "Oferta";
-};
-
-const buildBidNotificationPayload = (bid, extra = {}) => {
-    return {
-        bidId: String(bid?._id || ""),
-        listingType: bid?.listingType || "",
-        status: bid?.status || "",
-        title: getListingTitleFromBid(bid),
-        requestedQuantity: normalizeNumber(bid?.requestedQuantity),
-        requestedUnit: bid?.requestedUnit || "",
-        offeredPrice: normalizeNumber(bid?.offeredPrice),
-        offeredPriceLabel: formatCOP(bid?.offeredPrice),
-        counterPrice: bid?.counterPrice || null,
-        counterPriceLabel: bid?.counterPrice ? formatCOP(bid.counterPrice) : "",
-        message: bid?.message || "",
-        counterMessage: bid?.counterMessage || "",
-        customerName: getCustomerNameFromBid(bid),
-        captainName: getCaptainName(bid?.driver),
-        createdAt: bid?.createdAt,
-        updatedAt: bid?.updatedAt,
-        ...extra,
-    };
-};
-
-const notifyCaptainNewBid = async (bidId) => {
-    try {
-        const bid = await OfferBid.findById(bidId)
-            .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle socketId fcmTokens")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer");
-
-        if (!bid?.driver) return;
-
-        const captainId = bid.driver._id || bid.driver;
-
-        const title = "Nueva oferta recibida";
-        const body = `${getCustomerNameFromBid(bid)} ofertó ${
-            bid.requestedQuantity
-        } ${bid.requestedUnit} por ${formatCOP(bid.offeredPrice)}.`;
-
-        const payload = buildBidNotificationPayload(bid, {
-            notificationTitle: title,
-            notificationBody: body,
-        });
-
-        const captain = await Captain.findById(captainId).select(
-            "socketId fcmTokens"
-        );
-
-        if (captain?.socketId) {
-            sendMessageToSocketId(captain.socketId, {
-                event: "new-offer-bid",
-                data: payload,
-            });
-        }
-
-        await pushService.sendToCaptain(captainId, {
-            title,
-            body,
-            type: "marketplace_bid_received",
-            data: {
-                bidId: String(bid._id),
-                listingType: bid.listingType,
-                status: bid.status,
-                screen: "captain_received_bids",
-            },
-            link: `${process.env.FRONTEND_URL || ""}/captain/offers/received`,
-            requireInteraction: true,
-        });
-    } catch (error) {
-        console.error("[offers] notifyCaptainNewBid error:", error);
-    }
-};
-
-const notifyUserBidUpdated = async (bidId, action) => {
-    try {
-        const bid = await OfferBid.findById(bidId)
-            .populate("customer", "fullname email socketId fcmTokens")
-            .populate("driver", "fullname vehicle")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer");
-
-        if (!bid?.customer) return;
-
-        const userId = bid.customer._id || bid.customer;
-
-        const actionLabels = {
-            accepted: "aceptó",
-            rejected: "rechazó",
-            countered: "envió una contraoferta",
-            completed: "completó",
-            cancelled: "canceló",
-        };
-
-        const title =
-            action === "accepted"
-                ? "Oferta aceptada"
-                : action === "rejected"
-                ? "Oferta rechazada"
-                : action === "countered"
-                ? "Nueva contraoferta"
-                : "Respuesta a tu oferta";
-
-        const body = `${getCaptainName(bid.driver)} ${
-            actionLabels[action] || "respondió"
-        } tu oferta.`;
-
-        const payload = buildBidNotificationPayload(bid, {
-            action,
-            notificationTitle: title,
-            notificationBody: body,
-        });
-
-        const user = await User.findById(userId).select("socketId fcmTokens");
-
-        if (user?.socketId) {
-            sendMessageToSocketId(user.socketId, {
-                event: "offer-bid-updated",
-                data: payload,
-            });
-        }
-
-        await pushService.sendToUser(userId, {
-            title,
-            body,
-            type: "marketplace_bid_updated",
-            data: {
-                bidId: String(bid._id),
-                listingType: bid.listingType,
-                status: bid.status,
-                action,
-                screen: "user_sent_bids",
-            },
-            link: `${process.env.FRONTEND_URL || ""}/my-sent-bids`,
-            requireInteraction: true,
-        });
-    } catch (error) {
-        console.error("[offers] notifyUserBidUpdated error:", error);
-    }
-};
-
-const notifyCaptainCustomerCounterResponse = async (bidId, action) => {
-    try {
-        const bid = await OfferBid.findById(bidId)
-            .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle socketId fcmTokens")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer");
-
-        if (!bid?.driver) return;
-
-        const captainId = bid.driver._id || bid.driver;
-
-        const actionLabel = action === "accepted" ? "aceptó" : "rechazó";
-
-        const title =
-            action === "accepted"
-                ? "Contraoferta aceptada"
-                : "Contraoferta rechazada";
-
-        const body = `${getCustomerNameFromBid(bid)} ${actionLabel} tu contraoferta.`;
-
-        const payload = buildBidNotificationPayload(bid, {
-            action,
-            notificationTitle: title,
-            notificationBody: body,
-        });
-
-        const captain = await Captain.findById(captainId).select(
-            "socketId fcmTokens"
-        );
-
-        if (captain?.socketId) {
-            sendMessageToSocketId(captain.socketId, {
-                event: "offer-counter-response",
-                data: payload,
-            });
-        }
-
-        await pushService.sendToCaptain(captainId, {
-            title,
-            body,
-            type: "marketplace_counter_response",
-            data: {
-                bidId: String(bid._id),
-                listingType: bid.listingType,
-                status: bid.status,
-                action,
-                screen: "captain_received_bids",
-            },
-            link: `${process.env.FRONTEND_URL || ""}/captain/offers/received`,
-            requireInteraction: true,
-        });
-    } catch (error) {
-        console.error("[offers] notifyCaptainCustomerCounterResponse error:", error);
-    }
-};
-
-const notifyAsync = (label, fn) => {
+const runNotification = (label, callback) => {
     setImmediate(() => {
         Promise.resolve()
-            .then(fn)
+            .then(callback)
             .catch((error) => {
                 console.error(`[offers] ${label}:`, error);
             });
     });
 };
 
-const buildSalesMap = async ({ listingType, fieldName, offerIds }) => {
-    if (!Array.isArray(offerIds) || offerIds.length === 0) {
-        return {};
-    }
+/* =========================================================
+ * CAMPOS CALCULADOS
+ * ========================================================= */
 
-    const acceptedBids = await OfferBid.find({
-        listingType,
-        [fieldName]: { $in: offerIds },
-        status: "accepted",
-    })
-        .populate("customer", "fullname email")
-        .sort({ updatedAt: -1 });
+const attachGoodsComputedFields = (offer, salesInfo = null) => {
+    const obj =
+        typeof offer?.toObject === "function"
+            ? offer.toObject()
+            : offer || {};
 
-    const salesMap = {};
+    const publishedQuantity = normalizeNumber(obj.quantityAvailable);
+    const soldQuantity = normalizeNumber(salesInfo?.soldQuantity);
+    const soldMoney = normalizeNumber(salesInfo?.soldMoney);
+    const realAvailable = Math.max(
+        publishedQuantity - soldQuantity,
+        0
+    );
 
-    acceptedBids.forEach((bid) => {
-        const rawOfferId = bid[fieldName];
-        const offerId = String(rawOfferId?._id || rawOfferId);
+    return {
+        ...obj,
 
-        if (!salesMap[offerId]) {
-            salesMap[offerId] = {
-                soldQuantity: 0,
-                soldMoney: 0,
-                sales: [],
-            };
-        }
+        priceLabel: buildPriceLabel(
+            obj.suggestedPrice,
+            obj.priceType
+        ),
 
-        const quantity = normalizeNumber(bid.requestedQuantity);
-        const money = normalizeNumber(bid.offeredPrice);
+        publishedQuantity,
 
-        salesMap[offerId].soldQuantity += quantity;
-        salesMap[offerId].soldMoney += money;
+        publishedLabel:
+            `${publishedQuantity} ` +
+            `${obj.quantityUnit || ""} publicados`,
 
-        salesMap[offerId].sales.push({
-            bidId: bid._id,
-            customerName: getCustomerNameFromBid(bid),
-            customerEmail: bid?.customer?.email || "",
-            quantity,
-            unit: bid.requestedUnit,
-            price: money,
-            message: bid.message || "",
-            date: bid.updatedAt || bid.createdAt,
-        });
-    });
+        soldQuantity,
+        soldMoney,
 
-    return salesMap;
+        soldLabel:
+            `${soldQuantity} ` +
+            `${obj.quantityUnit || ""} vendidos`,
+
+        realAvailable,
+        availableReal: realAvailable,
+
+        availableLabel:
+            `${realAvailable} ` +
+            `${obj.quantityUnit || ""} disponibles`,
+
+        sales: Array.isArray(salesInfo?.sales)
+            ? salesInfo.sales
+            : [],
+    };
 };
 
-const getAcceptedSoldQuantity = async ({ listingType, fieldName, offerId }) => {
+const attachSpaceComputedFields = (offer) => {
+    const obj =
+        typeof offer?.toObject === "function"
+            ? offer.toObject()
+            : offer || {};
+
+    const available =
+        ["active", "recibiendo_propuestas"].includes(
+            obj.status
+        ) && !obj.selectedBid;
+
+    return {
+        ...obj,
+
+        priceLabel:
+            normalizeNumber(obj.suggestedPrice) > 0
+                ? formatCOP(obj.suggestedPrice)
+                : "Recibe propuestas",
+
+        publishedQuantity: 1,
+        publishedLabel: "1 carga publicada",
+
+        soldQuantity: obj.selectedBid ? 1 : 0,
+        soldMoney: 0,
+
+        soldLabel: obj.selectedBid
+            ? "Carga asignada"
+            : "Sin asignar",
+
+        realAvailable: available ? 1 : 0,
+        availableReal: available ? 1 : 0,
+
+        availableLabel: available
+            ? "Recibiendo propuestas"
+            : "Carga no disponible",
+
+        weightLabel:
+            obj.weightUnit === "toneladas"
+                ? `${obj.weight} toneladas`
+                : `${obj.weight} kg`,
+
+        normalizedWeightLabel:
+            `${normalizeNumber(obj.weightKg)} kg`,
+
+        suggestedVehicleLabel:
+            VEHICLE_LABELS[obj.suggestedVehicleType] ||
+            "Por definir",
+
+        requiredVehicleLabel:
+            VEHICLE_LABELS[obj.requiredVehicleType] ||
+            "Por definir",
+
+        requiredBodyLabel:
+            BODY_TYPE_LABELS[obj.requiredBodyType] ||
+            "No especificada",
+    };
+};
+
+const attachSeatComputedFields = (
+    offer,
+    salesInfo = null
+) => {
+    const obj =
+        typeof offer?.toObject === "function"
+            ? offer.toObject()
+            : offer || {};
+
+    const publishedQuantity =
+        normalizeNumber(obj.seatsAvailable);
+
+    const soldQuantity =
+        normalizeNumber(salesInfo?.soldQuantity);
+
+    const soldMoney =
+        normalizeNumber(salesInfo?.soldMoney);
+
+    const realAvailable = Math.max(
+        publishedQuantity - soldQuantity,
+        0
+    );
+
+    return {
+        ...obj,
+
+        priceLabel:
+            `${formatCOP(obj.suggestedPrice)} por ` +
+            `${obj.seatUnit || "cupo"}`,
+
+        publishedQuantity,
+
+        publishedLabel:
+            `${publishedQuantity} ` +
+            `${obj.seatUnit || "cupos"} publicados`,
+
+        soldQuantity,
+        soldMoney,
+
+        soldLabel:
+            `${soldQuantity} ` +
+            `${obj.seatUnit || "cupos"} vendidos`,
+
+        realAvailable,
+        availableReal: realAvailable,
+
+        availableLabel:
+            `${realAvailable} ` +
+            `${obj.seatUnit || "cupos"} disponibles`,
+
+        sales: Array.isArray(salesInfo?.sales)
+            ? salesInfo.sales
+            : [],
+    };
+};
+
+/* =========================================================
+ * DISPONIBILIDAD DE MERCANCÍA Y CUPOS
+ * ========================================================= */
+
+const getAcceptedQuantity = async ({
+    listingType,
+    fieldName,
+    offerId,
+}) => {
     const result = await OfferBid.aggregate([
         {
             $match: {
@@ -345,85 +298,90 @@ const getAcceptedSoldQuantity = async ({ listingType, fieldName, offerId }) => {
         {
             $group: {
                 _id: `$${fieldName}`,
-                soldQuantity: { $sum: "$requestedQuantity" },
+                quantity: {
+                    $sum: "$requestedQuantity",
+                },
             },
         },
     ]);
 
-    return normalizeNumber(result?.[0]?.soldQuantity);
+    return normalizeNumber(result?.[0]?.quantity);
 };
 
-const attachGoodsComputedFields = (offer, salesInfo = null) => {
-    const obj = typeof offer.toObject === "function" ? offer.toObject() : offer;
+const buildSalesMap = async ({
+    listingType,
+    fieldName,
+    offerIds,
+}) => {
+    if (!Array.isArray(offerIds) || offerIds.length === 0) {
+        return {};
+    }
 
-    const publishedQuantity = normalizeNumber(obj.quantityAvailable);
-    const soldQuantity = normalizeNumber(salesInfo?.soldQuantity);
-    const soldMoney = normalizeNumber(salesInfo?.soldMoney);
-    const realAvailable = Math.max(publishedQuantity - soldQuantity, 0);
+    const bids = await OfferBid.find({
+        listingType,
+        [fieldName]: {
+            $in: offerIds,
+        },
+        status: "accepted",
+    })
+        .populate("customer", "fullname email")
+        .sort({
+            updatedAt: -1,
+        });
 
-    return {
-        ...obj,
-        priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-        publishedQuantity,
-        publishedLabel: `${publishedQuantity} ${obj.quantityUnit || ""} publicados`,
-        soldQuantity,
-        soldMoney,
-        soldLabel: `${soldQuantity} ${obj.quantityUnit || ""} vendidos`,
-        realAvailable,
-        availableReal: realAvailable,
-        availableLabel: `${realAvailable} ${obj.quantityUnit || ""} disponibles`,
-        sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
-    };
-};
+    const result = {};
 
-const attachSpaceComputedFields = (offer, salesInfo = null) => {
-    const obj = typeof offer.toObject === "function" ? offer.toObject() : offer;
+    bids.forEach((bid) => {
+        const reference = bid[fieldName];
 
-    const publishedQuantity = normalizeNumber(obj.capacityAvailable);
-    const soldQuantity = normalizeNumber(salesInfo?.soldQuantity);
-    const soldMoney = normalizeNumber(salesInfo?.soldMoney);
-    const realAvailable = Math.max(publishedQuantity - soldQuantity, 0);
+        const id = String(
+            reference?._id || reference
+        );
 
-    return {
-        ...obj,
-        priceLabel: buildPriceLabel(obj.suggestedPrice, obj.priceType),
-        publishedQuantity,
-        publishedLabel: `${publishedQuantity} ${obj.capacityUnit || ""} publicados`,
-        soldQuantity,
-        soldMoney,
-        soldLabel: `${soldQuantity} ${obj.capacityUnit || ""} vendidos`,
-        realAvailable,
-        availableReal: realAvailable,
-        availableLabel: `${realAvailable} ${obj.capacityUnit || ""} disponibles`,
-        sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
-    };
-};
+        if (!result[id]) {
+            result[id] = {
+                soldQuantity: 0,
+                soldMoney: 0,
+                sales: [],
+            };
+        }
 
-const attachSeatComputedFields = (offer, salesInfo = null) => {
-    const obj = typeof offer.toObject === "function" ? offer.toObject() : offer;
+        const quantity =
+            normalizeNumber(bid.requestedQuantity);
 
-    const publishedQuantity = normalizeNumber(obj.seatsAvailable);
-    const soldQuantity = normalizeNumber(salesInfo?.soldQuantity);
-    const soldMoney = normalizeNumber(salesInfo?.soldMoney);
-    const realAvailable = Math.max(publishedQuantity - soldQuantity, 0);
+        const price =
+            normalizeNumber(bid.offeredPrice);
 
-    return {
-        ...obj,
-        priceLabel: `${formatCOP(obj.suggestedPrice)} por ${obj.seatUnit || "cupo"}`,
-        publishedQuantity,
-        publishedLabel: `${publishedQuantity} ${obj.seatUnit || "cupos"} publicados`,
-        soldQuantity,
-        soldMoney,
-        soldLabel: `${soldQuantity} ${obj.seatUnit || "cupos"} vendidos`,
-        realAvailable,
-        availableReal: realAvailable,
-        availableLabel: `${realAvailable} ${obj.seatUnit || "cupos"} disponibles`,
-        sales: Array.isArray(salesInfo?.sales) ? salesInfo.sales : [],
-    };
+        result[id].soldQuantity += quantity;
+        result[id].soldMoney += price;
+
+        result[id].sales.push({
+            bidId: bid._id,
+
+            customerName:
+                getCustomerName(bid.customer),
+
+            customerEmail:
+                bid?.customer?.email || "",
+
+            quantity,
+            unit: bid.requestedUnit,
+            price,
+            message: bid.message || "",
+
+            date:
+                bid.updatedAt ||
+                bid.createdAt,
+        });
+    });
+
+    return result;
 };
 
 const shouldIncludeEmpty = (req) => {
-    return String(req.query.includeEmpty || "false") === "true";
+    return String(
+        req.query.includeEmpty || "false"
+    ) === "true";
 };
 
 const filterAvailableOnly = (offers, req) => {
@@ -432,12 +390,17 @@ const filterAvailableOnly = (offers, req) => {
     }
 
     return offers.filter((offer) => {
-        const available = Number(offer.availableReal ?? offer.realAvailable ?? 0);
+        const available = Number(
+            offer.availableReal ??
+            offer.realAvailable ??
+            0
+        );
+
         return available > 0;
     });
 };
 
-const getListingConfigFromBid = (bid) => {
+const getTraditionalListingConfig = (bid) => {
     if (bid.listingType === "goods") {
         return {
             Model: GoodsOffer,
@@ -446,19 +409,6 @@ const getListingConfigFromBid = (bid) => {
             quantityField: "quantityAvailable",
             unitField: "quantityUnit",
             emptyStatus: "sold_out",
-            listingName: "mercancía",
-        };
-    }
-
-    if (bid.listingType === "space") {
-        return {
-            Model: SpaceOffer,
-            listingId: bid.spaceOffer,
-            bidField: "spaceOffer",
-            quantityField: "capacityAvailable",
-            unitField: "capacityUnit",
-            emptyStatus: "reserved",
-            listingName: "espacio",
         };
     }
 
@@ -470,401 +420,2311 @@ const getListingConfigFromBid = (bid) => {
             quantityField: "seatsAvailable",
             unitField: "seatUnit",
             emptyStatus: "full",
-            listingName: "cupos",
         };
     }
 
     return null;
 };
 
-const getListingIdFromBid = (bid, config) => {
-    if (!config || !config.listingId) return null;
-
-    if (typeof config.listingId === "object" && config.listingId._id) {
-        return config.listingId._id;
-    }
-
-    return config.listingId;
-};
-
-const getRealAvailableForListing = async ({
-    listingType,
-    bidField,
-    listingId,
-    publishedQuantity,
-}) => {
-    const soldQuantity = await getAcceptedSoldQuantity({
-        listingType,
-        fieldName: bidField,
-        offerId: listingId,
-    });
-
-    return Math.max(normalizeNumber(publishedQuantity) - soldQuantity, 0);
-};
-
-const discountAvailabilityForBid = async (bid) => {
-    const config = getListingConfigFromBid(bid);
+const acceptTraditionalBid = async (bid) => {
+    const config =
+        getTraditionalListingConfig(bid);
 
     if (!config) {
-        throw new Error("Tipo de publicación inválido.");
-    }
-
-    const listingId = getListingIdFromBid(bid, config);
-
-    if (!listingId) {
-        throw new Error("No se pudo identificar la publicación de esta oferta.");
-    }
-
-    const requestedQuantity = normalizeNumber(bid.requestedQuantity);
-
-    if (requestedQuantity <= 0) {
-        throw new Error("La cantidad solicitada debe ser mayor que cero.");
-    }
-
-    const requestedUnit = String(bid.requestedUnit || "").trim();
-
-    if (!requestedUnit) {
-        throw new Error("La unidad solicitada no es válida.");
-    }
-
-    const listingBefore = await config.Model.findById(listingId);
-
-    if (!listingBefore) {
-        throw new Error("La publicación ya no existe.");
-    }
-
-    if (listingBefore.status !== "active") {
-        throw new Error("La publicación ya no está activa.");
-    }
-
-    const listingUnit = String(listingBefore[config.unitField] || "").trim();
-
-    if (listingUnit !== requestedUnit) {
         throw new Error(
-            `La unidad solicitada (${requestedUnit}) no coincide con la unidad publicada (${listingUnit}).`
+            "Tipo de publicación inválido."
         );
     }
 
-    const realAvailableBefore = await getRealAvailableForListing({
-        listingType: bid.listingType,
-        bidField: config.bidField,
-        listingId,
-        publishedQuantity: listingBefore[config.quantityField],
-    });
+    const listingId =
+        config.listingId?._id ||
+        config.listingId;
 
-    if (realAvailableBefore < requestedQuantity) {
+    const listing =
+        await config.Model.findById(
+            listingId
+        );
+
+    if (!listing) {
         throw new Error(
-            `No hay disponibilidad suficiente. Disponible real: ${realAvailableBefore} ${listingUnit}. Solicitado: ${requestedQuantity} ${requestedUnit}.`
+            "La publicación ya no existe."
         );
     }
 
-    const realAvailableAfter = Math.max(realAvailableBefore - requestedQuantity, 0);
+    if (listing.status !== "active") {
+        throw new Error(
+            "La publicación ya no está activa."
+        );
+    }
 
-    if (realAvailableAfter <= 0) {
-        const updatedListing = await config.Model.findByIdAndUpdate(
-            listingId,
-            { $set: { status: config.emptyStatus } },
-            { new: true, runValidators: true }
+    const requestedQuantity =
+        normalizeNumber(
+            bid.requestedQuantity
         );
 
-        return updatedListing;
+    const requestedUnit =
+        String(
+            bid.requestedUnit || ""
+        ).trim();
+
+    const listingUnit =
+        String(
+            listing[
+                config.unitField
+            ] || ""
+        ).trim();
+
+    if (requestedUnit !== listingUnit) {
+        throw new Error(
+            "La unidad solicitada no coincide " +
+            "con la unidad publicada."
+        );
     }
 
-    return listingBefore;
+    const soldQuantity =
+        await getAcceptedQuantity({
+            listingType:
+                bid.listingType,
+
+            fieldName:
+                config.bidField,
+
+            offerId:
+                listing._id,
+        });
+
+    const available =
+        normalizeNumber(
+            listing[
+                config.quantityField
+            ]
+        ) - soldQuantity;
+
+    if (requestedQuantity > available) {
+        throw new Error(
+            `No hay disponibilidad suficiente. ` +
+            `Disponible: ${available} ${listingUnit}.`
+        );
+    }
+
+    bid.status = "accepted";
+    await bid.save();
+
+    const availableAfter =
+        available - requestedQuantity;
+
+    if (availableAfter <= 0) {
+        await config.Model.findByIdAndUpdate(
+            listing._id,
+            {
+                $set: {
+                    status:
+                        config.emptyStatus,
+                },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        await OfferBid.updateMany(
+            {
+                _id: {
+                    $ne: bid._id,
+                },
+
+                listingType:
+                    bid.listingType,
+
+                [config.bidField]:
+                    listing._id,
+
+                status: {
+                    $in: [
+                        "pending",
+                        "countered",
+                    ],
+                },
+            },
+            {
+                $set: {
+                    status: "rejected",
+
+                    counterMessage:
+                        "La publicación ya no tiene disponibilidad.",
+
+                    rejectedAt:
+                        new Date(),
+
+                    respondedAt:
+                        new Date(),
+                },
+            }
+        );
+    }
+
+    return config.Model.findById(
+        listing._id
+    );
 };
 
-const rejectOtherPendingBidsIfSoldOut = async (acceptedBid, updatedListing) => {
-    const config = getListingConfigFromBid(acceptedBid);
+/* =========================================================
+ * NOTIFICACIONES DEL MARKETPLACE DE CARGAS
+ * ========================================================= */
 
-    if (!config || !updatedListing) return;
-
-    const listingId = getListingIdFromBid(acceptedBid, config);
-
-    if (!listingId) return;
-
-    const realAvailable = await getRealAvailableForListing({
-        listingType: acceptedBid.listingType,
-        bidField: config.bidField,
-        listingId,
-        publishedQuantity: updatedListing[config.quantityField],
-    });
-
-    if (realAvailable > 0) return;
-
-    const filter = {
-        _id: { $ne: acceptedBid._id },
-        listingType: acceptedBid.listingType,
-        status: { $in: ["pending", "countered"] },
-    };
-
-    if (acceptedBid.listingType === "goods") {
-        filter.goodsOffer = listingId;
-    }
-
-    if (acceptedBid.listingType === "space") {
-        filter.spaceOffer = listingId;
-    }
-
-    if (acceptedBid.listingType === "seat") {
-        filter.seatOffer = listingId;
-    }
-
-    await OfferBid.updateMany(filter, {
-        $set: {
-            status: "rejected",
-            counterMessage: "La publicación ya no tiene disponibilidad.",
-        },
-    });
-};
-
-module.exports.createGoodsOffer = async (req, res) => {
+const notifyUserNewSpaceBid = async (bidId) => {
     try {
-        const errors = validationResult(req);
+        const bid = await OfferBid.findById(
+            bidId
+        )
+            .populate(
+                "customer",
+                "fullname email socketId fcmTokens"
+            )
+            .populate(
+                "driver",
+                "fullname vehicle"
+            )
+            .populate("spaceOffer");
 
-        if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+        if (!bid?.customer) {
+            return;
         }
 
-        const offer = await GoodsOffer.create({
-            driver: req.captain._id,
-            productName: req.body.productName,
-            quantityAvailable: Number(req.body.quantityAvailable),
-            quantityUnit: req.body.quantityUnit,
-            suggestedPrice: Number(req.body.suggestedPrice),
-            priceType: req.body.priceType,
-            origin: req.body.origin,
-            destination: req.body.destination,
-            departureTime: req.body.departureTime || null,
-            vehicleType: req.body.vehicleType || null,
-            description: req.body.description || "",
-            notes: req.body.notes || "",
-            isNegotiable:
-                typeof req.body.isNegotiable === "boolean"
-                    ? req.body.isNegotiable
-                    : true,
-        });
+        const userId =
+            bid.customer._id ||
+            bid.customer;
+
+        const title =
+            "Nueva propuesta para tu carga";
+
+        const body =
+            `${getCaptainName(bid.driver)} ` +
+            `ofrece realizar el viaje por ` +
+            `${formatCOP(bid.offeredPrice)}.`;
+
+        const user =
+            await User.findById(
+                userId
+            ).select(
+                "socketId fcmTokens"
+            );
+
+        if (user?.socketId) {
+            sendMessageToSocketId(
+                user.socketId,
+                {
+                    event:
+                        "new-space-bid",
+
+                    data: {
+                        bidId:
+                            String(bid._id),
+
+                        status:
+                            bid.status,
+
+                        offeredPrice:
+                            bid.offeredPrice,
+
+                        offeredPriceLabel:
+                            formatCOP(
+                                bid.offeredPrice
+                            ),
+
+                        driverName:
+                            getCaptainName(
+                                bid.driver
+                            ),
+
+                        loadTitle:
+                            bid?.spaceOffer
+                                ?.title ||
+                            "Carga disponible",
+                    },
+                }
+            );
+        }
+
+        await pushService.sendToUser(
+            userId,
+            {
+                title,
+                body,
+
+                type:
+                    "marketplace_space_bid_received",
+
+                data: {
+                    bidId:
+                        String(bid._id),
+
+                    listingType:
+                        "space",
+
+                    status:
+                        bid.status,
+
+                    screen:
+                        "user_space_bids_received",
+                },
+
+                link:
+                    `${process.env.FRONTEND_URL || ""}` +
+                    `/my-load-offers`,
+
+                requireInteraction:
+                    true,
+            }
+        );
+    } catch (error) {
+        console.error(
+            "notifyUserNewSpaceBid:",
+            error
+        );
+    }
+};
+
+const notifyCaptainSpaceBidUpdated = async (
+    bidId,
+    action
+) => {
+    try {
+        const bid = await OfferBid.findById(
+            bidId
+        )
+            .populate(
+                "customer",
+                "fullname email"
+            )
+            .populate(
+                "driver",
+                "fullname vehicle socketId fcmTokens"
+            )
+            .populate("spaceOffer");
+
+        if (!bid?.driver) {
+            return;
+        }
+
+        const captainId =
+            bid.driver._id ||
+            bid.driver;
+
+        const title =
+            action === "accepted"
+                ? "Tu propuesta fue aceptada"
+                : action === "rejected"
+                ? "Tu propuesta no fue seleccionada"
+                : action === "countered"
+                ? "Recibiste una contraoferta"
+                : "Actualización de propuesta";
+
+        const body =
+            action === "countered"
+                ? `El cliente propone ` +
+                  `${formatCOP(bid.counterPrice)}.`
+                : `${getCustomerName(bid.customer)} ` +
+                  `actualizó tu propuesta.`;
+
+        const captain =
+            await Captain.findById(
+                captainId
+            ).select(
+                "socketId fcmTokens"
+            );
+
+        if (captain?.socketId) {
+            sendMessageToSocketId(
+                captain.socketId,
+                {
+                    event:
+                        "space-bid-updated",
+
+                    data: {
+                        bidId:
+                            String(bid._id),
+
+                        status:
+                            bid.status,
+
+                        action,
+
+                        offeredPrice:
+                            bid.offeredPrice,
+
+                        counterPrice:
+                            bid.counterPrice,
+
+                        title:
+                            bid?.spaceOffer
+                                ?.title ||
+                            "Carga disponible",
+                    },
+                }
+            );
+        }
+
+        await pushService.sendToCaptain(
+            captainId,
+            {
+                title,
+                body,
+
+                type:
+                    "marketplace_space_bid_updated",
+
+                data: {
+                    bidId:
+                        String(bid._id),
+
+                    listingType:
+                        "space",
+
+                    status:
+                        bid.status,
+
+                    action,
+
+                    screen:
+                        "captain_space_bids_sent",
+                },
+
+                link:
+                    `${process.env.FRONTEND_URL || ""}` +
+                    `/captain/load-proposals`,
+
+                requireInteraction:
+                    true,
+            }
+        );
+    } catch (error) {
+        console.error(
+            "notifyCaptainSpaceBidUpdated:",
+            error
+        );
+    }
+};
+
+const notifyUserSpaceCounterResponse = async (
+    bidId,
+    action
+) => {
+    try {
+        const bid = await OfferBid.findById(
+            bidId
+        )
+            .populate(
+                "customer",
+                "fullname email socketId fcmTokens"
+            )
+            .populate(
+                "driver",
+                "fullname vehicle"
+            )
+            .populate("spaceOffer");
+
+        if (!bid?.customer) {
+            return;
+        }
+
+        const userId =
+            bid.customer._id ||
+            bid.customer;
+
+        const title =
+            action === "accepted"
+                ? "Contraoferta aceptada"
+                : "Contraoferta rechazada";
+
+        const body =
+            `${getCaptainName(bid.driver)} ` +
+            `${action === "accepted"
+                ? "aceptó"
+                : "rechazó"} ` +
+            `tu contraoferta.`;
+
+        const user =
+            await User.findById(
+                userId
+            ).select(
+                "socketId fcmTokens"
+            );
+
+        if (user?.socketId) {
+            sendMessageToSocketId(
+                user.socketId,
+                {
+                    event:
+                        "space-counter-response",
+
+                    data: {
+                        bidId:
+                            String(bid._id),
+
+                        action,
+
+                        status:
+                            bid.status,
+                    },
+                }
+            );
+        }
+
+        await pushService.sendToUser(
+            userId,
+            {
+                title,
+                body,
+
+                type:
+                    "marketplace_space_counter_response",
+
+                data: {
+                    bidId:
+                        String(bid._id),
+
+                    listingType:
+                        "space",
+
+                    status:
+                        bid.status,
+
+                    action,
+
+                    screen:
+                        "user_space_bids_received",
+                },
+
+                link:
+                    `${process.env.FRONTEND_URL || ""}` +
+                    `/my-load-offers`,
+
+                requireInteraction:
+                    true,
+            }
+        );
+    } catch (error) {
+        console.error(
+            "notifyUserSpaceCounterResponse:",
+            error
+        );
+    }
+};
+
+/* =========================================================
+ * MERCANCÍA
+ * ========================================================= */
+
+module.exports.createGoodsOffer = async (
+    req,
+    res
+) => {
+    try {
+        const errors =
+            validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                errors: errors.array(),
+            });
+        }
+
+        const offer =
+            await GoodsOffer.create({
+                driver:
+                    req.captain._id,
+
+                productName:
+                    req.body.productName,
+
+                quantityAvailable:
+                    Number(
+                        req.body
+                            .quantityAvailable
+                    ),
+
+                quantityUnit:
+                    req.body.quantityUnit,
+
+                suggestedPrice:
+                    Number(
+                        req.body
+                            .suggestedPrice
+                    ),
+
+                priceType:
+                    req.body.priceType,
+
+                origin:
+                    req.body.origin,
+
+                destination:
+                    req.body.destination,
+
+                departureTime:
+                    req.body
+                        .departureTime ||
+                    null,
+
+                vehicleType:
+                    req.body
+                        .vehicleType ||
+                    null,
+
+                description:
+                    req.body
+                        .description ||
+                    "",
+
+                notes:
+                    req.body.notes ||
+                    "",
+
+                photos:
+                    Array.isArray(
+                        req.body.photos
+                    )
+                        ? req.body.photos
+                              .filter(
+                                  (photo) =>
+                                      typeof photo ===
+                                          "string" &&
+                                      photo.trim()
+                                          .length >
+                                          0
+                              )
+                              .slice(0, 4)
+                        : [],
+
+                isNegotiable:
+                    typeof req.body
+                        .isNegotiable ===
+                    "boolean"
+                        ? req.body
+                              .isNegotiable
+                        : true,
+            });
 
         return res.status(201).json({
-            offer: attachGoodsComputedFields(offer),
+            offer:
+                attachGoodsComputedFields(
+                    offer
+                ),
         });
     } catch (error) {
-        console.error("Error creating goods offer:", error);
+        console.error(
+            "Error creating goods offer:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error creando oferta de mercancía.",
+            message:
+                error?.message ||
+                "Error creando oferta de mercancía.",
         });
     }
 };
 
-module.exports.listGoodsOffers = async (req, res) => {
+module.exports.listGoodsOffers = async (
+    req,
+    res
+) => {
     try {
-        const filter = {};
+        const filter = {
+            status:
+                req.query.status ||
+                "active",
+        };
 
         if (req.query.origin) {
-            filter.origin = { $regex: req.query.origin, $options: "i" };
+            filter.origin = {
+                $regex:
+                    req.query.origin,
+
+                $options: "i",
+            };
         }
 
         if (req.query.destination) {
-            filter.destination = { $regex: req.query.destination, $options: "i" };
+            filter.destination = {
+                $regex:
+                    req.query
+                        .destination,
+
+                $options: "i",
+            };
         }
 
-        filter.status = req.query.status || "active";
+        const offers =
+            await GoodsOffer.find(
+                filter
+            )
+                .populate(
+                    "driver",
+                    "fullname vehicle"
+                )
+                .sort({
+                    createdAt: -1,
+                });
 
-        const offers = await GoodsOffer.find(filter)
-            .populate("driver", "fullname vehicle")
-            .sort({ createdAt: -1 });
+        const salesMap =
+            await buildSalesMap({
+                listingType:
+                    "goods",
 
-        const salesMap = await buildSalesMap({
-            listingType: "goods",
-            fieldName: "goodsOffer",
-            offerIds: offers.map((offer) => offer._id),
-        });
+                fieldName:
+                    "goodsOffer",
 
-        let computedOffers = offers.map((offer) =>
-            attachGoodsComputedFields(offer, salesMap[String(offer._id)])
-        );
+                offerIds:
+                    offers.map(
+                        (offer) =>
+                            offer._id
+                    ),
+            });
 
-        computedOffers = filterAvailableOnly(computedOffers, req);
+        let computed =
+            offers.map((offer) =>
+                attachGoodsComputedFields(
+                    offer,
+
+                    salesMap[
+                        String(
+                            offer._id
+                        )
+                    ]
+                )
+            );
+
+        computed =
+            filterAvailableOnly(
+                computed,
+                req
+            );
 
         return res.status(200).json({
-            offers: computedOffers,
+            offers: computed,
         });
     } catch (error) {
-        console.error("Error listing goods offers:", error);
+        console.error(
+            "Error listing goods offers:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error listando ofertas de mercancía.",
+            message:
+                error?.message ||
+                "Error listando ofertas de mercancía.",
         });
     }
 };
 
-module.exports.createSpaceOffer = async (req, res) => {
+/* =========================================================
+ * MARKETPLACE DE CARGAS
+ * ========================================================= */
+
+module.exports.createSpaceOffer = async (
+    req,
+    res
+) => {
     try {
-        const errors = validationResult(req);
+        const errors =
+            validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({
+                errors: errors.array(),
+            });
         }
 
-        const offer = await SpaceOffer.create({
-            driver: req.captain._id,
-            capacityAvailable: Number(req.body.capacityAvailable),
-            capacityUnit: req.body.capacityUnit,
-            cargoType: req.body.cargoType || "",
-            suggestedPrice: Number(req.body.suggestedPrice),
-            priceType: req.body.priceType,
-            origin: req.body.origin,
-            destination: req.body.destination,
-            departureTime: req.body.departureTime || null,
-            vehicleType: req.body.vehicleType || null,
-            description: req.body.description || "",
-            notes: req.body.notes || "",
-            isNegotiable:
-                typeof req.body.isNegotiable === "boolean"
-                    ? req.body.isNegotiable
-                    : true,
-        });
+        const offer =
+            await SpaceOffer.create({
+                customer:
+                    req.user._id,
+
+                title:
+                    req.body.title,
+
+                cargoType:
+                    req.body.cargoType,
+
+                weight:
+                    Number(
+                        req.body.weight
+                    ),
+
+                weightUnit:
+                    req.body
+                        .weightUnit ||
+                    "kg",
+
+                /*
+                 * Valor temporal obligatorio.
+                 * El modelo lo recalcula en pre-validate.
+                 */
+                weightKg: 1,
+
+                volumeM3:
+                    Number(
+                        req.body
+                            .volumeM3 ||
+                        0
+                    ),
+
+                lengthMeters:
+                    Number(
+                        req.body
+                            .lengthMeters ||
+                        0
+                    ),
+
+                widthMeters:
+                    Number(
+                        req.body
+                            .widthMeters ||
+                        0
+                    ),
+
+                heightMeters:
+                    Number(
+                        req.body
+                            .heightMeters ||
+                        0
+                    ),
+
+                packageQuantity:
+                    Number(
+                        req.body
+                            .packageQuantity ||
+                        0
+                    ),
+
+                packageUnit:
+                    req.body
+                        .packageUnit ||
+                    "unidades",
+
+                palletCount:
+                    Number(
+                        req.body
+                            .palletCount ||
+                        0
+                    ),
+
+                origin:
+                    req.body.origin,
+
+                originCity:
+                    req.body
+                        .originCity ||
+                    "",
+
+                originDepartment:
+                    req.body
+                        .originDepartment ||
+                    "",
+
+                destination:
+                    req.body.destination,
+
+                destinationCity:
+                    req.body
+                        .destinationCity ||
+                    "",
+
+                destinationDepartment:
+                    req.body
+                        .destinationDepartment ||
+                    "",
+
+                stops:
+                    Array.isArray(
+                        req.body.stops
+                    )
+                        ? req.body.stops
+                        : [],
+
+                pickupTime:
+                    req.body
+                        .pickupTime,
+
+                deliveryDeadline:
+                    req.body
+                        .deliveryDeadline ||
+                    null,
+
+                pickupIsFlexible:
+                    Boolean(
+                        req.body
+                            .pickupIsFlexible
+                    ),
+
+                requiredVehicleType:
+                    req.body
+                        .requiredVehicleType ||
+                    null,
+
+                requiredBodyType:
+                    req.body
+                        .requiredBodyType ||
+                    "no_especificada",
+
+                vehicleSuggestionOverridden:
+                    Boolean(
+                        req.body
+                            .vehicleSuggestionOverridden
+                    ),
+
+                requiresRefrigeration:
+                    Boolean(
+                        req.body
+                            .requiresRefrigeration
+                    ),
+
+                isFragile:
+                    Boolean(
+                        req.body.isFragile
+                    ),
+
+                isHazardous:
+                    Boolean(
+                        req.body
+                            .isHazardous
+                    ),
+
+                requiresTarp:
+                    Boolean(
+                        req.body
+                            .requiresTarp
+                    ),
+
+                requiresLoading:
+                    Boolean(
+                        req.body
+                            .requiresLoading
+                    ),
+
+                requiresUnloading:
+                    Boolean(
+                        req.body
+                            .requiresUnloading
+                    ),
+
+                requiresAssistant:
+                    Boolean(
+                        req.body
+                            .requiresAssistant
+                    ),
+
+                loadingIncludedInPrice:
+                    Boolean(
+                        req.body
+                            .loadingIncludedInPrice
+                    ),
+
+                unloadingIncludedInPrice:
+                    Boolean(
+                        req.body
+                            .unloadingIncludedInPrice
+                    ),
+
+                priceMode:
+                    req.body
+                        .priceMode ||
+                    "recibir_ofertas",
+
+                suggestedPrice:
+                    Number(
+                        req.body
+                            .suggestedPrice ||
+                        0
+                    ),
+
+                isNegotiable:
+                    typeof req.body
+                        .isNegotiable ===
+                    "boolean"
+                        ? req.body
+                              .isNegotiable
+                        : true,
+
+                paymentMethod:
+                    req.body
+                        .paymentMethod ||
+                    "por_acordar",
+
+                paymentTermDays:
+                    Number(
+                        req.body
+                            .paymentTermDays ||
+                        0
+                    ),
+
+                includesTolls:
+                    typeof req.body
+                        .includesTolls ===
+                    "boolean"
+                        ? req.body
+                              .includesTolls
+                        : true,
+
+                includesFuel:
+                    typeof req.body
+                        .includesFuel ===
+                    "boolean"
+                        ? req.body
+                              .includesFuel
+                        : true,
+
+                description:
+                    req.body
+                        .description ||
+                    "",
+
+                notes:
+                    req.body.notes ||
+                    "",
+
+                contactInstructions:
+                    req.body
+                        .contactInstructions ||
+                    "",
+
+                photos:
+                    Array.isArray(
+                        req.body.photos
+                    )
+                        ? req.body.photos
+                        : [],
+
+                status: "active",
+            });
 
         return res.status(201).json({
-            offer: attachSpaceComputedFields(offer),
+            offer:
+                attachSpaceComputedFields(
+                    offer
+                ),
+
+            message:
+                "Carga publicada correctamente.",
         });
     } catch (error) {
-        console.error("Error creating space offer:", error);
+        console.error(
+            "Error creating space offer:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error creando oferta de espacio.",
+            message:
+                error?.message ||
+                "Error creando la publicación de carga.",
         });
     }
 };
 
-module.exports.listSpaceOffers = async (req, res) => {
+module.exports.listSpaceOffers = async (
+    req,
+    res
+) => {
     try {
-        const filter = {};
+        const filter = {
+            status:
+                req.query.status ||
+                "active",
+        };
 
         if (req.query.origin) {
-            filter.origin = { $regex: req.query.origin, $options: "i" };
+            filter.origin = {
+                $regex:
+                    req.query.origin,
+
+                $options: "i",
+            };
         }
 
         if (req.query.destination) {
-            filter.destination = { $regex: req.query.destination, $options: "i" };
+            filter.destination = {
+                $regex:
+                    req.query
+                        .destination,
+
+                $options: "i",
+            };
         }
 
-        filter.status = req.query.status || "active";
+        if (
+            req.query
+                .requiredVehicleType
+        ) {
+            filter.requiredVehicleType =
+                req.query
+                    .requiredVehicleType;
+        }
 
-        const offers = await SpaceOffer.find(filter)
-            .populate("driver", "fullname vehicle")
-            .sort({ createdAt: -1 });
+        if (
+            req.query.requiredBodyType
+        ) {
+            filter.requiredBodyType =
+                req.query
+                    .requiredBodyType;
+        }
 
-        const salesMap = await buildSalesMap({
-            listingType: "space",
-            fieldName: "spaceOffer",
-            offerIds: offers.map((offer) => offer._id),
-        });
+        if (req.query.priceMode) {
+            filter.priceMode =
+                req.query.priceMode;
+        }
 
-        let computedOffers = offers.map((offer) =>
-            attachSpaceComputedFields(offer, salesMap[String(offer._id)])
-        );
+        if (req.query.maxWeightKg) {
+            filter.weightKg = {
+                $lte: Number(
+                    req.query
+                        .maxWeightKg
+                ),
+            };
+        }
 
-        computedOffers = filterAvailableOnly(computedOffers, req);
+        const offers =
+            await SpaceOffer.find(
+                filter
+            )
+                .populate(
+                    "customer",
+                    "fullname email"
+                )
+                .populate(
+                    "selectedDriver",
+                    "fullname vehicle"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        let computed =
+            offers.map(
+                attachSpaceComputedFields
+            );
+
+        computed =
+            filterAvailableOnly(
+                computed,
+                req
+            );
 
         return res.status(200).json({
-            offers: computedOffers,
+            offers: computed,
         });
     } catch (error) {
-        console.error("Error listing space offers:", error);
+        console.error(
+            "Error listing space offers:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error listando ofertas de espacio.",
+            message:
+                error?.message ||
+                "Error listando cargas disponibles.",
         });
     }
 };
 
-module.exports.createSeatOffer = async (req, res) => {
+module.exports.getMySpaceOffers = async (
+    req,
+    res
+) => {
     try {
-        const errors = validationResult(req);
+        const offers =
+            await SpaceOffer.find({
+                customer:
+                    req.user._id,
+            })
+                .populate(
+                    "selectedDriver",
+                    "fullname vehicle"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        const ids =
+            offers.map(
+                (offer) =>
+                    offer._id
+            );
+
+        const counts =
+            ids.length > 0
+                ? await OfferBid.aggregate([
+                      {
+                          $match: {
+                              listingType:
+                                  "space",
+
+                              spaceOffer: {
+                                  $in: ids,
+                              },
+                          },
+                      },
+                      {
+                          $group: {
+                              _id:
+                                  "$spaceOffer",
+
+                              total: {
+                                  $sum: 1,
+                              },
+
+                              active: {
+                                  $sum: {
+                                      $cond: [
+                                          {
+                                              $in: [
+                                                  "$status",
+
+                                                  [
+                                                      "pending",
+                                                      "countered",
+                                                  ],
+                                              ],
+                                          },
+
+                                          1,
+                                          0,
+                                      ],
+                                  },
+                              },
+                          },
+                      },
+                  ])
+                : [];
+
+        const countMap = {};
+
+        counts.forEach((item) => {
+            countMap[
+                String(item._id)
+            ] = item;
+        });
+
+        return res.status(200).json({
+            offers: offers.map(
+                (offer) => ({
+                    ...attachSpaceComputedFields(
+                        offer
+                    ),
+
+                    proposalsCount:
+                        countMap[
+                            String(
+                                offer._id
+                            )
+                        ]?.total ||
+                        0,
+
+                    activeProposalsCount:
+                        countMap[
+                            String(
+                                offer._id
+                            )
+                        ]?.active ||
+                        0,
+                })
+            ),
+        });
+    } catch (error) {
+        console.error(
+            "Error fetching my loads:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error consultando tus cargas.",
+        });
+    }
+};
+
+module.exports.createSpaceBid = async (
+    req,
+    res
+) => {
+    try {
+        const errors =
+            validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({
+                errors: errors.array(),
+            });
         }
 
-        const offer = await SeatOffer.create({
-            driver: req.captain._id,
-            seatsAvailable: Number(req.body.seatsAvailable),
-            seatUnit: req.body.seatUnit || "cupos",
-            suggestedPrice: Number(req.body.suggestedPrice),
-            origin: req.body.origin,
-            stops: Array.isArray(req.body.stops) ? req.body.stops : [],
-            destination: req.body.destination,
-            departureTime: req.body.departureTime || null,
-            vehicleType: req.body.vehicleType || null,
-            description: req.body.description || "",
-            notes: req.body.notes || "",
-            isNegotiable:
-                typeof req.body.isNegotiable === "boolean"
-                    ? req.body.isNegotiable
-                    : true,
-        });
+        const listing =
+            await SpaceOffer.findById(
+                req.body.listingId
+            );
+
+        if (!listing) {
+            return res.status(404).json({
+                message:
+                    "Carga no encontrada.",
+            });
+        }
+
+        if (
+            ![
+                "active",
+                "recibiendo_propuestas",
+            ].includes(listing.status)
+        ) {
+            return res.status(400).json({
+                message:
+                    "Esta carga ya no recibe propuestas.",
+            });
+        }
+
+        if (listing.selectedBid) {
+            return res.status(400).json({
+                message:
+                    "Esta carga ya tiene un transportador seleccionado.",
+            });
+        }
+
+        const previous =
+            await OfferBid.findOne({
+                listingType:
+                    "space",
+
+                spaceOffer:
+                    listing._id,
+
+                driver:
+                    req.captain._id,
+
+                status: {
+                    $in: [
+                        "pending",
+                        "countered",
+                    ],
+                },
+            });
+
+        if (previous) {
+            return res.status(409).json({
+                message:
+                    "Ya tienes una propuesta activa para esta carga.",
+
+                bid: previous,
+            });
+        }
+
+        const offeredPrice =
+            normalizeNumber(
+                req.body.offeredPrice
+            );
+
+        if (offeredPrice <= 0) {
+            return res.status(400).json({
+                message:
+                    "El valor debe ser mayor que cero.",
+            });
+        }
+
+        const capacity =
+            normalizeNumber(
+                req.body
+                    .proposedVehicleCapacity
+            );
+
+        const capacityUnit =
+            req.body
+                .proposedVehicleCapacityUnit ||
+            null;
+
+        const capacityKg =
+            capacityUnit === "toneladas"
+                ? capacity * 1000
+                : capacityUnit === "kg"
+                ? capacity
+                : null;
+
+        if (
+            capacityKg &&
+            normalizeNumber(
+                listing
+                    .recommendedMinCapacityKg
+            ) > 0 &&
+            capacityKg <
+                normalizeNumber(
+                    listing
+                        .recommendedMinCapacityKg
+                )
+        ) {
+            return res.status(400).json({
+                message:
+                    `La capacidad del vehículo es menor ` +
+                    `a la recomendada para la carga: ` +
+                    `${listing.recommendedMinCapacityKg} kg.`,
+            });
+        }
+
+        const bid =
+            await OfferBid.create({
+                listingType:
+                    "space",
+
+                spaceOffer:
+                    listing._id,
+
+                customer:
+                    listing.customer,
+
+                driver:
+                    req.captain._id,
+
+                requestedQuantity: 1,
+
+                requestedUnit:
+                    "vehiculo_completo",
+
+                offeredPrice,
+
+                message:
+                    req.body.message ||
+                    "",
+
+                proposedVehicleType:
+                    req.body
+                        .proposedVehicleType ||
+                    null,
+
+                proposedVehicleBrand:
+                    req.body
+                        .proposedVehicleBrand ||
+                    "",
+
+                proposedVehicleReference:
+                    req.body
+                        .proposedVehicleReference ||
+                    "",
+
+                proposedVehicleModel:
+                    req.body
+                        .proposedVehicleModel ||
+                    "",
+
+                proposedVehiclePlate:
+                    req.body
+                        .proposedVehiclePlate ||
+                    "",
+
+                proposedBodyType:
+                    req.body
+                        .proposedBodyType ||
+                    "no_especificada",
+
+                proposedVehicleCapacity:
+                    capacity || null,
+
+                proposedVehicleCapacityUnit:
+                    capacityUnit,
+
+                availablePickupTime:
+                    req.body
+                        .availablePickupTime ||
+                    null,
+
+                estimatedDeliveryTime:
+                    req.body
+                        .estimatedDeliveryTime ||
+                    null,
+
+                estimatedDurationHours:
+                    normalizeNumber(
+                        req.body
+                            .estimatedDurationHours
+                    ) || null,
+
+                includesLoading:
+                    Boolean(
+                        req.body
+                            .includesLoading
+                    ),
+
+                includesUnloading:
+                    Boolean(
+                        req.body
+                            .includesUnloading
+                    ),
+
+                includesAssistant:
+                    Boolean(
+                        req.body
+                            .includesAssistant
+                    ),
+
+                includesTolls:
+                    typeof req.body
+                        .includesTolls ===
+                    "boolean"
+                        ? req.body
+                              .includesTolls
+                        : true,
+
+                includesFuel:
+                    typeof req.body
+                        .includesFuel ===
+                    "boolean"
+                        ? req.body
+                              .includesFuel
+                        : true,
+
+                includesInsurance:
+                    Boolean(
+                        req.body
+                            .includesInsurance
+                    ),
+            });
+
+        await SpaceOffer.findByIdAndUpdate(
+            listing._id,
+            {
+                $set: {
+                    status:
+                        "recibiendo_propuestas",
+                },
+
+                $inc: {
+                    proposalsCount: 1,
+                },
+            }
+        );
+
+        runNotification(
+            "Nueva propuesta de carga",
+            () =>
+                notifyUserNewSpaceBid(
+                    bid._id
+                )
+        );
 
         return res.status(201).json({
-            offer: attachSeatComputedFields(offer),
+            bid,
+
+            message:
+                "Propuesta enviada correctamente.",
         });
     } catch (error) {
-        console.error("Error creating seat offer:", error);
+        console.error(
+            "Error creating space bid:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error creando oferta de cupos.",
+            message:
+                error?.message ||
+                "Error enviando la propuesta.",
         });
     }
 };
 
-module.exports.listSeatOffers = async (req, res) => {
+module.exports.respondToSpaceBid = async (
+    req,
+    res
+) => {
     try {
-        const filter = {};
+        const errors =
+            validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                errors: errors.array(),
+            });
+        }
+
+        const {
+            bidId,
+            action,
+            counterPrice,
+            counterMessage,
+        } = req.body;
+
+        const bid =
+            await OfferBid.findById(
+                bidId
+            );
+
+        if (
+            !bid ||
+            bid.listingType !==
+                "space"
+        ) {
+            return res.status(404).json({
+                message:
+                    "Propuesta no encontrada.",
+            });
+        }
+
+        if (
+            String(bid.customer) !==
+            String(req.user._id)
+        ) {
+            return res.status(403).json({
+                message:
+                    "No tienes autorización para responder.",
+            });
+        }
+
+        if (
+            ![
+                "pending",
+                "countered",
+            ].includes(bid.status)
+        ) {
+            return res.status(400).json({
+                message:
+                    "Esta propuesta ya fue respondida.",
+            });
+        }
+
+        const listing =
+            await SpaceOffer.findById(
+                bid.spaceOffer
+            );
+
+        if (!listing) {
+            return res.status(404).json({
+                message:
+                    "La carga ya no existe.",
+            });
+        }
+
+        if (action === "accepted") {
+            if (listing.selectedBid) {
+                return res.status(409).json({
+                    message:
+                        "Ya existe un transportador seleccionado.",
+                });
+            }
+
+            bid.status = "accepted";
+            await bid.save();
+
+            const updatedListing =
+                await SpaceOffer.findByIdAndUpdate(
+                    listing._id,
+                    {
+                        $set: {
+                            status:
+                                "assigned",
+
+                            selectedBid:
+                                bid._id,
+
+                            selectedDriver:
+                                bid.driver,
+
+                            assignedAt:
+                                new Date(),
+                        },
+                    },
+                    {
+                        new: true,
+                        runValidators: true,
+                    }
+                );
+
+            let tracking = null;
+
+            try {
+                tracking =
+                    await createTrackingFromAcceptedBid({
+                        bidId:
+                            bid._id,
+
+                        trackingPlan:
+                            "basic",
+                    });
+            } catch (trackingError) {
+                console.error(
+                    "No se pudo crear el seguimiento de la carga aceptada:",
+                    trackingError
+                );
+            }
+
+            await OfferBid.updateMany(
+                {
+                    _id: {
+                        $ne: bid._id,
+                    },
+
+                    listingType:
+                        "space",
+
+                    spaceOffer:
+                        listing._id,
+
+                    status: {
+                        $in: [
+                            "pending",
+                            "countered",
+                        ],
+                    },
+                },
+                {
+                    $set: {
+                        status:
+                            "rejected",
+
+                        counterMessage:
+                            "El cliente seleccionó otra propuesta.",
+
+                        rejectedAt:
+                            new Date(),
+
+                        respondedAt:
+                            new Date(),
+                    },
+                }
+            );
+
+            runNotification(
+                "Propuesta aceptada",
+                () =>
+                    notifyCaptainSpaceBidUpdated(
+                        bid._id,
+                        "accepted"
+                    )
+            );
+
+            return res.status(200).json({
+                bid,
+
+                listing:
+                    attachSpaceComputedFields(
+                        updatedListing
+                    ),
+
+                tracking,
+
+                message:
+                    tracking
+                        ? "Propuesta aceptada, transportador seleccionado y seguimiento creado."
+                        : "Propuesta aceptada y transportador seleccionado. El seguimiento quedó pendiente de creación.",
+            });
+        }
+
+        if (action === "rejected") {
+            bid.status = "rejected";
+            await bid.save();
+
+            runNotification(
+                "Propuesta rechazada",
+                () =>
+                    notifyCaptainSpaceBidUpdated(
+                        bid._id,
+                        "rejected"
+                    )
+            );
+
+            return res.status(200).json({
+                bid,
+
+                message:
+                    "Propuesta rechazada correctamente.",
+            });
+        }
+
+        if (action === "countered") {
+            const price =
+                normalizeNumber(
+                    counterPrice
+                );
+
+            if (price <= 0) {
+                return res.status(400).json({
+                    message:
+                        "La contraoferta debe ser mayor que cero.",
+                });
+            }
+
+            bid.status = "countered";
+            bid.counterPrice = price;
+
+            bid.counterMessage =
+                counterMessage || "";
+
+            await bid.save();
+
+            runNotification(
+                "Contraoferta enviada",
+                () =>
+                    notifyCaptainSpaceBidUpdated(
+                        bid._id,
+                        "countered"
+                    )
+            );
+
+            return res.status(200).json({
+                bid,
+
+                message:
+                    "Contraoferta enviada correctamente.",
+            });
+        }
+
+        return res.status(400).json({
+            message:
+                "Acción inválida.",
+        });
+    } catch (error) {
+        console.error(
+            "Error responding space bid:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error respondiendo la propuesta.",
+        });
+    }
+};
+
+module.exports.captainRespondToSpaceCounter =
+async (req, res) => {
+    try {
+        const errors =
+            validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                errors: errors.array(),
+            });
+        }
+
+        const {
+            bidId,
+            action,
+        } = req.body;
+
+        const bid =
+            await OfferBid.findById(
+                bidId
+            );
+
+        if (
+            !bid ||
+            bid.listingType !==
+                "space"
+        ) {
+            return res.status(404).json({
+                message:
+                    "Propuesta no encontrada.",
+            });
+        }
+
+        if (
+            String(bid.driver) !==
+            String(req.captain._id)
+        ) {
+            return res.status(403).json({
+                message:
+                    "No tienes autorización para responder.",
+            });
+        }
+
+        if (
+            bid.status !==
+            "countered"
+        ) {
+            return res.status(400).json({
+                message:
+                    "No hay una contraoferta activa.",
+            });
+        }
+
+        if (action === "rejected") {
+            bid.status = "rejected";
+            await bid.save();
+
+            runNotification(
+                "Contraoferta rechazada",
+                () =>
+                    notifyUserSpaceCounterResponse(
+                        bid._id,
+                        "rejected"
+                    )
+            );
+
+            return res.status(200).json({
+                bid,
+
+                message:
+                    "Contraoferta rechazada.",
+            });
+        }
+
+        if (action === "accepted") {
+            const listing =
+                await SpaceOffer.findById(
+                    bid.spaceOffer
+                );
+
+            if (!listing) {
+                return res.status(404).json({
+                    message:
+                        "La carga ya no existe.",
+                });
+            }
+
+            if (listing.selectedBid) {
+                return res.status(409).json({
+                    message:
+                        "La carga ya tiene transportador.",
+                });
+            }
+
+            const acceptedCounterPrice =
+                normalizeNumber(
+                    bid.counterPrice
+                );
+
+            if (acceptedCounterPrice <= 0) {
+                return res.status(400).json({
+                    message:
+                        "La contraoferta no tiene un valor válido.",
+                });
+            }
+
+            bid.offeredPrice =
+                acceptedCounterPrice;
+
+            bid.status =
+                "accepted";
+
+            await bid.save();
+
+            const updatedListing =
+                await SpaceOffer.findByIdAndUpdate(
+                    listing._id,
+                    {
+                        $set: {
+                            status:
+                                "assigned",
+
+                            selectedBid:
+                                bid._id,
+
+                            selectedDriver:
+                                bid.driver,
+
+                            assignedAt:
+                                new Date(),
+                        },
+                    },
+                    {
+                        new: true,
+                        runValidators: true,
+                    }
+                );
+
+            let tracking = null;
+
+            try {
+                tracking =
+                    await createTrackingFromAcceptedBid({
+                        bidId:
+                            bid._id,
+
+                        trackingPlan:
+                            "basic",
+                    });
+            } catch (trackingError) {
+                console.error(
+                    "No se pudo crear el seguimiento de la contraoferta aceptada:",
+                    trackingError
+                );
+            }
+
+            await OfferBid.updateMany(
+                {
+                    _id: {
+                        $ne: bid._id,
+                    },
+
+                    listingType:
+                        "space",
+
+                    spaceOffer:
+                        listing._id,
+
+                    status: {
+                        $in: [
+                            "pending",
+                            "countered",
+                        ],
+                    },
+                },
+                {
+                    $set: {
+                        status:
+                            "rejected",
+
+                        counterMessage:
+                            "El cliente seleccionó otra propuesta.",
+
+                        rejectedAt:
+                            new Date(),
+
+                        respondedAt:
+                            new Date(),
+                    },
+                }
+            );
+
+            runNotification(
+                "Contraoferta aceptada",
+                () =>
+                    notifyUserSpaceCounterResponse(
+                        bid._id,
+                        "accepted"
+                    )
+            );
+
+            return res.status(200).json({
+                bid,
+
+                listing:
+                    attachSpaceComputedFields(
+                        updatedListing
+                    ),
+
+                tracking,
+
+                message:
+                    tracking
+                        ? "Contraoferta aceptada, servicio asignado y seguimiento creado."
+                        : "Contraoferta aceptada y servicio asignado. El seguimiento quedó pendiente de creación.",
+            });
+        }
+
+        return res.status(400).json({
+            message:
+                "Acción inválida.",
+        });
+    } catch (error) {
+        console.error(
+            "Error responding counter:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error respondiendo la contraoferta.",
+        });
+    }
+};
+
+module.exports.getMyReceivedSpaceBids =
+async (req, res) => {
+    try {
+        const offers =
+            await SpaceOffer.find({
+                customer:
+                    req.user._id,
+            }).select("_id");
+
+        const bids =
+            await OfferBid.find({
+                listingType:
+                    "space",
+
+                spaceOffer: {
+                    $in: offers.map(
+                        (offer) =>
+                            offer._id
+                    ),
+                },
+            })
+                .populate(
+                    "driver",
+                    "fullname vehicle profileImage"
+                )
+                .populate(
+                    "spaceOffer"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        return res.status(200).json({
+            bids,
+        });
+    } catch (error) {
+        console.error(
+            "Error received space bids:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error consultando propuestas recibidas.",
+        });
+    }
+};
+
+module.exports.getMySentSpaceBids =
+async (req, res) => {
+    try {
+        const bids =
+            await OfferBid.find({
+                listingType:
+                    "space",
+
+                driver:
+                    req.captain._id,
+            })
+                .populate(
+                    "customer",
+                    "fullname email"
+                )
+                .populate(
+                    "spaceOffer"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        return res.status(200).json({
+            bids,
+        });
+    } catch (error) {
+        console.error(
+            "Error sent space bids:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error consultando propuestas enviadas.",
+        });
+    }
+};
+
+/* =========================================================
+ * CUPOS
+ * ========================================================= */
+
+module.exports.createSeatOffer = async (
+    req,
+    res
+) => {
+    try {
+        const errors =
+            validationResult(req);
+
+        if (!errors.isEmpty()) {
+            return res.status(400).json({
+                errors: errors.array(),
+            });
+        }
+
+        const offer =
+            await SeatOffer.create({
+                driver:
+                    req.captain._id,
+
+                seatsAvailable:
+                    Number(
+                        req.body
+                            .seatsAvailable
+                    ),
+
+                seatUnit:
+                    req.body.seatUnit ||
+                    "cupos",
+
+                suggestedPrice:
+                    Number(
+                        req.body
+                            .suggestedPrice
+                    ),
+
+                origin:
+                    req.body.origin,
+
+                stops:
+                    Array.isArray(
+                        req.body.stops
+                    )
+                        ? req.body.stops
+                        : [],
+
+                destination:
+                    req.body.destination,
+
+                departureTime:
+                    req.body
+                        .departureTime ||
+                    null,
+
+                vehicleType:
+                    req.body
+                        .vehicleType ||
+                    null,
+
+                description:
+                    req.body
+                        .description ||
+                    "",
+
+                notes:
+                    req.body.notes ||
+                    "",
+
+                isNegotiable:
+                    typeof req.body
+                        .isNegotiable ===
+                    "boolean"
+                        ? req.body
+                              .isNegotiable
+                        : true,
+            });
+
+        return res.status(201).json({
+            offer:
+                attachSeatComputedFields(
+                    offer
+                ),
+        });
+    } catch (error) {
+        console.error(
+            "Error creating seat offer:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error creando oferta de cupos.",
+        });
+    }
+};
+
+module.exports.listSeatOffers = async (
+    req,
+    res
+) => {
+    try {
+        const filter = {
+            status:
+                req.query.status ||
+                "active",
+        };
 
         if (req.query.origin) {
-            filter.origin = { $regex: req.query.origin, $options: "i" };
+            filter.origin = {
+                $regex:
+                    req.query.origin,
+
+                $options: "i",
+            };
         }
 
         if (req.query.destination) {
-            filter.destination = { $regex: req.query.destination, $options: "i" };
+            filter.destination = {
+                $regex:
+                    req.query
+                        .destination,
+
+                $options: "i",
+            };
         }
 
-        filter.status = req.query.status || "active";
+        const offers =
+            await SeatOffer.find(
+                filter
+            )
+                .populate(
+                    "driver",
+                    "fullname vehicle"
+                )
+                .sort({
+                    createdAt: -1,
+                });
 
-        const offers = await SeatOffer.find(filter)
-            .populate("driver", "fullname vehicle")
-            .sort({ createdAt: -1 });
+        const salesMap =
+            await buildSalesMap({
+                listingType:
+                    "seat",
 
-        const salesMap = await buildSalesMap({
-            listingType: "seat",
-            fieldName: "seatOffer",
-            offerIds: offers.map((offer) => offer._id),
-        });
+                fieldName:
+                    "seatOffer",
 
-        let computedOffers = offers.map((offer) =>
-            attachSeatComputedFields(offer, salesMap[String(offer._id)])
-        );
+                offerIds:
+                    offers.map(
+                        (offer) =>
+                            offer._id
+                    ),
+            });
 
-        computedOffers = filterAvailableOnly(computedOffers, req);
+        let computed =
+            offers.map((offer) =>
+                attachSeatComputedFields(
+                    offer,
+
+                    salesMap[
+                        String(
+                            offer._id
+                        )
+                    ]
+                )
+            );
+
+        computed =
+            filterAvailableOnly(
+                computed,
+                req
+            );
 
         return res.status(200).json({
-            offers: computedOffers,
+            offers: computed,
         });
     } catch (error) {
-        console.error("Error listing seat offers:", error);
+        console.error(
+            "Error listing seat offers:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error listando ofertas de cupos.",
+            message:
+                error?.message ||
+                "Error listando ofertas de cupos.",
         });
     }
 };
 
-module.exports.createBid = async (req, res) => {
+/* =========================================================
+ * PUJAS EXISTENTES DE MERCANCÍA Y CUPOS
+ * ========================================================= */
+
+module.exports.createBid = async (
+    req,
+    res
+) => {
     try {
-        const errors = validationResult(req);
+        const errors =
+            validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({
+                errors: errors.array(),
+            });
         }
 
         const {
@@ -876,312 +2736,500 @@ module.exports.createBid = async (req, res) => {
             message,
         } = req.body;
 
-        const requestedQty = normalizeNumber(requestedQuantity);
-        const offered = normalizeNumber(offeredPrice);
-
-        if (!["goods", "space", "seat"].includes(listingType)) {
+        if (
+            !["goods", "seat"].includes(
+                listingType
+            )
+        ) {
             return res.status(400).json({
-                message: "Tipo de publicación inválido.",
+                message:
+                    "Tipo de publicación inválido.",
             });
         }
 
-        if (requestedQty <= 0) {
+        const quantity =
+            normalizeNumber(
+                requestedQuantity
+            );
+
+        const price =
+            normalizeNumber(
+                offeredPrice
+            );
+
+        if (quantity <= 0) {
             return res.status(400).json({
-                message: "La cantidad solicitada debe ser mayor que cero.",
+                message:
+                    "La cantidad debe ser mayor que cero.",
             });
         }
 
-        if (offered <= 0) {
+        if (price <= 0) {
             return res.status(400).json({
-                message: "El valor ofrecido debe ser mayor que cero.",
+                message:
+                    "El valor debe ser mayor que cero.",
             });
         }
 
-        let listing = null;
-        let bidField = "";
-        let quantityField = "";
-        let unitField = "";
+        let listing;
+        let referenceField;
+        let quantityField;
+        let unitField;
 
         if (listingType === "goods") {
-            listing = await GoodsOffer.findById(listingId);
-            bidField = "goodsOffer";
-            quantityField = "quantityAvailable";
-            unitField = "quantityUnit";
-        }
+            listing =
+                await GoodsOffer.findById(
+                    listingId
+                );
 
-        if (listingType === "space") {
-            listing = await SpaceOffer.findById(listingId);
-            bidField = "spaceOffer";
-            quantityField = "capacityAvailable";
-            unitField = "capacityUnit";
-        }
+            referenceField =
+                "goodsOffer";
 
-        if (listingType === "seat") {
-            listing = await SeatOffer.findById(listingId);
-            bidField = "seatOffer";
-            quantityField = "seatsAvailable";
-            unitField = "seatUnit";
+            quantityField =
+                "quantityAvailable";
+
+            unitField =
+                "quantityUnit";
+        } else {
+            listing =
+                await SeatOffer.findById(
+                    listingId
+                );
+
+            referenceField =
+                "seatOffer";
+
+            quantityField =
+                "seatsAvailable";
+
+            unitField =
+                "seatUnit";
         }
 
         if (!listing) {
             return res.status(404).json({
-                message: "Publicación no encontrada.",
+                message:
+                    "Publicación no encontrada.",
             });
         }
 
         if (listing.status !== "active") {
             return res.status(400).json({
-                message: "Esta publicación no está activa.",
+                message:
+                    "La publicación no está activa.",
             });
         }
 
-        if (String(requestedUnit) !== String(listing[unitField])) {
+        if (
+            String(requestedUnit) !==
+            String(
+                listing[unitField]
+            )
+        ) {
             return res.status(400).json({
-                message: `Debes ofertar en la misma unidad publicada: ${listing[unitField]}.`,
+                message:
+                    `Debes ofertar en ` +
+                    `${listing[unitField]}.`,
             });
         }
 
-        const realAvailable = await getRealAvailableForListing({
-            listingType,
-            bidField,
-            listingId: listing._id,
-            publishedQuantity: listing[quantityField],
-        });
+        const accepted =
+            await getAcceptedQuantity({
+                listingType,
 
-        if (requestedQty > realAvailable) {
+                fieldName:
+                    referenceField,
+
+                offerId:
+                    listing._id,
+            });
+
+        const available =
+            normalizeNumber(
+                listing[
+                    quantityField
+                ]
+            ) - accepted;
+
+        if (quantity > available) {
             return res.status(400).json({
-                message: `No hay suficiente disponibilidad. Disponible real: ${realAvailable} ${listing[unitField]}.`,
+                message:
+                    `Disponible: ${available} ` +
+                    `${listing[unitField]}.`,
             });
         }
 
-        const bidPayload = {
-            listingType,
-            customer: req.user._id,
-            driver: listing.driver,
-            requestedQuantity: requestedQty,
-            requestedUnit,
-            offeredPrice: offered,
-            message: message || "",
-            [bidField]: listing._id,
-        };
+        const bid =
+            await OfferBid.create({
+                listingType,
 
-        const bid = await OfferBid.create(bidPayload);
+                customer:
+                    req.user._id,
 
-        notifyAsync("Error enviando notificación al conductor", () =>
-            notifyCaptainNewBid(bid._id)
-        );
+                driver:
+                    listing.driver,
+
+                requestedQuantity:
+                    quantity,
+
+                requestedUnit,
+
+                offeredPrice:
+                    price,
+
+                message:
+                    message || "",
+
+                [referenceField]:
+                    listing._id,
+            });
 
         return res.status(201).json({
             bid,
-            message: "Solicitud enviada correctamente.",
+
+            message:
+                "Solicitud enviada correctamente.",
         });
     } catch (error) {
-        console.error("Error creating bid:", error);
+        console.error(
+            "Error creating bid:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error creando solicitud.",
+            message:
+                error?.message ||
+                "Error creando solicitud.",
         });
     }
 };
 
-module.exports.respondToBid = async (req, res) => {
+module.exports.respondToBid = async (
+    req,
+    res
+) => {
     try {
-        const errors = validationResult(req);
+        const errors =
+            validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({
+                errors: errors.array(),
+            });
         }
 
-        const { bidId, action, counterPrice, counterMessage } = req.body;
+        const {
+            bidId,
+            action,
+            counterPrice,
+            counterMessage,
+        } = req.body;
 
-        const bid = await OfferBid.findById(bidId);
+        const bid =
+            await OfferBid.findById(
+                bidId
+            );
 
         if (!bid) {
             return res.status(404).json({
-                message: "Oferta no encontrada.",
+                message:
+                    "Oferta no encontrada.",
             });
         }
 
-        if (String(bid.driver) !== String(req.captain._id)) {
-            return res.status(403).json({
-                message: "No tienes autorización para responder esta oferta.",
-            });
-        }
-
-        if (!["pending", "countered"].includes(bid.status)) {
+        if (bid.listingType === "space") {
             return res.status(400).json({
-                message: "Esta oferta ya fue respondida anteriormente.",
+                message:
+                    "Usa la ruta de propuestas de carga.",
             });
         }
 
-        let updatedListing = null;
-        const finalAction = action;
+        if (
+            String(bid.driver) !==
+            String(req.captain._id)
+        ) {
+            return res.status(403).json({
+                message:
+                    "No tienes autorización.",
+            });
+        }
+
+        if (
+            ![
+                "pending",
+                "countered",
+            ].includes(bid.status)
+        ) {
+            return res.status(400).json({
+                message:
+                    "La oferta ya fue respondida.",
+            });
+        }
+
+        let listing = null;
 
         if (action === "accepted") {
-            updatedListing = await discountAvailabilityForBid(bid);
-            bid.status = "accepted";
-            await bid.save();
-            await rejectOtherPendingBidsIfSoldOut(bid, updatedListing);
-        } else if (action === "rejected") {
-            bid.status = "rejected";
-            await bid.save();
-        } else if (action === "countered") {
-            const counter = normalizeNumber(counterPrice);
+            listing =
+                await acceptTraditionalBid(
+                    bid
+                );
+        } else if (
+            action === "rejected"
+        ) {
+            bid.status =
+                "rejected";
 
-            if (counter <= 0) {
+            await bid.save();
+        } else if (
+            action === "countered"
+        ) {
+            const price =
+                normalizeNumber(
+                    counterPrice
+                );
+
+            if (price <= 0) {
                 return res.status(400).json({
-                    message: "La contraoferta debe tener un precio mayor que cero.",
+                    message:
+                        "Contraoferta inválida.",
                 });
             }
 
-            bid.status = "countered";
-            bid.counterPrice = counter;
-            bid.counterMessage = counterMessage || "";
+            bid.status =
+                "countered";
+
+            bid.counterPrice =
+                price;
+
+            bid.counterMessage =
+                counterMessage ||
+                "";
+
             await bid.save();
         } else {
             return res.status(400).json({
-                message: "Acción inválida.",
+                message:
+                    "Acción inválida.",
             });
         }
 
-        notifyAsync("Error notificando al usuario", () =>
-            notifyUserBidUpdated(bid._id, finalAction)
-        );
-
-        const populatedBid = await OfferBid.findById(bid._id)
-            .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer");
-
         return res.status(200).json({
-            bid: populatedBid,
-            listing: updatedListing,
+            bid,
+            listing,
+
             message:
                 action === "accepted"
-                    ? "Oferta aceptada. La disponibilidad real fue actualizada correctamente."
+                    ? "Oferta aceptada."
                     : action === "rejected"
-                    ? "Oferta rechazada correctamente."
-                    : "Contraoferta enviada correctamente.",
+                    ? "Oferta rechazada."
+                    : "Contraoferta enviada.",
         });
     } catch (error) {
-        console.error("Error responding to bid:", error);
+        console.error(
+            "Error responding bid:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error respondiendo la oferta.",
+            message:
+                error?.message ||
+                "Error respondiendo oferta.",
         });
     }
 };
 
-module.exports.customerRespondToBid = async (req, res) => {
+module.exports.customerRespondToBid =
+async (req, res) => {
     try {
-        const errors = validationResult(req);
+        const errors =
+            validationResult(req);
 
         if (!errors.isEmpty()) {
-            return res.status(400).json({ errors: errors.array() });
+            return res.status(400).json({
+                errors: errors.array(),
+            });
         }
 
-        const { bidId, action } = req.body;
+        const {
+            bidId,
+            action,
+        } = req.body;
 
-        const bid = await OfferBid.findById(bidId);
+        const bid =
+            await OfferBid.findById(
+                bidId
+            );
 
         if (!bid) {
             return res.status(404).json({
-                message: "Oferta no encontrada.",
+                message:
+                    "Oferta no encontrada.",
             });
         }
 
-        if (String(bid.customer) !== String(req.user._id)) {
-            return res.status(403).json({
-                message: "No tienes autorización para responder esta contraoferta.",
-            });
-        }
-
-        if (bid.status !== "countered") {
+        if (bid.listingType === "space") {
             return res.status(400).json({
-                message: "Esta oferta no tiene una contraoferta activa.",
+                message:
+                    "Usa la ruta de contraofertas de cargas.",
             });
         }
 
-        let updatedListing = null;
+        if (
+            String(bid.customer) !==
+            String(req.user._id)
+        ) {
+            return res.status(403).json({
+                message:
+                    "No tienes autorización.",
+            });
+        }
+
+        if (
+            bid.status !==
+            "countered"
+        ) {
+            return res.status(400).json({
+                message:
+                    "No hay contraoferta activa.",
+            });
+        }
+
+        let listing = null;
 
         if (action === "accepted") {
-            updatedListing = await discountAvailabilityForBid(bid);
-            bid.status = "accepted";
-            await bid.save();
-            await rejectOtherPendingBidsIfSoldOut(bid, updatedListing);
-        } else if (action === "rejected") {
-            bid.status = "rejected";
+            listing =
+                await acceptTraditionalBid(
+                    bid
+                );
+        } else if (
+            action === "rejected"
+        ) {
+            bid.status =
+                "rejected";
+
             await bid.save();
         } else {
             return res.status(400).json({
-                message: "Acción inválida.",
+                message:
+                    "Acción inválida.",
             });
         }
 
-        notifyAsync("Error notificando respuesta de contraoferta", () =>
-            notifyCaptainCustomerCounterResponse(bid._id, action)
-        );
-
-        const populatedBid = await OfferBid.findById(bid._id)
-            .populate("customer", "fullname email")
-            .populate("driver", "fullname vehicle")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer");
-
         return res.status(200).json({
-            bid: populatedBid,
-            listing: updatedListing,
+            bid,
+            listing,
+
             message:
                 action === "accepted"
-                    ? "Contraoferta aceptada. La disponibilidad real fue actualizada correctamente."
-                    : "Contraoferta rechazada correctamente.",
+                    ? "Contraoferta aceptada."
+                    : "Contraoferta rechazada.",
         });
     } catch (error) {
-        console.error("Error responding to counteroffer:", error);
+        console.error(
+            "Error customer response:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error respondiendo la contraoferta.",
-        });
-    }
-};
-
-module.exports.getMyReceivedBids = async (req, res) => {
-    try {
-        const bids = await OfferBid.find({ driver: req.captain._id })
-            .populate("customer", "fullname email")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer")
-            .sort({ createdAt: -1 });
-
-        return res.status(200).json({ bids });
-    } catch (error) {
-        console.error("Error fetching received bids:", error);
-
-        return res.status(500).json({
-            message: error?.message || "Error consultando solicitudes recibidas.",
+            message:
+                error?.message ||
+                "Error respondiendo contraoferta.",
         });
     }
 };
 
-module.exports.getMySentBids = async (req, res) => {
+module.exports.getMyReceivedBids = async (
+    req,
+    res
+) => {
     try {
-        const bids = await OfferBid.find({ customer: req.user._id })
-            .populate("driver", "fullname vehicle")
-            .populate("goodsOffer")
-            .populate("spaceOffer")
-            .populate("seatOffer")
-            .sort({ createdAt: -1 });
+        const bids =
+            await OfferBid.find({
+                driver:
+                    req.captain._id,
 
-        return res.status(200).json({ bids });
+                listingType: {
+                    $in: [
+                        "goods",
+                        "seat",
+                    ],
+                },
+            })
+                .populate(
+                    "customer",
+                    "fullname email"
+                )
+                .populate(
+                    "goodsOffer"
+                )
+                .populate(
+                    "seatOffer"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        return res.status(200).json({
+            bids,
+        });
     } catch (error) {
-        console.error("Error fetching sent bids:", error);
+        console.error(
+            "Error received bids:",
+            error
+        );
 
         return res.status(500).json({
-            message: error?.message || "Error consultando solicitudes enviadas.",
+            message:
+                error?.message ||
+                "Error consultando solicitudes.",
+        });
+    }
+};
+
+module.exports.getMySentBids = async (
+    req,
+    res
+) => {
+    try {
+        const bids =
+            await OfferBid.find({
+                customer:
+                    req.user._id,
+
+                listingType: {
+                    $in: [
+                        "goods",
+                        "seat",
+                    ],
+                },
+            })
+                .populate(
+                    "driver",
+                    "fullname vehicle"
+                )
+                .populate(
+                    "goodsOffer"
+                )
+                .populate(
+                    "seatOffer"
+                )
+                .sort({
+                    createdAt: -1,
+                });
+
+        return res.status(200).json({
+            bids,
+        });
+    } catch (error) {
+        console.error(
+            "Error sent bids:",
+            error
+        );
+
+        return res.status(500).json({
+            message:
+                error?.message ||
+                "Error consultando solicitudes.",
         });
     }
 };

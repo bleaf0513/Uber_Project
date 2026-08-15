@@ -36,6 +36,8 @@ const VEHICLE_TYPES = [
     "moving",
 ];
 
+const MAX_PRODUCT_PHOTOS = 4;
+
 const goodsOfferSchema = new mongoose.Schema(
     {
         driver: {
@@ -98,6 +100,37 @@ const goodsOfferSchema = new mongoose.Schema(
             default: null,
         },
 
+        /*
+         * =====================================================
+         * FOTOS DE LA MERCANCÍA
+         * =====================================================
+         *
+         * El frontend envía imágenes optimizadas en formato
+         * data URL / base64.
+         *
+         * La primera imagen del arreglo se considera la portada.
+         *
+         * Máximo 4 fotos por publicación.
+         */
+        photos: {
+            type: [
+                {
+                    type: String,
+                    default: "",
+                },
+            ],
+            default: [],
+            validate: {
+                validator(value) {
+                    return (
+                        Array.isArray(value) &&
+                        value.length <= MAX_PRODUCT_PHOTOS
+                    );
+                },
+                message: `Solo puedes guardar máximo ${MAX_PRODUCT_PHOTOS} fotos por publicación.`,
+            },
+        },
+
         description: {
             type: String,
             trim: true,
@@ -112,7 +145,13 @@ const goodsOfferSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["active", "paused", "sold_out", "cancelled", "completed"],
+            enum: [
+                "active",
+                "paused",
+                "sold_out",
+                "cancelled",
+                "completed",
+            ],
             default: "active",
             index: true,
         },
@@ -127,12 +166,63 @@ const goodsOfferSchema = new mongoose.Schema(
     }
 );
 
-goodsOfferSchema.index({ driver: 1, status: 1, createdAt: -1 });
-goodsOfferSchema.index({ origin: 1, destination: 1, status: 1 });
-goodsOfferSchema.index({ vehicleType: 1, status: 1 });
-goodsOfferSchema.index({ productName: "text", description: "text" });
-goodsOfferSchema.index({ quantityUnit: 1, status: 1 });
+/*
+ * =========================================================
+ * LIMPIEZA DE FOTOS
+ * =========================================================
+ *
+ * Evita guardar valores vacíos, nulos o más de cuatro fotos.
+ */
+goodsOfferSchema.pre("validate", function (next) {
+    try {
+        if (Array.isArray(this.photos)) {
+            this.photos = this.photos
+                .filter(
+                    (photo) =>
+                        typeof photo === "string" &&
+                        photo.trim().length > 0
+                )
+                .slice(0, MAX_PRODUCT_PHOTOS);
+        } else {
+            this.photos = [];
+        }
 
-const goodsOfferModel = mongoose.model("GoodsOffer", goodsOfferSchema);
+        next();
+    } catch (error) {
+        next(error);
+    }
+});
+
+goodsOfferSchema.index({
+    driver: 1,
+    status: 1,
+    createdAt: -1,
+});
+
+goodsOfferSchema.index({
+    origin: 1,
+    destination: 1,
+    status: 1,
+});
+
+goodsOfferSchema.index({
+    vehicleType: 1,
+    status: 1,
+});
+
+goodsOfferSchema.index({
+    productName: "text",
+    description: "text",
+});
+
+goodsOfferSchema.index({
+    quantityUnit: 1,
+    status: 1,
+});
+
+const goodsOfferModel = mongoose.model(
+    "GoodsOffer",
+    goodsOfferSchema
+);
 
 module.exports = goodsOfferModel;

@@ -6,6 +6,7 @@ import React, {
   useCallback,
 } from "react";
 import { Link, useNavigate } from "react-router-dom";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import "remixicon/fonts/remixicon.css";
@@ -29,6 +30,28 @@ const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
 const GPS_SOFT = "linear-gradient(135deg, #FAF5FF 0%, #FDF4FF 100%)";
 const DARK_GLASS = "rgba(17, 24, 39, 0.94)";
 
+const BackgroundGeolocation = registerPlugin("BackgroundGeolocation");
+
+const GPS_LAST_SUCCESS_PREFIX = "centralgo:gps-last-success:";
+const GPS_DISMISSED_PREFIX = "centralgo:gps-dismissed:";
+const GPS_RECENT_WINDOW_MS = 5 * 60 * 1000;
+
+const getGpsLastSuccessKey = (captainId) =>
+  `${GPS_LAST_SUCCESS_PREFIX}${captainId || "anonymous"}`;
+
+const getGpsDismissedKey = (captainId) =>
+  `${GPS_DISMISSED_PREFIX}${captainId || "anonymous"}`;
+
+const hasRecentGpsSuccess = (captainId) => {
+  if (!captainId) return false;
+
+  const raw = Number(
+    localStorage.getItem(getGpsLastSuccessKey(captainId)) || 0
+  );
+
+  return Number.isFinite(raw) && Date.now() - raw < GPS_RECENT_WINDOW_MS;
+};
+
 const getCaptainToken = () =>
   localStorage.getItem("captainToken") ||
   localStorage.getItem("token") ||
@@ -43,6 +66,7 @@ const CaptainHome = () => {
   const availableRidesIntervalRef = useRef(null);
   const ignoredRideIdsRef = useRef(new Set());
   const activeRideCheckRef = useRef(false);
+  const gpsResumeTimeoutRef = useRef(null);
 
   const navigate = useNavigate();
 
@@ -68,6 +92,25 @@ const CaptainHome = () => {
   const [requestingLocation, setRequestingLocation] = useState(false);
   const [showGpsPrompt, setShowGpsPrompt] = useState(false);
   const [gpsPromptDismissed, setGpsPromptDismissed] = useState(false);
+  const [openingLocationSettings, setOpeningLocationSettings] = useState(false);
+
+  useEffect(() => {
+    if (!captain?._id) return;
+
+    const recentSuccess = hasRecentGpsSuccess(captain._id);
+    const dismissedThisSession =
+      sessionStorage.getItem(getGpsDismissedKey(captain._id)) === "1";
+
+    if (recentSuccess) {
+      setLocationReady(true);
+      setLocationPermission("granted");
+      setShowGpsPrompt(false);
+      setGpsPromptDismissed(false);
+      setLocationError("");
+    } else if (dismissedThisSession) {
+      setGpsPromptDismissed(true);
+    }
+  }, [captain?._id]);
 
   useEffect(() => {
     const token =
@@ -404,6 +447,14 @@ const CaptainHome = () => {
       setGpsPromptDismissed(false);
       setLocationPermission("granted");
 
+      localStorage.setItem(
+        getGpsLastSuccessKey(captain._id),
+        String(now)
+      );
+      sessionStorage.removeItem(
+        getGpsDismissedKey(captain._id)
+      );
+
       socket.emit("update-location-captain", {
         userId: captain._id,
         location: { ltd, lng },
@@ -465,8 +516,6 @@ const CaptainHome = () => {
 
               if (secondError?.code === 1 || firstError?.code === 1) {
                 setLocationPermission("denied");
-              } else if (forcePrompt) {
-                setLocationPermission("prompt");
               }
             },
             {
@@ -538,10 +587,59 @@ const CaptainHome = () => {
     stopLocationTracking,
   ]);
 
-  const handleEnableGps = useCallback(() => {
+  const openLocationSettings = useCallback(async () => {
     setGpsPromptDismissed(false);
-    requestAndEmitCurrentLocation("manual-enable-gps", true);
+    setOpeningLocationSettings(true);
+
+    try {
+      if (Capacitor.isNativePlatform()) {
+        await BackgroundGeolocation.openSettings();
+        return;
+      }
+
+      requestAndEmitCurrentLocation("web-location-settings", true);
+    } catch (error) {
+      console.warn(
+        "[captain-home] No se pudieron abrir los ajustes de ubicación:",
+        error?.message || error
+      );
+
+      requestAndEmitCurrentLocation("settings-fallback", true);
+    } finally {
+      setOpeningLocationSettings(false);
+    }
   }, [requestAndEmitCurrentLocation]);
+
+  const handleEnableGps = useCallback(async () => {
+    setGpsPromptDismissed(false);
+
+    if (
+      locationPermission === "denied" ||
+      (locationPermission === "granted" && !locationReady && locationError)
+    ) {
+      await openLocationSettings();
+      return;
+    }
+
+    requestAndEmitCurrentLocation("manual-enable-gps", true);
+  }, [
+    locationPermission,
+    locationReady,
+    locationError,
+    openLocationSettings,
+    requestAndEmitCurrentLocation,
+  ]);
+
+  const handleDismissGpsPrompt = useCallback(() => {
+    setGpsPromptDismissed(true);
+
+    if (captain?._id) {
+      sessionStorage.setItem(
+        getGpsDismissedKey(captain._id),
+        "1"
+      );
+    }
+  }, [captain?._id]);
 
   useEffect(() => {
     if (!navigator.geolocation) {
@@ -589,6 +687,35 @@ const CaptainHome = () => {
       requestAndEmitCurrentLocation("initial-auto-request", true);
     }
   }, [requestAndEmitCurrentLocation]);
+
+  useEffect(() => {
+    if (!captain?._id) return;
+
+    const reconnectLocation = () => {
+      if (document.visibilityState !== "visible") return;
+
+      if (gpsResumeTimeoutRef.current) {
+        clearTimeout(gpsResumeTimeoutRef.current);
+      }
+
+      gpsResumeTimeoutRef.current = setTimeout(() => {
+        requestAndEmitCurrentLocation("app-resume-auto-reconnect", false);
+      }, 500);
+    };
+
+    document.addEventListener("visibilitychange", reconnectLocation);
+    window.addEventListener("focus", reconnectLocation);
+
+    return () => {
+      document.removeEventListener("visibilitychange", reconnectLocation);
+      window.removeEventListener("focus", reconnectLocation);
+
+      if (gpsResumeTimeoutRef.current) {
+        clearTimeout(gpsResumeTimeoutRef.current);
+        gpsResumeTimeoutRef.current = null;
+      }
+    };
+  }, [captain?._id, requestAndEmitCurrentLocation]);
 
   const fetchAvailableRidesForCaptain = useCallback(async () => {
     try {
@@ -1020,7 +1147,19 @@ const CaptainHome = () => {
   const gpsBlocked = !locationReady || locationPermission !== "granted";
 
   const shouldShowGpsPrompt =
-    showGpsPrompt && !gpsPromptDismissed && locationPermission !== "granted";
+    showGpsPrompt &&
+    !gpsPromptDismissed &&
+    (!locationReady || locationPermission !== "granted");
+
+  const gpsPrimaryActionLabel = openingLocationSettings
+    ? "Abriendo ajustes..."
+    : requestingLocation
+      ? "Comprobando ubicación..."
+      : locationPermission === "denied"
+        ? "Abrir permisos de ubicación"
+        : locationPermission === "granted" && !locationReady
+          ? "Abrir ajustes del GPS"
+          : "Permitir ubicación";
 
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
@@ -1041,23 +1180,31 @@ const CaptainHome = () => {
       </Link>
 
       <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40">
-        <div className="flex items-center gap-2 rounded-full bg-white/95 shadow-xl border border-purple-100 px-4 py-2 backdrop-blur-md">
-          <span
-            className={`inline-block w-2.5 h-2.5 rounded-full ${
-              socketReady ? "bg-emerald-500" : "bg-red-500"
-            }`}
-          />
-          <span className="text-xs font-semibold text-gray-700">
-            {socketReady ? "Conectado" : "Reconectando..."}
-          </span>
-          <span className="text-gray-300">|</span>
-          <span
-            className={`text-xs font-semibold ${
-              locationReady ? "text-emerald-700" : "text-purple-700"
-            }`}
-          >
-            {locationReady ? "Ubicación activa" : "GPS pendiente"}
-          </span>
+        <div className="flex items-center gap-2 rounded-2xl bg-white/95 shadow-xl border border-purple-100 px-3 py-2 backdrop-blur-md">
+          <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+            socketReady ? "bg-emerald-50 text-emerald-600" : "bg-red-50 text-red-600"
+          }`}>
+            <i className={socketReady ? "ri-wifi-line" : "ri-wifi-off-line"}></i>
+          </div>
+
+          <div className="leading-tight">
+            <p className="text-[9px] uppercase tracking-[0.14em] font-black text-gray-400">
+              Estado operativo
+            </p>
+            <div className="flex items-center gap-2 mt-0.5">
+              <span className={`text-[11px] font-black ${
+                socketReady ? "text-emerald-700" : "text-red-600"
+              }`}>
+                {socketReady ? "En línea" : "Reconectando"}
+              </span>
+              <span className="text-gray-300">•</span>
+              <span className={`text-[11px] font-black ${
+                locationReady ? "text-emerald-700" : "text-amber-700"
+              }`}>
+                {locationReady ? "GPS listo" : "GPS pendiente"}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -1213,67 +1360,116 @@ const CaptainHome = () => {
       )}
 
       {shouldShowGpsPrompt && (
-        <div className="fixed inset-0 z-[90] bg-slate-950/65 backdrop-blur-sm flex items-center justify-center px-5">
-          <div className="w-full max-w-md rounded-[32px] bg-white shadow-2xl overflow-hidden">
+        <div className="fixed inset-0 z-[90] bg-slate-950/65 backdrop-blur-sm flex items-center justify-center px-4 py-6">
+          <div className="w-full max-w-md rounded-[34px] bg-white shadow-[0_30px_90px_rgba(15,23,42,0.35)] overflow-hidden border border-white/60">
             <div
-              className="px-6 pt-6 pb-5 text-white relative overflow-hidden"
-              style={{
-                background: PURPLE_DEEP_GRADIENT,
-              }}
+              className="px-6 pt-6 pb-6 text-white relative overflow-hidden"
+              style={{ background: PURPLE_DEEP_GRADIENT }}
             >
-              <div className="absolute -top-14 -right-12 w-40 h-40 rounded-full bg-white/15 blur-2xl" />
-              <div className="absolute -bottom-16 -left-10 w-44 h-44 rounded-full bg-fuchsia-300/20 blur-2xl" />
+              <div className="absolute -top-16 -right-10 w-44 h-44 rounded-full bg-white/15 blur-2xl" />
+              <div className="absolute -bottom-20 -left-14 w-52 h-52 rounded-full bg-fuchsia-300/20 blur-3xl" />
 
               <div className="relative z-10 flex items-start gap-4">
-                <div className="w-14 h-14 rounded-2xl bg-white/15 border border-white/20 flex items-center justify-center shrink-0">
-                  <i className="ri-map-pin-user-fill text-3xl text-white"></i>
+                <div className="w-16 h-16 rounded-[22px] bg-white/15 border border-white/20 flex items-center justify-center shrink-0 shadow-lg">
+                  <i className="ri-navigation-fill text-3xl text-white"></i>
                 </div>
 
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs font-black uppercase tracking-[0.18em] text-white/70">
-                    GPS del transportador
-                  </p>
+                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-1">
+                    <span className="w-2 h-2 rounded-full bg-amber-300 animate-pulse" />
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em] text-white/80">
+                      Ubicación requerida
+                    </span>
+                  </div>
 
-                  <h2 className="text-2xl font-black leading-tight mt-1">
-                    Activa tu ubicación
+                  <h2 className="text-2xl font-black leading-tight mt-3">
+                    Mantente visible para recibir viajes
                   </h2>
 
                   <p className="text-sm text-white/80 mt-2 leading-5">
-                    Central Go usa tu ubicación para asignarte servicios
-                    cercanos y mostrar tu ruta en tiempo real.
+                    Central Go necesita tu ubicación para mostrarte servicios cercanos, calcular distancias y seguir tu ruta correctamente.
                   </p>
                 </div>
               </div>
             </div>
 
-            <div className="p-6">
+            <div className="p-5 sm:p-6">
+              <div className="grid grid-cols-3 gap-2">
+                <div className={`rounded-2xl border p-3 ${
+                  locationPermission === "granted"
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-amber-200 bg-amber-50"
+                }`}>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    locationPermission === "granted"
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    <i className={locationPermission === "granted" ? "ri-check-line" : "ri-lock-unlock-line"}></i>
+                  </div>
+                  <p className="mt-2 text-[10px] uppercase font-black text-gray-400">Permiso</p>
+                  <p className="text-xs font-black text-gray-900 mt-0.5">
+                    {locationPermission === "granted" ? "Concedido" : "Pendiente"}
+                  </p>
+                </div>
+
+                <div className={`rounded-2xl border p-3 ${
+                  locationReady
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-amber-200 bg-amber-50"
+                }`}>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    locationReady
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-amber-100 text-amber-700"
+                  }`}>
+                    <i className={locationReady ? "ri-check-line" : "ri-map-pin-line"}></i>
+                  </div>
+                  <p className="mt-2 text-[10px] uppercase font-black text-gray-400">GPS</p>
+                  <p className="text-xs font-black text-gray-900 mt-0.5">
+                    {locationReady ? "Activo" : "Pendiente"}
+                  </p>
+                </div>
+
+                <div className={`rounded-2xl border p-3 ${
+                  socketReady
+                    ? "border-emerald-200 bg-emerald-50"
+                    : "border-gray-200 bg-gray-50"
+                }`}>
+                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                    socketReady
+                      ? "bg-emerald-100 text-emerald-700"
+                      : "bg-gray-100 text-gray-600"
+                  }`}>
+                    <i className={socketReady ? "ri-wifi-line" : "ri-wifi-off-line"}></i>
+                  </div>
+                  <p className="mt-2 text-[10px] uppercase font-black text-gray-400">Central Go</p>
+                  <p className="text-xs font-black text-gray-900 mt-0.5">
+                    {socketReady ? "En línea" : "Conectando"}
+                  </p>
+                </div>
+              </div>
+
               {!!locationError && (
-                <div className="rounded-2xl border border-purple-100 bg-purple-50 px-4 py-3 flex items-start gap-3">
-                  <div className="w-9 h-9 rounded-xl bg-purple-100 flex items-center justify-center shrink-0">
-                    <i className="ri-information-line text-xl text-purple-700"></i>
+                <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 flex items-start gap-3">
+                  <div className="w-9 h-9 rounded-xl bg-amber-100 flex items-center justify-center shrink-0">
+                    <i className="ri-information-line text-xl text-amber-700"></i>
                   </div>
 
                   <div>
-                    <p className="text-sm font-black text-purple-900">
-                      GPS pendiente
+                    <p className="text-sm font-black text-amber-950">
+                      Falta un paso
                     </p>
-                    <p className="text-xs text-purple-700 mt-1 leading-5">
+                    <p className="text-xs text-amber-800 mt-1 leading-5">
                       {locationError}
                     </p>
                   </div>
                 </div>
               )}
 
-              {!geoSupported && (
-                <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700">
-                  Tu dispositivo o navegador no permite obtener la ubicación.
-                </div>
-              )}
-
               {locationPermission === "denied" && (
-                <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-sm text-red-700 leading-5">
-                  El permiso fue bloqueado. Habilita la ubicación desde la
-                  configuración del navegador o del teléfono y vuelve a intentar.
+                <div className="mt-3 rounded-2xl border border-red-100 bg-red-50 px-4 py-3 text-xs text-red-700 leading-5">
+                  El permiso está bloqueado. Abre los ajustes de Central Go, permite la ubicación y vuelve a la app. La conexión se comprobará automáticamente.
                 </div>
               )}
 
@@ -1281,15 +1477,17 @@ const CaptainHome = () => {
                 <button
                   type="button"
                   onClick={handleEnableGps}
-                  disabled={requestingLocation || !geoSupported}
-                  className="w-full rounded-2xl text-white font-black py-4 px-4 disabled:opacity-60 shadow-lg shadow-purple-900/20 active:scale-[0.99] transition"
-                  style={{
-                    background: PURPLE_GRADIENT,
-                  }}
+                  disabled={requestingLocation || openingLocationSettings || !geoSupported}
+                  className="w-full rounded-2xl text-white font-black py-4 px-4 disabled:opacity-60 shadow-lg shadow-purple-900/20 active:scale-[0.99] transition flex items-center justify-center gap-2"
+                  style={{ background: PURPLE_GRADIENT }}
                 >
-                  {requestingLocation
-                    ? "Activando ubicación..."
-                    : "Activar GPS ahora"}
+                  <i className={
+                    locationPermission === "denied" ||
+                    (locationPermission === "granted" && !locationReady)
+                      ? "ri-settings-3-line text-xl"
+                      : "ri-map-pin-user-line text-xl"
+                  }></i>
+                  {gpsPrimaryActionLabel}
                 </button>
 
                 <button
@@ -1298,26 +1496,30 @@ const CaptainHome = () => {
                     setGpsPromptDismissed(false);
                     requestAndEmitCurrentLocation("retry-location");
                   }}
-                  disabled={requestingLocation || !geoSupported}
-                  className="w-full rounded-2xl border border-purple-100 bg-purple-50 text-purple-800 font-black py-4 px-4 disabled:opacity-60 active:scale-[0.99] transition"
+                  disabled={requestingLocation || openingLocationSettings || !geoSupported}
+                  className="w-full rounded-2xl border border-purple-100 bg-purple-50 text-purple-800 font-black py-3.5 px-4 disabled:opacity-60 active:scale-[0.99] transition flex items-center justify-center gap-2"
                 >
-                  Reintentar ubicación
+                  <i className="ri-refresh-line text-lg"></i>
+                  Comprobar ubicación
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setGpsPromptDismissed(true)}
-                  className="w-full rounded-2xl border border-gray-200 bg-white text-gray-700 font-bold py-4 px-4 active:scale-[0.99] transition"
+                  onClick={handleDismissGpsPrompt}
+                  className="w-full rounded-2xl border border-gray-200 bg-white text-gray-600 font-bold py-3.5 px-4 active:scale-[0.99] transition"
                 >
                   Continuar por ahora
                 </button>
               </div>
 
-              <p className="text-[12px] text-gray-500 text-center mt-4 leading-5">
-                Puedes seguir usando el panel, pero para recibir servicios
-                cercanos y aparecer correctamente en el mapa debes mantener
-                activo el GPS.
-              </p>
+              <div className="mt-4 rounded-2xl bg-slate-50 border border-slate-100 px-4 py-3">
+                <div className="flex items-start gap-2">
+                  <i className="ri-shield-check-line text-lg text-purple-700 mt-0.5"></i>
+                  <p className="text-[11px] text-gray-500 leading-5">
+                    Si abres los ajustes y activas el GPS, al regresar a Central Go la app intentará reconectarse automáticamente. No tendrás que pulsar “reintentar” cada vez.
+                  </p>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -1344,37 +1546,60 @@ const CaptainHome = () => {
             </div>
           </div>
 
-          {gpsBlocked && (
-            <div className="px-4 pb-2">
-              <div
-                className="rounded-[22px] border border-purple-100 px-4 py-3 flex items-center gap-3 shadow-sm"
-                style={{
-                  background: GPS_SOFT,
+          {gpsBlocked ? (
+            <div className="px-4 pb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setGpsPromptDismissed(false);
+                  setShowGpsPrompt(true);
                 }}
+                className="w-full rounded-[24px] border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 px-4 py-3 flex items-center gap-3 shadow-sm text-left active:scale-[0.99] transition"
               >
-                <div className="w-11 h-11 rounded-2xl bg-white border border-purple-100 flex items-center justify-center shrink-0">
-                  <i className="ri-map-pin-line text-xl text-purple-700"></i>
+                <div className="relative w-12 h-12 rounded-2xl bg-white border border-amber-200 flex items-center justify-center shrink-0 shadow-sm">
+                  <i className="ri-navigation-line text-2xl text-amber-700"></i>
+                  <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full bg-amber-500 border-2 border-white animate-pulse" />
                 </div>
 
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-black text-purple-950">
-                    GPS pendiente
-                  </p>
-                  <p className="text-xs text-purple-700 mt-0.5 leading-4">
-                    Activa tu ubicación para recibir servicios cercanos.
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-black text-gray-950">
+                      Ubicación pendiente
+                    </p>
+                    <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-black text-amber-800">
+                      REVISAR
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-4">
+                    Activa el GPS para aparecer disponible y recibir servicios cercanos.
                   </p>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleEnableGps}
-                  className="rounded-2xl text-white text-xs font-black px-4 py-2.5 shadow-md shadow-purple-900/20"
-                  style={{
-                    background: PURPLE_GRADIENT,
-                  }}
-                >
-                  Activar
-                </button>
+                <div className="w-9 h-9 rounded-full bg-amber-600 text-white flex items-center justify-center shrink-0">
+                  <i className="ri-arrow-right-line"></i>
+                </div>
+              </button>
+            </div>
+          ) : (
+            <div className="px-4 pb-3">
+              <div className="rounded-[24px] border border-emerald-200 bg-gradient-to-r from-emerald-50 to-teal-50 px-4 py-3 flex items-center gap-3 shadow-sm">
+                <div className="w-12 h-12 rounded-2xl bg-white border border-emerald-200 flex items-center justify-center shrink-0 shadow-sm">
+                  <i className="ri-navigation-fill text-2xl text-emerald-600"></i>
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <p className="text-sm font-black text-gray-950">
+                      Listo para recibir servicios
+                    </p>
+                    <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[9px] font-black text-emerald-800">
+                      EN LÍNEA
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 mt-0.5 leading-4">
+                    GPS conectado y ubicación compartiéndose con Central Go.
+                  </p>
+                </div>
               </div>
             </div>
           )}

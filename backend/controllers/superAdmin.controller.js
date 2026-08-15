@@ -11,12 +11,34 @@ const EnterpriseDelivery = require('../models/enterpriseDelivery.model');
 const DriverApplication = require('../models/driverApplication.model');
 const WalletTransaction = require('../models/walletTransaction.model');
 
+const GoodsOffer = require('../models/goodsOffer.model');
+const SpaceOffer = require('../models/spaceOffer.model');
+const SeatOffer = require('../models/seatOffer.model');
+const OfferBid = require('../models/offerBid.model');
+const MarketplaceLoadTracking = require('../models/marketplaceLoadTracking.model');
+
 const {
     sendDriverApplicationApprovedEmail,
     sendDriverApplicationRejectedEmail,
 } = require('../services/email.service');
 
 const MIN_CAPTAIN_BALANCE_TO_WORK = 5000;
+
+const DRIVER_APPLICATION_PRIVATE_FIELDS = [
+    '+password',
+    '+vehicle.photo',
+    '+documents.identificationCard.front',
+    '+documents.identificationCard.back',
+    '+documents.drivingLicense.front',
+    '+documents.drivingLicense.back',
+    '+documents.vehicleRegistration.front',
+    '+documents.vehicleRegistration.back',
+    '+documents.drivingLicenseImage',
+    '+documents.vehicleRegistrationImage',
+    '+securityConsent.ipAddress',
+    '+securityConsent.userAgent',
+].join(' ');
+
 
 function getTodayRange() {
     const now = new Date();
@@ -126,17 +148,96 @@ function buildCaptainWalletResponse(captainDoc) {
 function buildApplicationResponse(applicationDoc) {
     if (!applicationDoc) return null;
 
-    const app = applicationDoc.toObject ? applicationDoc.toObject() : applicationDoc;
+    const app = applicationDoc.toObject
+        ? applicationDoc.toObject()
+        : applicationDoc;
 
     return {
         _id: app._id,
         id: app._id,
+
         fullname: app.fullname,
         email: app.email,
-        vehicle: app.vehicle,
-        documents: app.documents,
+
+        identification: {
+            number: app?.identification?.number || '',
+            type: app?.identification?.type || 'CC',
+        },
+
+        vehicle: {
+            color: app?.vehicle?.color || '',
+            plate: app?.vehicle?.plate || '',
+            brand: app?.vehicle?.brand || '',
+            reference: app?.vehicle?.reference || '',
+            model: app?.vehicle?.model || '',
+            capacity: Number(app?.vehicle?.capacity || 0),
+            capacityUnit: app?.vehicle?.capacityUnit || 'kg',
+            capacityKg: Number(
+                app?.vehicle?.capacityKg ||
+                app?.vehicle?.capacity ||
+                0
+            ),
+            vehicleType: app?.vehicle?.vehicleType || '',
+            bodyType: app?.vehicle?.bodyType || 'not_specified',
+            axleCount: app?.vehicle?.axleCount || null,
+            photo: app?.vehicle?.photo || '',
+        },
+
+        documents: {
+            identificationCard: {
+                front:
+                    app?.documents?.identificationCard?.front ||
+                    '',
+                back:
+                    app?.documents?.identificationCard?.back ||
+                    '',
+                verified: Boolean(
+                    app?.documents?.identificationCard?.verified
+                ),
+            },
+
+            drivingLicense: {
+                front:
+                    app?.documents?.drivingLicense?.front ||
+                    app?.documents?.drivingLicenseImage ||
+                    '',
+                back:
+                    app?.documents?.drivingLicense?.back ||
+                    '',
+                verified: Boolean(
+                    app?.documents?.drivingLicense?.verified
+                ),
+            },
+
+            vehicleRegistration: {
+                front:
+                    app?.documents?.vehicleRegistration?.front ||
+                    app?.documents?.vehicleRegistrationImage ||
+                    '',
+                back:
+                    app?.documents?.vehicleRegistration?.back ||
+                    '',
+                verified: Boolean(
+                    app?.documents?.vehicleRegistration?.verified
+                ),
+            },
+        },
+
+        securityConsent: {
+            accepted: Boolean(
+                app?.securityConsent?.accepted
+            ),
+            acceptedAt:
+                app?.securityConsent?.acceptedAt ||
+                null,
+            privacyPolicyVersion:
+                app?.securityConsent?.privacyPolicyVersion ||
+                '',
+        },
+
         status: app.status,
         rejectionReason: app.rejectionReason || '',
+        reviewNotes: app.reviewNotes || '',
         reviewedAt: app.reviewedAt || null,
         reviewedBy: app.reviewedBy || null,
         approvedCaptainId: app.approvedCaptainId || null,
@@ -448,6 +549,308 @@ module.exports.dashboard = async (req, res) => {
             enterpriseDeliveryTodayRevenueAgg?.[0]?.total || 0
         );
 
+        /*
+         * =====================================================
+         * MARKETPLACE LOGÍSTICO REAL
+         * =====================================================
+         *
+         * Mercancía: GoodsOffer
+         * Cargas / espacios: SpaceOffer
+         * Cupos: SeatOffer
+         * Propuestas: OfferBid
+         * Servicios y seguimiento: MarketplaceLoadTracking
+         */
+
+        const [
+            goodsTotal,
+            goodsActive,
+            goodsPaused,
+            goodsCompleted,
+            goodsCancelled,
+
+            spacesTotal,
+            spacesActive,
+            spacesReceivingBids,
+            spacesAssigned,
+            spacesInTransit,
+            spacesCompleted,
+            spacesCancelled,
+
+            seatsTotal,
+            seatsActive,
+            seatsPaused,
+            seatsFull,
+            seatsCompleted,
+            seatsCancelled,
+
+            bidsTotal,
+            bidsPending,
+            bidsAccepted,
+            bidsRejected,
+            bidsCountered,
+            bidsCancelled,
+            bidsCompleted,
+
+            trackingsTotal,
+            trackingsActive,
+            trackingsProfessional,
+            trackingsInTransit,
+            trackingsDelivered,
+            trackingsCompleted,
+            trackingsCancelled,
+            trackingsDisputed,
+        ] = await Promise.all([
+            GoodsOffer.countDocuments(),
+            GoodsOffer.countDocuments({ status: 'active' }),
+            GoodsOffer.countDocuments({ status: 'paused' }),
+            GoodsOffer.countDocuments({ status: 'completed' }),
+            GoodsOffer.countDocuments({ status: 'cancelled' }),
+
+            SpaceOffer.countDocuments(),
+            SpaceOffer.countDocuments({ status: 'active' }),
+            SpaceOffer.countDocuments({ status: 'recibiendo_propuestas' }),
+            SpaceOffer.countDocuments({
+                status: { $in: ['assigned', 'reserved', 'recogida'] },
+            }),
+            SpaceOffer.countDocuments({ status: 'in_transit' }),
+            SpaceOffer.countDocuments({
+                status: { $in: ['delivered', 'completed'] },
+            }),
+            SpaceOffer.countDocuments({ status: 'cancelled' }),
+
+            SeatOffer.countDocuments(),
+            SeatOffer.countDocuments({ status: 'active' }),
+            SeatOffer.countDocuments({ status: 'paused' }),
+            SeatOffer.countDocuments({ status: 'full' }),
+            SeatOffer.countDocuments({ status: 'completed' }),
+            SeatOffer.countDocuments({ status: 'cancelled' }),
+
+            OfferBid.countDocuments(),
+            OfferBid.countDocuments({ status: 'pending' }),
+            OfferBid.countDocuments({ status: 'accepted' }),
+            OfferBid.countDocuments({ status: 'rejected' }),
+            OfferBid.countDocuments({ status: 'countered' }),
+            OfferBid.countDocuments({ status: 'cancelled' }),
+            OfferBid.countDocuments({ status: 'completed' }),
+
+            MarketplaceLoadTracking.countDocuments(),
+            MarketplaceLoadTracking.countDocuments({
+                active: true,
+                status: {
+                    $nin: ['completed', 'cancelled'],
+                },
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                trackingPlan: 'professional',
+                trackingEnabled: true,
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                status: 'in_transit',
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                status: 'delivered',
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                status: 'completed',
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                status: 'cancelled',
+            }),
+            MarketplaceLoadTracking.countDocuments({
+                status: 'disputed',
+            }),
+        ]);
+
+        const [
+            acceptedBidValueAgg,
+            completedTrackingValueAgg,
+            marketplaceCommissionAgg,
+            marketplaceTrackingFeeAgg,
+            goodsPublishedValueAgg,
+            seatsPublishedValueAgg,
+            spacesPublishedValueAgg,
+        ] = await Promise.all([
+            OfferBid.aggregate([
+                {
+                    $match: {
+                        status: {
+                            $in: ['accepted', 'completed'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: {
+                                $ifNull: [
+                                    '$counterPrice',
+                                    '$offeredPrice',
+                                ],
+                            },
+                        },
+                    },
+                },
+            ]),
+
+            MarketplaceLoadTracking.aggregate([
+                {
+                    $match: {
+                        status: {
+                            $in: ['delivered', 'completed'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: '$serviceValue',
+                        },
+                    },
+                },
+            ]),
+
+            MarketplaceLoadTracking.aggregate([
+                {
+                    $match: {
+                        commissionStatus: {
+                            $in: ['reserved', 'paid'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: '$platformCommission',
+                        },
+                    },
+                },
+            ]),
+
+            MarketplaceLoadTracking.aggregate([
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: '$trackingFee',
+                        },
+                    },
+                },
+            ]),
+
+            GoodsOffer.aggregate([
+                {
+                    $match: {
+                        status: {
+                            $nin: ['cancelled'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: '$suggestedPrice',
+                        },
+                    },
+                },
+            ]),
+
+            SeatOffer.aggregate([
+                {
+                    $match: {
+                        status: {
+                            $nin: ['cancelled'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: {
+                                $multiply: [
+                                    '$suggestedPrice',
+                                    '$seatsAvailable',
+                                ],
+                            },
+                        },
+                    },
+                },
+            ]),
+
+            SpaceOffer.aggregate([
+                {
+                    $match: {
+                        status: {
+                            $nin: ['cancelled'],
+                        },
+                    },
+                },
+                {
+                    $group: {
+                        _id: null,
+                        total: {
+                            $sum: '$suggestedPrice',
+                        },
+                    },
+                },
+            ]),
+        ]);
+
+        const acceptedBidValue = Number(
+            acceptedBidValueAgg?.[0]?.total || 0
+        );
+
+        const completedTrackingValue = Number(
+            completedTrackingValueAgg?.[0]?.total || 0
+        );
+
+        const marketplaceCommission = Number(
+            marketplaceCommissionAgg?.[0]?.total || 0
+        );
+
+        const marketplaceTrackingFees = Number(
+            marketplaceTrackingFeeAgg?.[0]?.total || 0
+        );
+
+        const marketplacePublishedValue =
+            Number(goodsPublishedValueAgg?.[0]?.total || 0) +
+            Number(seatsPublishedValueAgg?.[0]?.total || 0) +
+            Number(spacesPublishedValueAgg?.[0]?.total || 0);
+
+        const latestMarketplaceSpaces = await SpaceOffer.find()
+            .sort({ createdAt: -1 })
+            .limit(6)
+            .populate('customer', 'fullname email')
+            .populate('selectedDriver', 'fullname email vehicle')
+            .lean();
+
+        const latestMarketplaceBids = await OfferBid.find()
+            .sort({ createdAt: -1 })
+            .limit(8)
+            .populate('customer', 'fullname email')
+            .populate('driver', 'fullname email vehicle')
+            .populate(
+                'spaceOffer',
+                'publicationCode title origin destination status'
+            )
+            .lean();
+
+        const latestMarketplaceTrackings =
+            await MarketplaceLoadTracking.find()
+                .sort({ updatedAt: -1 })
+                .limit(8)
+                .populate('customer', 'fullname email')
+                .populate('captain', 'fullname email vehicle')
+                .populate(
+                    'spaceOffer',
+                    'publicationCode title origin destination status'
+                )
+                .lean();
+
         const latestRides = await Ride.find()
             .sort({ createdAt: -1 })
             .limit(8)
@@ -531,21 +934,107 @@ module.exports.dashboard = async (req, res) => {
                 },
 
                 marketplace: {
-                    status: 'pending_backend_connection',
-                    totalListings: 0,
-                    activeNegotiations: 0,
-                    completedDeals: 0,
-                    revenue: 0,
-                    estimatedCommission: 0,
-                    note: 'Marketplace visible en frontend. Falta conectar modelos backend específicos.',
+                    status: 'connected',
+
+                    listings: {
+                        total:
+                            goodsTotal +
+                            spacesTotal +
+                            seatsTotal,
+                        active:
+                            goodsActive +
+                            spacesActive +
+                            spacesReceivingBids +
+                            seatsActive,
+
+                        goods: {
+                            total: goodsTotal,
+                            active: goodsActive,
+                            paused: goodsPaused,
+                            completed: goodsCompleted,
+                            cancelled: goodsCancelled,
+                        },
+
+                        spaces: {
+                            total: spacesTotal,
+                            active: spacesActive,
+                            receivingBids:
+                                spacesReceivingBids,
+                            assigned: spacesAssigned,
+                            inTransit: spacesInTransit,
+                            completed: spacesCompleted,
+                            cancelled: spacesCancelled,
+                        },
+
+                        seats: {
+                            total: seatsTotal,
+                            active: seatsActive,
+                            paused: seatsPaused,
+                            full: seatsFull,
+                            completed: seatsCompleted,
+                            cancelled: seatsCancelled,
+                        },
+                    },
+
+                    bids: {
+                        total: bidsTotal,
+                        pending: bidsPending,
+                        accepted: bidsAccepted,
+                        rejected: bidsRejected,
+                        countered: bidsCountered,
+                        cancelled: bidsCancelled,
+                        completed: bidsCompleted,
+                    },
+
+                    tracking: {
+                        total: trackingsTotal,
+                        active: trackingsActive,
+                        professional:
+                            trackingsProfessional,
+                        inTransit:
+                            trackingsInTransit,
+                        delivered:
+                            trackingsDelivered,
+                        completed:
+                            trackingsCompleted,
+                        cancelled:
+                            trackingsCancelled,
+                        disputed:
+                            trackingsDisputed,
+                    },
+
+                    financial: {
+                        publishedValue:
+                            marketplacePublishedValue,
+                        acceptedBidValue,
+                        completedServiceValue:
+                            completedTrackingValue,
+                        platformCommission:
+                            marketplaceCommission,
+                        trackingFees:
+                            marketplaceTrackingFees,
+                        platformIncome:
+                            marketplaceCommission +
+                            marketplaceTrackingFees,
+                    },
+
+                    note:
+                        'Marketplace conectado a mercancías, cargas, cupos, propuestas y seguimiento.',
                 },
 
                 totals: {
-                    grossRevenue: ridesRevenue + enterpriseRevenue,
-                    grossRevenueToday: ridesRevenueToday + enterpriseRevenueToday,
+                    grossRevenue:
+                        ridesRevenue +
+                        enterpriseRevenue +
+                        completedTrackingValue,
+                    grossRevenueToday:
+                        ridesRevenueToday +
+                        enterpriseRevenueToday,
                     estimatedCommission:
                         calculateCommission(ridesRevenue) +
-                        calculateCommission(enterpriseRevenue),
+                        calculateCommission(enterpriseRevenue) +
+                        marketplaceCommission +
+                        marketplaceTrackingFees,
                     estimatedCommissionToday:
                         calculateCommission(ridesRevenueToday) +
                         calculateCommission(enterpriseRevenueToday),
@@ -557,6 +1046,12 @@ module.exports.dashboard = async (req, res) => {
                 enterpriseDeliveries: latestEnterpriseDeliveries,
                 enterpriseDrivers: latestEnterpriseDrivers,
                 driverApplications: latestDriverApplications,
+                marketplaceSpaces:
+                    latestMarketplaceSpaces,
+                marketplaceBids:
+                    latestMarketplaceBids,
+                marketplaceTrackings:
+                    latestMarketplaceTrackings,
             },
         });
     } catch (error) {
@@ -759,6 +1254,33 @@ module.exports.getDriverApplications = async (req, res) => {
         const filter = status === 'all' ? {} : { status };
 
         const applications = await DriverApplication.find(filter)
+            .select(
+                [
+                    "fullname",
+                    "email",
+                    "identification.type",
+                    "identification.number",
+                    "vehicle.color",
+                    "vehicle.plate",
+                    "vehicle.brand",
+                    "vehicle.reference",
+                    "vehicle.model",
+                    "vehicle.capacity",
+                    "vehicle.capacityUnit",
+                    "vehicle.capacityKg",
+                    "vehicle.vehicleType",
+                    "vehicle.bodyType",
+                    "vehicle.axleCount",
+                    "status",
+                    "rejectionReason",
+                    "reviewNotes",
+                    "reviewedAt",
+                    "reviewedBy",
+                    "approvedCaptainId",
+                    "createdAt",
+                    "updatedAt",
+                ].join(" ")
+            )
             .sort({ createdAt: -1 })
             .lean();
 
@@ -776,11 +1298,43 @@ module.exports.getDriverApplications = async (req, res) => {
     }
 };
 
+module.exports.getDriverApplicationById = async (req, res) => {
+    try {
+        const { id } = req.params;
+
+        const application = await DriverApplication.findById(id)
+            .select(DRIVER_APPLICATION_PRIVATE_FIELDS)
+            .lean();
+
+        if (!application) {
+            return res.status(404).json({
+                success: false,
+                message: "Solicitud no encontrada.",
+            });
+        }
+
+        return res.status(200).json({
+            success: true,
+            application: buildApplicationResponse(application),
+        });
+    } catch (error) {
+        console.error("Error en getDriverApplicationById:", error);
+
+        return res.status(500).json({
+            success: false,
+            message:
+                error.message ||
+                "No se pudo cargar el expediente del conductor.",
+        });
+    }
+};
+
 module.exports.approveDriverApplication = async (req, res) => {
     try {
         const { id } = req.params;
 
-        const application = await DriverApplication.findById(id).select('+password');
+        const application = await DriverApplication.findById(id)
+            .select(DRIVER_APPLICATION_PRIVATE_FIELDS);
 
         if (!application) {
             return res.status(404).json({
@@ -815,25 +1369,127 @@ module.exports.approveDriverApplication = async (req, res) => {
 
         const captain = await Captain.create({
             fullname: {
-                firstname: application.fullname.firstname,
-                lastname: application.fullname.lastname || '',
+                firstname:
+                    application.fullname.firstname,
+                lastname:
+                    application.fullname.lastname || '',
             },
+
             email: cleanEmail,
             password: application.password,
-            status: 'active',
-            vehicle: {
-                color: application.vehicle.color,
-                plate,
-                capacity: application.vehicle.capacity,
-                vehicleType: application.vehicle.vehicleType,
+
+            identification: {
+                number:
+                    application?.identification?.number || '',
+                type:
+                    application?.identification?.type || 'CC',
             },
+
+            status: 'active',
+
+            verification: {
+                status: 'approved',
+                reviewedAt: new Date(),
+                reviewedBy:
+                    req.superAdmin?._id || null,
+                notes: '',
+            },
+
+            vehicle: {
+                color:
+                    application?.vehicle?.color || '',
+                plate,
+                brand:
+                    application?.vehicle?.brand || '',
+                reference:
+                    application?.vehicle?.reference || '',
+                model:
+                    application?.vehicle?.model || '',
+                capacity:
+                    Number(
+                        application?.vehicle?.capacity || 1
+                    ),
+                capacityUnit:
+                    application?.vehicle?.capacityUnit || 'kg',
+                capacityKg:
+                    Number(
+                        application?.vehicle?.capacityKg ||
+                        application?.vehicle?.capacity ||
+                        1
+                    ),
+                vehicleType:
+                    application?.vehicle?.vehicleType,
+                bodyType:
+                    application?.vehicle?.bodyType ||
+                    'not_specified',
+                axleCount:
+                    application?.vehicle?.axleCount ||
+                    null,
+                photo:
+                    application?.vehicle?.photo || '',
+            },
+
+            documents: {
+                identificationCard: {
+                    front:
+                        application?.documents
+                            ?.identificationCard?.front ||
+                        '',
+                    back:
+                        application?.documents
+                            ?.identificationCard?.back ||
+                        '',
+                    verified: true,
+                    verifiedAt: new Date(),
+                    verifiedBy:
+                        req.superAdmin?._id || null,
+                },
+
+                drivingLicense: {
+                    front:
+                        application?.documents
+                            ?.drivingLicense?.front ||
+                        application?.documents
+                            ?.drivingLicenseImage ||
+                        '',
+                    back:
+                        application?.documents
+                            ?.drivingLicense?.back ||
+                        '',
+                    verified: true,
+                    verifiedAt: new Date(),
+                    verifiedBy:
+                        req.superAdmin?._id || null,
+                },
+
+                vehicleRegistration: {
+                    front:
+                        application?.documents
+                            ?.vehicleRegistration?.front ||
+                        application?.documents
+                            ?.vehicleRegistrationImage ||
+                        '',
+                    back:
+                        application?.documents
+                            ?.vehicleRegistration?.back ||
+                        '',
+                    verified: true,
+                    verifiedAt: new Date(),
+                    verifiedBy:
+                        req.superAdmin?._id || null,
+                },
+            },
+
             profileImage: '',
             rating: 5,
+
             onlineSession: {
                 isOnline: false,
                 sessionStartedAt: null,
+                startedAt: null,
                 lastSeenAt: null,
             },
+
             stats: {
                 hoursOnline: 0,
                 totalDistanceKm: 0,
@@ -843,6 +1499,7 @@ module.exports.approveDriverApplication = async (req, res) => {
                 totalTrips: 0,
                 pendingToSettle: 0,
             },
+
             wallet: {
                 balance: 0,
                 currency: 'COP',
@@ -855,6 +1512,48 @@ module.exports.approveDriverApplication = async (req, res) => {
         application.reviewedBy = req.superAdmin?._id || null;
         application.approvedCaptainId = captain._id;
         application.rejectionReason = '';
+
+        if (application.documents) {
+            const now = new Date();
+            const adminId =
+                req.superAdmin?._id || null;
+
+            if (
+                application.documents
+                    .identificationCard
+            ) {
+                application.documents
+                    .identificationCard.verified = true;
+                application.documents
+                    .identificationCard.verifiedAt = now;
+                application.documents
+                    .identificationCard.verifiedBy = adminId;
+            }
+
+            if (
+                application.documents
+                    .drivingLicense
+            ) {
+                application.documents
+                    .drivingLicense.verified = true;
+                application.documents
+                    .drivingLicense.verifiedAt = now;
+                application.documents
+                    .drivingLicense.verifiedBy = adminId;
+            }
+
+            if (
+                application.documents
+                    .vehicleRegistration
+            ) {
+                application.documents
+                    .vehicleRegistration.verified = true;
+                application.documents
+                    .vehicleRegistration.verifiedAt = now;
+                application.documents
+                    .vehicleRegistration.verifiedBy = adminId;
+            }
+        }
 
         await application.save();
 

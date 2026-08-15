@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
 import { CaptainDataContext } from "../context/CaptainContext";
@@ -108,8 +108,102 @@ const getNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
+
+const MAX_PRODUCT_PHOTOS = 4;
+const MAX_IMAGE_FILE_SIZE = 8 * 1024 * 1024;
+const IMAGE_MAX_DIMENSION = 1280;
+const IMAGE_JPEG_QUALITY = 0.78;
+
+const fileToCompressedDataUrl = (file) =>
+  new Promise((resolve, reject) => {
+    if (!file) {
+      reject(new Error("No se recibió ninguna imagen."));
+      return;
+    }
+
+    if (!String(file.type || "").startsWith("image/")) {
+      reject(new Error("Selecciona únicamente archivos de imagen."));
+      return;
+    }
+
+    if (file.size > MAX_IMAGE_FILE_SIZE) {
+      reject(
+        new Error(
+          "Cada foto debe pesar máximo 8 MB antes de comprimir."
+        )
+      );
+      return;
+    }
+
+    const reader = new FileReader();
+
+    reader.onload = () => {
+      const image = new Image();
+
+      image.onload = () => {
+        try {
+          const originalWidth = image.naturalWidth || image.width;
+          const originalHeight = image.naturalHeight || image.height;
+
+          if (!originalWidth || !originalHeight) {
+            reject(new Error("No se pudo leer el tamaño de la imagen."));
+            return;
+          }
+
+          const scale = Math.min(
+            1,
+            IMAGE_MAX_DIMENSION / Math.max(originalWidth, originalHeight)
+          );
+
+          const width = Math.max(1, Math.round(originalWidth * scale));
+          const height = Math.max(1, Math.round(originalHeight * scale));
+
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+
+          const context = canvas.getContext("2d");
+
+          if (!context) {
+            reject(new Error("No se pudo preparar la imagen."));
+            return;
+          }
+
+          context.drawImage(image, 0, 0, width, height);
+
+          resolve(
+            canvas.toDataURL(
+              "image/jpeg",
+              IMAGE_JPEG_QUALITY
+            )
+          );
+        } catch (error) {
+          reject(error);
+        }
+      };
+
+      image.onerror = () => {
+        reject(new Error("No se pudo abrir la imagen seleccionada."));
+      };
+
+      image.src = String(reader.result || "");
+    };
+
+    reader.onerror = () => {
+      reject(new Error("No se pudo leer la imagen seleccionada."));
+    };
+
+    reader.readAsDataURL(file);
+  });
+
 const CaptainGoodsOffers = () => {
   const { captain } = useContext(CaptainDataContext);
+
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
+
+  const [productPhotos, setProductPhotos] = useState([]);
+  const [processingPhotos, setProcessingPhotos] = useState(false);
 
   const [loading, setLoading] = useState(false);
   const [loadingMine, setLoadingMine] = useState(false);
@@ -173,7 +267,98 @@ const CaptainGoodsOffers = () => {
     });
   };
 
+  const addProductPhotos = async (fileList) => {
+    const files = Array.from(fileList || []);
+
+    if (files.length === 0) return;
+
+    const remainingSlots =
+      MAX_PRODUCT_PHOTOS - productPhotos.length;
+
+    if (remainingSlots <= 0) {
+      setMessage(
+        `Puedes publicar máximo ${MAX_PRODUCT_PHOTOS} fotos por producto.`
+      );
+      return;
+    }
+
+    const selectedFiles = files.slice(0, remainingSlots);
+
+    try {
+      setProcessingPhotos(true);
+      setMessage("");
+
+      const compressed = [];
+
+      for (const file of selectedFiles) {
+        const dataUrl = await fileToCompressedDataUrl(file);
+        compressed.push(dataUrl);
+      }
+
+      setProductPhotos((previous) => [
+        ...previous,
+        ...compressed,
+      ]);
+
+      if (files.length > remainingSlots) {
+        setMessage(
+          `Solo agregamos ${remainingSlots} foto(s). El máximo es ${MAX_PRODUCT_PHOTOS}.`
+        );
+      }
+    } catch (error) {
+      console.error(
+        "Error preparando foto de mercancía:",
+        error
+      );
+
+      setMessage(
+        error?.message ||
+          "No se pudo preparar la imagen."
+      );
+    } finally {
+      setProcessingPhotos(false);
+
+      if (cameraInputRef.current) {
+        cameraInputRef.current.value = "";
+      }
+
+      if (galleryInputRef.current) {
+        galleryInputRef.current.value = "";
+      }
+    }
+  };
+
+  const removeProductPhoto = (indexToRemove) => {
+    setProductPhotos((previous) =>
+      previous.filter(
+        (_, index) => index !== indexToRemove
+      )
+    );
+  };
+
+  const movePhotoToCover = (indexToMove) => {
+    setProductPhotos((previous) => {
+      if (
+        indexToMove <= 0 ||
+        indexToMove >= previous.length
+      ) {
+        return previous;
+      }
+
+      const next = [...previous];
+      const [selected] = next.splice(
+        indexToMove,
+        1
+      );
+
+      next.unshift(selected);
+      return next;
+    });
+  };
+
   const resetForm = () => {
+    setProductPhotos([]);
+
     setForm({
       productName: "",
       quantityAvailable: "",
@@ -282,6 +467,10 @@ const CaptainGoodsOffers = () => {
       return "Debes ingresar un destino válido.";
     }
 
+    if (productPhotos.length === 0) {
+      return "Agrega al menos una foto real de la mercancía.";
+    }
+
     return "";
   };
 
@@ -316,6 +505,7 @@ const CaptainGoodsOffers = () => {
           description: form.description.trim(),
           notes: form.notes.trim(),
           isNegotiable: form.isNegotiable,
+          photos: productPhotos,
         },
         {
           headers: {
@@ -452,6 +642,38 @@ const CaptainGoodsOffers = () => {
         className="relative overflow-hidden rounded-[30px] border border-orange-100 bg-white shadow-[0_22px_60px_rgba(15,23,42,0.12)]"
       >
         <div className="h-2 bg-gradient-to-r from-orange-500 via-amber-500 to-yellow-400" />
+
+        {Array.isArray(offer.photos) &&
+        offer.photos.length > 0 ? (
+          <div className="relative bg-slate-100">
+            <img
+              src={offer.photos[0]}
+              alt={offer.productName || "Mercancía"}
+              className="h-52 w-full object-cover"
+            />
+
+            <div className="absolute left-3 top-3 rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-black text-white backdrop-blur-md">
+              <i className="ri-camera-3-line mr-1" />
+              {offer.photos.length} foto
+              {offer.photos.length === 1 ? "" : "s"}
+            </div>
+
+            {offer.photos.length > 1 ? (
+              <div className="absolute bottom-3 right-3 flex -space-x-2">
+                {offer.photos
+                  .slice(1, 4)
+                  .map((photo, index) => (
+                    <img
+                      key={`${offer._id}-thumb-${index}`}
+                      src={photo}
+                      alt=""
+                      className="h-10 w-10 rounded-xl border-2 border-white object-cover shadow-md"
+                    />
+                  ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
 
         <div className="p-4">
           <div className="flex items-start justify-between gap-3">
@@ -626,6 +848,195 @@ const CaptainGoodsOffers = () => {
               />
             </div>
 
+            <div className="overflow-hidden rounded-[26px] border border-purple-100 bg-gradient-to-br from-purple-50 via-white to-orange-50 shadow-sm">
+              <div className="p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-[11px] font-black uppercase tracking-[0.14em] text-purple-700">
+                      Fotos de la mercancía
+                    </p>
+
+                    <h3 className="mt-1 text-lg font-black text-gray-950">
+                      Muestra lo que estás vendiendo
+                    </h3>
+
+                    <p className="mt-1 text-xs leading-5 text-gray-600">
+                      Agrega hasta {MAX_PRODUCT_PHOTOS} fotos reales.
+                      La primera será la portada que verá el comprador.
+                    </p>
+                  </div>
+
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-700 text-white shadow-lg shadow-purple-700/20">
+                    <i className="ri-camera-3-line text-2xl" />
+                  </div>
+                </div>
+
+                <input
+                  ref={cameraInputRef}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(event) =>
+                    addProductPhotos(
+                      event.target.files
+                    )
+                  }
+                />
+
+                <input
+                  ref={galleryInputRef}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(event) =>
+                    addProductPhotos(
+                      event.target.files
+                    )
+                  }
+                />
+
+                <div className="mt-4 grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    disabled={
+                      processingPhotos ||
+                      productPhotos.length >=
+                        MAX_PRODUCT_PHOTOS
+                    }
+                    onClick={() =>
+                      cameraInputRef.current?.click()
+                    }
+                    className="rounded-2xl bg-purple-700 px-3 py-4 text-white shadow-lg shadow-purple-700/15 transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    <i className="ri-camera-fill text-2xl" />
+                    <span className="mt-1 block text-sm font-black">
+                      Tomar foto
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-white/70">
+                      Usar cámara
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    disabled={
+                      processingPhotos ||
+                      productPhotos.length >=
+                        MAX_PRODUCT_PHOTOS
+                    }
+                    onClick={() =>
+                      galleryInputRef.current?.click()
+                    }
+                    className="rounded-2xl border border-orange-200 bg-white px-3 py-4 text-orange-700 shadow-sm transition active:scale-[0.98] disabled:opacity-50"
+                  >
+                    <i className="ri-image-add-fill text-2xl" />
+                    <span className="mt-1 block text-sm font-black">
+                      Galería
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-orange-600/70">
+                      Elegir imágenes
+                    </span>
+                  </button>
+                </div>
+
+                {processingPhotos ? (
+                  <div className="mt-3 flex items-center gap-2 rounded-2xl bg-white px-4 py-3 text-xs font-bold text-purple-700">
+                    <i className="ri-loader-4-line animate-spin text-lg" />
+                    Optimizando fotografía...
+                  </div>
+                ) : null}
+
+                {productPhotos.length > 0 ? (
+                  <div className="mt-4">
+                    <div className="mb-2 flex items-center justify-between">
+                      <p className="text-xs font-black text-gray-700">
+                        Vista previa
+                      </p>
+
+                      <span className="rounded-full bg-white px-2.5 py-1 text-[10px] font-black text-gray-500 shadow-sm">
+                        {productPhotos.length}/{MAX_PRODUCT_PHOTOS}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      {productPhotos.map(
+                        (photo, index) => (
+                          <div
+                            key={`product-photo-${index}`}
+                            className={`relative overflow-hidden rounded-[20px] border bg-white shadow-sm ${
+                              index === 0
+                                ? "border-purple-400 ring-2 ring-purple-100"
+                                : "border-gray-200"
+                            }`}
+                          >
+                            <img
+                              src={photo}
+                              alt={`Mercancía ${index + 1}`}
+                              className="h-36 w-full object-cover"
+                            />
+
+                            <div className="absolute inset-x-0 bottom-0 flex items-center justify-between gap-2 bg-gradient-to-t from-black/80 to-transparent p-2 pt-8">
+                              <span className="rounded-full bg-white/90 px-2 py-1 text-[9px] font-black text-gray-900">
+                                {index === 0
+                                  ? "PORTADA"
+                                  : `FOTO ${index + 1}`}
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  removeProductPhoto(
+                                    index
+                                  )
+                                }
+                                className="flex h-8 w-8 items-center justify-center rounded-full bg-red-500 text-white shadow-lg"
+                                aria-label="Eliminar foto"
+                              >
+                                <i className="ri-delete-bin-6-line" />
+                              </button>
+                            </div>
+
+                            {index > 0 ? (
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  movePhotoToCover(
+                                    index
+                                  )
+                                }
+                                className="absolute left-2 top-2 rounded-full bg-black/70 px-2.5 py-1.5 text-[9px] font-black text-white backdrop-blur-md"
+                              >
+                                Hacer portada
+                              </button>
+                            ) : null}
+                          </div>
+                        )
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-dashed border-purple-200 bg-white/80 p-5 text-center">
+                    <i className="ri-image-line text-3xl text-purple-300" />
+                    <p className="mt-2 text-sm font-black text-gray-800">
+                      Aún no has agregado fotos
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      Una buena foto aumenta la confianza del comprador.
+                    </p>
+                  </div>
+                )}
+
+                <div className="mt-3 flex items-start gap-2 rounded-2xl bg-white/80 px-3 py-2.5">
+                  <i className="ri-shield-check-line mt-0.5 text-emerald-600" />
+                  <p className="text-[11px] leading-4 text-gray-500">
+                    Central Go comprime las imágenes antes de enviarlas para ahorrar datos y mejorar la velocidad de publicación.
+                  </p>
+                </div>
+              </div>
+            </div>
+
             <div className="rounded-[22px] border border-gray-200 bg-gray-50 p-3">
               <p className="text-xs font-bold text-gray-700 uppercase mb-3">
                 Cantidad total disponible
@@ -715,7 +1126,15 @@ const CaptainGoodsOffers = () => {
                 </div>
               </div>
 
-              <div className="rounded-2xl bg-white border border-orange-100 px-4 py-3 mt-3">
+              <div className="rounded-2xl bg-white border border-orange-100 px-4 py-3 mt-3 overflow-hidden">
+                {productPhotos[0] ? (
+                  <img
+                    src={productPhotos[0]}
+                    alt="Portada de la mercancía"
+                    className="mb-3 h-40 w-full rounded-2xl object-cover"
+                  />
+                ) : null}
+
                 <p className="text-xs text-orange-700 font-bold">
                   Así verá el usuario tu publicación
                 </p>
@@ -865,10 +1284,14 @@ const CaptainGoodsOffers = () => {
 
             <button
               type="submit"
-              disabled={loading}
+              disabled={loading || processingPhotos}
               className="w-full rounded-2xl bg-black text-white py-3.5 text-base font-bold disabled:opacity-60"
             >
-              {loading ? "Publicando..." : "Publicar mercancía"}
+              {loading
+                ? "Publicando..."
+                : processingPhotos
+                ? "Preparando fotos..."
+                : "Publicar mercancía"}
             </button>
           </form>
         </div>

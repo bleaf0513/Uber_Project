@@ -309,6 +309,10 @@ const AvailableOffers = () => {
   const [selectedOffer, setSelectedOffer] = useState(null);
   const [selectedMode, setSelectedMode] = useState("offer");
 
+  const [photoViewerOpen, setPhotoViewerOpen] = useState(false);
+  const [photoViewerPhotos, setPhotoViewerPhotos] = useState([]);
+  const [photoViewerIndex, setPhotoViewerIndex] = useState(0);
+
   const [bidForm, setBidForm] = useState({
     listingType: "",
     listingId: "",
@@ -340,88 +344,179 @@ const AvailableOffers = () => {
           }
         : {};
 
-      const requests = [
-        axios.get(`${getApiBaseUrl()}/offers/goods/list`, {
-          headers,
-        }),
+      /*
+       * IMPORTANTE:
+       * Cada módulo se consulta por separado para evitar que un fallo
+       * secundario (por ejemplo tracking o cargas) deje vacío TODO
+       * el Marketplace.
+       */
+      const goodsPromise = axios.get(
+        `${getApiBaseUrl()}/offers/goods/list`,
+        { headers }
+      );
 
-        axios.get(`${getApiBaseUrl()}/offers/seat/list`, {
-          headers,
-        }),
-      ];
+      const seatPromise = axios.get(
+        `${getApiBaseUrl()}/offers/seat/list`,
+        { headers }
+      );
 
-      if (token) {
-        requests.push(
-          axios.get(
+      const spacePromise = token
+        ? axios.get(
             `${getApiBaseUrl()}/offers/space/my-offers`,
-            {
-              headers,
-            }
+            { headers }
           )
+        : Promise.resolve({
+            data: { offers: [] },
+          });
+
+      const trackingPromise = token
+        ? axios.get(
+            `${getApiBaseUrl()}/marketplace-load-tracking/customer/my-trackings`,
+            { headers }
+          )
+        : Promise.resolve({
+            data: { trackings: [] },
+          });
+
+      const [
+        goodsResult,
+        seatResult,
+        spaceResult,
+        trackingResult,
+      ] = await Promise.allSettled([
+        goodsPromise,
+        seatPromise,
+        spacePromise,
+        trackingPromise,
+      ]);
+
+      let partialError = false;
+
+      /*
+       * MERCANCÍA
+       */
+      if (goodsResult.status === "fulfilled") {
+        const offers = Array.isArray(
+          goodsResult.value?.data?.offers
+        )
+          ? goodsResult.value.data.offers
+          : [];
+
+        setGoodsOffers(offers);
+      } else {
+        partialError = true;
+
+        console.error(
+          "Error cargando mercancía:",
+          goodsResult.reason?.response?.data ||
+            goodsResult.reason?.message ||
+            goodsResult.reason
         );
 
-        requests.push(
-          axios.get(
-            `${getApiBaseUrl()}/marketplace-load-tracking/customer/my-trackings`,
-            {
-              headers,
-            }
-          )
-        );
+        setGoodsOffers([]);
       }
 
-      const responses = await Promise.all(requests);
+      /*
+       * CUPOS
+       */
+      if (seatResult.status === "fulfilled") {
+        const offers = Array.isArray(
+          seatResult.value?.data?.offers
+        )
+          ? seatResult.value.data.offers
+          : [];
 
-      const goodsRes = responses[0];
-      const seatRes = responses[1];
-      const spaceRes = responses[2];
-      const trackingRes = responses[3];
+        setSeatOffers(offers);
+      } else {
+        partialError = true;
 
-      setGoodsOffers(
-        Array.isArray(goodsRes?.data?.offers)
-          ? goodsRes.data.offers
-          : []
-      );
+        console.error(
+          "Error cargando cupos:",
+          seatResult.reason?.response?.data ||
+            seatResult.reason?.message ||
+            seatResult.reason
+        );
 
-      setSeatOffers(
-        Array.isArray(seatRes?.data?.offers)
-          ? seatRes.data.offers
-          : []
-      );
+        setSeatOffers([]);
+      }
 
-      setSpaceOffers(
-        Array.isArray(spaceRes?.data?.offers)
-          ? spaceRes.data.offers
-          : []
-      );
+      /*
+       * CARGAS DEL USUARIO
+       */
+      if (spaceResult.status === "fulfilled") {
+        const offers = Array.isArray(
+          spaceResult.value?.data?.offers
+        )
+          ? spaceResult.value.data.offers
+          : [];
 
-      const trackings = Array.isArray(
-        trackingRes?.data?.trackings
-      )
-        ? trackingRes.data.trackings
-        : [];
+        setSpaceOffers(offers);
+      } else {
+        partialError = true;
 
-      const nextTrackingByOffer = {};
+        console.error(
+          "Error cargando cargas:",
+          spaceResult.reason?.response?.data ||
+            spaceResult.reason?.message ||
+            spaceResult.reason
+        );
 
-      trackings.forEach((tracking) => {
-        const spaceOfferReference =
-          tracking?.spaceOffer?._id ||
-          tracking?.spaceOffer;
+        setSpaceOffers([]);
+      }
 
-        if (spaceOfferReference) {
-          nextTrackingByOffer[
-            String(spaceOfferReference)
-          ] = tracking;
-        }
-      });
+      /*
+       * TRACKING
+       *
+       * Si esto falla NO bloqueamos mercancía, cargas ni cupos.
+       */
+      if (trackingResult.status === "fulfilled") {
+        const trackings = Array.isArray(
+          trackingResult.value?.data?.trackings
+        )
+          ? trackingResult.value.data.trackings
+          : [];
 
-      setTrackingByOffer(nextTrackingByOffer);
+        const nextTrackingByOffer = {};
+
+        trackings.forEach((tracking) => {
+          const spaceOfferReference =
+            tracking?.spaceOffer?._id ||
+            tracking?.spaceOffer;
+
+          if (spaceOfferReference) {
+            nextTrackingByOffer[
+              String(spaceOfferReference)
+            ] = tracking;
+          }
+        });
+
+        setTrackingByOffer(nextTrackingByOffer);
+      } else {
+        partialError = true;
+
+        console.error(
+          "Error cargando seguimiento:",
+          trackingResult.reason?.response?.data ||
+            trackingResult.reason?.message ||
+            trackingResult.reason
+        );
+
+        setTrackingByOffer({});
+      }
+
+      if (partialError) {
+        setPageError(
+          "Algunos servicios del Marketplace no respondieron. Puedes seguir usando las secciones disponibles y volver a actualizar."
+        );
+      }
     } catch (error) {
-      console.error("Error cargando publicaciones:", error);
+      console.error(
+        "Error general cargando Marketplace:",
+        error
+      );
 
       setPageError(
-        error?.response?.data?.message ||
-          "No se pudieron cargar las publicaciones."
+        "No se pudo conectar con el Marketplace. Intenta actualizar nuevamente."
       );
     } finally {
       setLoading(false);
@@ -455,6 +550,53 @@ const AvailableOffers = () => {
 
     return seatOffers;
   }, [activeTab, goodsOffers, spaceOffers, seatOffers]);
+
+  const openPhotoViewer = (offer, startIndex = 0) => {
+    const photos = Array.isArray(offer?.photos)
+      ? offer.photos.filter(
+          (photo) =>
+            typeof photo === "string" &&
+            photo.trim().length > 0
+        )
+      : [];
+
+    if (photos.length === 0) return;
+
+    const safeIndex = Math.min(
+      Math.max(Number(startIndex) || 0, 0),
+      photos.length - 1
+    );
+
+    setPhotoViewerPhotos(photos);
+    setPhotoViewerIndex(safeIndex);
+    setPhotoViewerOpen(true);
+  };
+
+  const closePhotoViewer = () => {
+    setPhotoViewerOpen(false);
+    setPhotoViewerPhotos([]);
+    setPhotoViewerIndex(0);
+  };
+
+  const showPreviousPhoto = () => {
+    setPhotoViewerIndex((previous) => {
+      if (photoViewerPhotos.length <= 1) return 0;
+
+      return previous <= 0
+        ? photoViewerPhotos.length - 1
+        : previous - 1;
+    });
+  };
+
+  const showNextPhoto = () => {
+    setPhotoViewerIndex((previous) => {
+      if (photoViewerPhotos.length <= 1) return 0;
+
+      return previous >= photoViewerPhotos.length - 1
+        ? 0
+        : previous + 1;
+    });
+  };
 
   const closeBidModal = () => {
     setBidModalOpen(false);
@@ -856,6 +998,69 @@ const AvailableOffers = () => {
         <div
           className={`h-2 bg-gradient-to-r ${theme.gradient}`}
         />
+
+        {listingType === "goods" &&
+        Array.isArray(offer.photos) &&
+        offer.photos.length > 0 ? (
+          <div className="relative bg-slate-100">
+            <button
+              type="button"
+              onClick={() => openPhotoViewer(offer, 0)}
+              className="block w-full text-left"
+            >
+              <img
+                src={offer.photos[0]}
+                alt={offer.productName || "Mercancía"}
+                className="h-56 w-full object-cover"
+              />
+
+              <div className="absolute inset-x-0 bottom-0 h-20 bg-gradient-to-t from-black/55 to-transparent pointer-events-none" />
+            </button>
+
+            <div className="absolute left-3 top-3 flex items-center gap-2">
+              <span className="rounded-full bg-black/70 px-3 py-1.5 text-[11px] font-black text-white backdrop-blur-md">
+                <i className="ri-camera-3-fill mr-1" />
+                {offer.photos.length} foto
+                {offer.photos.length === 1 ? "" : "s"}
+              </span>
+
+              <span className="rounded-full bg-white/90 px-3 py-1.5 text-[10px] font-black text-orange-700 shadow-sm backdrop-blur-md">
+                FOTO REAL
+              </span>
+            </div>
+
+            {offer.photos.length > 1 ? (
+              <div className="absolute bottom-3 right-3 flex items-center gap-2">
+                {offer.photos.slice(0, 4).map((photo, index) => (
+                  <button
+                    key={`${offer._id}-photo-${index}`}
+                    type="button"
+                    onClick={() => openPhotoViewer(offer, index)}
+                    className="h-11 w-11 overflow-hidden rounded-xl border-2 border-white bg-white shadow-lg"
+                    aria-label={`Ver foto ${index + 1}`}
+                  >
+                    <img
+                      src={photo}
+                      alt=""
+                      className="h-full w-full object-cover"
+                    />
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : listingType === "goods" ? (
+          <div className="flex h-36 items-center justify-center bg-gradient-to-br from-orange-50 via-amber-50 to-yellow-50">
+            <div className="text-center">
+              <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-white text-orange-400 shadow-sm">
+                <i className="ri-image-line text-3xl" />
+              </div>
+              <p className="mt-2 text-xs font-bold text-orange-700/70">
+                Publicación sin fotografías
+              </p>
+            </div>
+          </div>
+        ) : null}
 
         <div className="p-4">
           <div className="flex items-start justify-between gap-3">
@@ -1606,13 +1811,23 @@ const AvailableOffers = () => {
           </div>
         ) : null}
 
+        {pageError ? (
+          <div className="mb-4 bg-amber-50 rounded-[24px] border border-amber-200 p-4 text-sm text-amber-800 font-semibold">
+            <div className="flex items-start gap-3">
+              <div className="w-9 h-9 shrink-0 rounded-xl bg-amber-100 flex items-center justify-center">
+                <i className="ri-information-line text-xl" />
+              </div>
+              <div className="flex-1">
+                <p className="font-black">Conexión parcial</p>
+                <p className="mt-1 text-xs leading-5">{pageError}</p>
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         {loading ? (
           <div className="bg-white rounded-[24px] border border-gray-200 p-5 text-sm text-gray-600 shadow-sm">
             Cargando publicaciones...
-          </div>
-        ) : pageError ? (
-          <div className="bg-red-50 rounded-[24px] border border-red-200 p-5 text-sm text-red-700 font-semibold">
-            {pageError}
           </div>
         ) : currentList.length === 0 ? (
           <div className="bg-white rounded-[24px] border border-gray-200 p-6 text-sm text-gray-600 text-center shadow-sm">
@@ -1671,6 +1886,86 @@ const AvailableOffers = () => {
         )}
       </div>
 
+      {photoViewerOpen &&
+      photoViewerPhotos.length > 0 ? (
+        <div className="fixed inset-0 z-[140] flex flex-col bg-black">
+          <div className="flex items-center justify-between px-4 pb-3 pt-4 text-white">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/50">
+                Galería de mercancía
+              </p>
+
+              <p className="mt-1 text-sm font-black">
+                Foto {photoViewerIndex + 1} de{" "}
+                {photoViewerPhotos.length}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={closePhotoViewer}
+              className="flex h-11 w-11 items-center justify-center rounded-full bg-white/10 text-white backdrop-blur-md"
+              aria-label="Cerrar galería"
+            >
+              <i className="ri-close-line text-2xl" />
+            </button>
+          </div>
+
+          <div className="relative flex min-h-0 flex-1 items-center justify-center overflow-hidden">
+            <img
+              src={photoViewerPhotos[photoViewerIndex]}
+              alt={`Foto ${photoViewerIndex + 1}`}
+              className="max-h-full max-w-full object-contain"
+            />
+
+            {photoViewerPhotos.length > 1 ? (
+              <>
+                <button
+                  type="button"
+                  onClick={showPreviousPhoto}
+                  className="absolute left-3 flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-md"
+                  aria-label="Foto anterior"
+                >
+                  <i className="ri-arrow-left-s-line text-3xl" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={showNextPhoto}
+                  className="absolute right-3 flex h-12 w-12 items-center justify-center rounded-full bg-black/55 text-white shadow-lg backdrop-blur-md"
+                  aria-label="Foto siguiente"
+                >
+                  <i className="ri-arrow-right-s-line text-3xl" />
+                </button>
+              </>
+            ) : null}
+          </div>
+
+          {photoViewerPhotos.length > 1 ? (
+            <div className="flex gap-2 overflow-x-auto px-4 pb-5 pt-3">
+              {photoViewerPhotos.map((photo, index) => (
+                <button
+                  key={`viewer-thumb-${index}`}
+                  type="button"
+                  onClick={() => setPhotoViewerIndex(index)}
+                  className={`h-16 w-16 shrink-0 overflow-hidden rounded-xl border-2 ${
+                    index === photoViewerIndex
+                      ? "border-white"
+                      : "border-white/20"
+                  }`}
+                >
+                  <img
+                    src={photo}
+                    alt=""
+                    className="h-full w-full object-cover"
+                  />
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {bidModalOpen ? (
         <div className="fixed inset-0 z-[100] bg-black/50 flex items-end">
           <div className="w-full bg-white rounded-t-[30px] p-4 shadow-2xl max-h-[90vh] overflow-auto">
@@ -1708,6 +2003,61 @@ const AvailableOffers = () => {
                 <i className="ri-close-line text-xl" />
               </button>
             </div>
+
+            {bidForm.listingType === "goods" &&
+            Array.isArray(selectedOffer?.photos) &&
+            selectedOffer.photos.length > 0 ? (
+              <div className="mt-4 overflow-hidden rounded-[24px] border border-orange-100 bg-orange-50">
+                <button
+                  type="button"
+                  onClick={() => openPhotoViewer(selectedOffer, 0)}
+                  className="relative block w-full"
+                >
+                  <img
+                    src={selectedOffer.photos[0]}
+                    alt={selectedOffer?.productName || "Mercancía"}
+                    className="h-52 w-full object-cover"
+                  />
+
+                  <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-3 bg-gradient-to-t from-black/70 to-transparent p-3 pt-12">
+                    <div className="text-left text-white">
+                      <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/70">
+                        Fotografías del producto
+                      </p>
+                      <p className="text-sm font-black">
+                        Ver galería completa
+                      </p>
+                    </div>
+
+                    <span className="rounded-full bg-white px-3 py-1.5 text-[10px] font-black text-orange-700">
+                      {selectedOffer.photos.length} FOTO
+                      {selectedOffer.photos.length === 1 ? "" : "S"}
+                    </span>
+                  </div>
+                </button>
+
+                {selectedOffer.photos.length > 1 ? (
+                  <div className="grid grid-cols-4 gap-2 p-3">
+                    {selectedOffer.photos.slice(0, 4).map((photo, index) => (
+                      <button
+                        key={`selected-offer-photo-${index}`}
+                        type="button"
+                        onClick={() =>
+                          openPhotoViewer(selectedOffer, index)
+                        }
+                        className="overflow-hidden rounded-xl border-2 border-white bg-white shadow-sm"
+                      >
+                        <img
+                          src={photo}
+                          alt=""
+                          className="h-16 w-full object-cover"
+                        />
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
 
             <div className="mt-4 rounded-2xl bg-gray-50 border border-gray-200 p-4 text-sm text-gray-700 space-y-2">
               <p>

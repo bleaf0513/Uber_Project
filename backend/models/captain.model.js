@@ -9,38 +9,65 @@ const fcmTokenSchema = new mongoose.Schema(
             required: true,
             trim: true,
         },
-
         platform: {
             type: String,
             enum: ["web", "android", "ios", "unknown"],
             default: "unknown",
         },
-
         deviceId: {
             type: String,
             trim: true,
             default: "",
         },
-
         userAgent: {
             type: String,
             trim: true,
             default: "",
         },
-
         active: {
             type: Boolean,
             default: true,
         },
-
         lastUsedAt: {
             type: Date,
             default: Date.now,
         },
-
         createdAt: {
             type: Date,
             default: Date.now,
+        },
+    },
+    {
+        _id: false,
+    }
+);
+
+const documentImageSchema = new mongoose.Schema(
+    {
+        front: {
+            type: String,
+            default: "",
+            trim: true,
+            select: false,
+        },
+        back: {
+            type: String,
+            default: "",
+            trim: true,
+            select: false,
+        },
+        verified: {
+            type: Boolean,
+            default: false,
+        },
+        verifiedAt: {
+            type: Date,
+            default: null,
+        },
+        verifiedBy: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "user",
+            default: null,
         },
     },
     {
@@ -80,6 +107,19 @@ const captainSchema = new mongoose.Schema(
             select: false,
         },
 
+        identification: {
+            number: {
+                type: String,
+                trim: true,
+                default: "",
+            },
+            type: {
+                type: String,
+                enum: ["CC", "CE", "PASSPORT", "OTHER"],
+                default: "CC",
+            },
+        },
+
         socketId: {
             type: String,
             default: null,
@@ -87,8 +127,41 @@ const captainSchema = new mongoose.Schema(
 
         status: {
             type: String,
-            enum: ["active", "inactive"],
-            default: "active",
+            enum: [
+                "pending_review",
+                "active",
+                "inactive",
+                "rejected",
+                "suspended",
+            ],
+            default: "pending_review",
+        },
+
+        verification: {
+            status: {
+                type: String,
+                enum: [
+                    "pending",
+                    "approved",
+                    "rejected",
+                    "needs_changes",
+                ],
+                default: "pending",
+            },
+            reviewedAt: {
+                type: Date,
+                default: null,
+            },
+            reviewedBy: {
+                type: mongoose.Schema.Types.ObjectId,
+                ref: "user",
+                default: null,
+            },
+            notes: {
+                type: String,
+                trim: true,
+                default: "",
+            },
         },
 
         vehicle: {
@@ -105,10 +178,35 @@ const captainSchema = new mongoose.Schema(
                 uppercase: true,
                 trim: true,
             },
+            brand: {
+                type: String,
+                trim: true,
+                default: "",
+            },
+            reference: {
+                type: String,
+                trim: true,
+                default: "",
+            },
+            model: {
+                type: String,
+                trim: true,
+                default: "",
+            },
             capacity: {
                 type: Number,
                 required: true,
                 min: [1, "Capacity must be at least 1"],
+            },
+            capacityUnit: {
+                type: String,
+                enum: ["kg", "ton"],
+                default: "kg",
+            },
+            capacityKg: {
+                type: Number,
+                required: true,
+                min: [1, "Capacity in kg must be at least 1"],
             },
             vehicleType: {
                 type: String,
@@ -116,13 +214,63 @@ const captainSchema = new mongoose.Schema(
                 enum: [
                     "motorcycle",
                     "car",
-                    "light_cargo",
-                    "van",
-                    "truck",
                     "motocarro",
                     "pickup",
-                    "moving",
+                    "van",
+                    "light_truck",
+                    "medium_truck",
+                    "heavy_truck",
+                    "simple_truck",
+                    "double_troque",
+                    "dump_truck",
+                    "mini_trailer",
+                    "tractor_trailer",
+                    "lowboy",
+                    "special_vehicle",
                 ],
+            },
+            bodyType: {
+                type: String,
+                enum: [
+                    "not_specified",
+                    "closed_van",
+                    "stakes",
+                    "platform",
+                    "refrigerated",
+                    "dump",
+                    "tank",
+                    "container_carrier",
+                    "lowboy",
+                    "open_body",
+                    "other",
+                ],
+                default: "not_specified",
+            },
+            axleCount: {
+                type: Number,
+                min: 1,
+                default: null,
+            },
+            photo: {
+                type: String,
+                trim: true,
+                default: "",
+                select: false,
+            },
+        },
+
+        documents: {
+            identificationCard: {
+                type: documentImageSchema,
+                default: () => ({}),
+            },
+            drivingLicense: {
+                type: documentImageSchema,
+                default: () => ({}),
+            },
+            vehicleRegistration: {
+                type: documentImageSchema,
+                default: () => ({}),
             },
         },
 
@@ -207,16 +355,6 @@ const captainSchema = new mongoose.Schema(
             },
         },
 
-        /*
-         * Billetera interna del conductor.
-         * Este saldo es el que Central Go usará para:
-         * - validar si puede ofertar o aceptar servicios,
-         * - descontar la comisión al finalizar un viaje,
-         * - mostrar saldo disponible en el panel del conductor.
-         *
-         * El historial real de movimientos NO se guarda aquí,
-         * se guarda en walletTransaction.model.js.
-         */
         wallet: {
             balance: {
                 type: Number,
@@ -234,12 +372,6 @@ const captainSchema = new mongoose.Schema(
             },
         },
 
-        /*
-         * Tokens de notificaciones push.
-         * Aquí guardamos los dispositivos/navegadores del conductor
-         * para avisarle cuando reciba ofertas de mercancía, espacio, cupos
-         * o eventos importantes cuando esté fuera de la app.
-         */
         fcmTokens: {
             type: [fcmTokenSchema],
             default: [],
@@ -251,7 +383,7 @@ const captainSchema = new mongoose.Schema(
 );
 
 captainSchema.methods.generateAuthToken = function () {
-    const token = jwt.sign(
+    return jwt.sign(
         {
             _id: this._id,
         },
@@ -260,22 +392,42 @@ captainSchema.methods.generateAuthToken = function () {
             expiresIn: "24h",
         }
     );
-
-    return token;
 };
 
 captainSchema.methods.comparePassword = async function (password) {
-    return await bcrypt.compare(password, this.password);
+    return bcrypt.compare(password, this.password);
 };
 
 captainSchema.statics.hashPassword = async function (password) {
-    return await bcrypt.hash(password, 10);
+    return bcrypt.hash(password, 10);
 };
 
-captainSchema.index({ email: 1 });
+captainSchema.pre("validate", function (next) {
+    if (!this.vehicle) {
+        next();
+        return;
+    }
+
+    const capacity = Number(this.vehicle.capacity);
+    const unit = this.vehicle.capacityUnit || "kg";
+
+    if (Number.isFinite(capacity) && capacity > 0) {
+        this.vehicle.capacityKg =
+            unit === "ton"
+                ? capacity * 1000
+                : capacity;
+    }
+
+    next();
+});
+
 captainSchema.index({ status: 1 });
+captainSchema.index({ "verification.status": 1 });
 captainSchema.index({ "wallet.balance": 1 });
 captainSchema.index({ "fcmTokens.token": 1 });
+captainSchema.index({ "vehicle.vehicleType": 1 });
+captainSchema.index({ "vehicle.capacityKg": 1 });
+captainSchema.index({ "identification.number": 1 });
 
 const captainModel = mongoose.model("captain", captainSchema);
 

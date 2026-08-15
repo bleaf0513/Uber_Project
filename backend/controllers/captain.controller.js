@@ -9,13 +9,37 @@ const VALID_PUSH_PLATFORMS = ["web", "android", "ios", "unknown"];
 const VALID_VEHICLE_TYPES = [
     "motorcycle",
     "car",
-    "light_cargo",
-    "van",
-    "truck",
     "motocarro",
     "pickup",
-    "moving",
+    "van",
+    "light_truck",
+    "medium_truck",
+    "heavy_truck",
+    "simple_truck",
+    "double_troque",
+    "dump_truck",
+    "mini_trailer",
+    "tractor_trailer",
+    "lowboy",
+    "special_vehicle",
 ];
+
+const VALID_BODY_TYPES = [
+    "not_specified",
+    "closed_van",
+    "stakes",
+    "platform",
+    "refrigerated",
+    "dump",
+    "tank",
+    "container_carrier",
+    "lowboy",
+    "open_body",
+    "other",
+];
+
+const VALID_CAPACITY_UNITS = ["kg", "ton"];
+
 
 function normalizePushPlatform(platform) {
     const value = String(platform || "unknown").trim().toLowerCase();
@@ -37,6 +61,36 @@ function cleanString(value, maxLength = 500) {
 function toNumber(value, fallback = 0) {
     const num = Number(value);
     return Number.isFinite(num) ? num : fallback;
+}
+
+function normalizeCapacityUnit(value) {
+    const unit = cleanString(value, 10).toLowerCase();
+
+    if (VALID_CAPACITY_UNITS.includes(unit)) {
+        return unit;
+    }
+
+    return "kg";
+}
+
+function capacityToKg(capacity, unit) {
+    const numericCapacity = toNumber(capacity, 0);
+    const normalizedUnit = normalizeCapacityUnit(unit);
+
+    if (numericCapacity <= 0) {
+        return 0;
+    }
+
+    return normalizedUnit === "ton"
+        ? numericCapacity * 1000
+        : numericCapacity;
+}
+
+function normalizeDocumentPair(documentValue = {}) {
+    return {
+        front: cleanString(documentValue?.front, 10_000_000),
+        back: cleanString(documentValue?.back, 10_000_000),
+    };
 }
 
 /**
@@ -86,11 +140,46 @@ function buildCaptainResponse(captainDoc) {
         email: captain.email || "",
         socketId: captain.socketId || "",
         status: captain.status || "inactive",
+        identification: {
+            number: captain?.identification?.number || "",
+            type: captain?.identification?.type || "CC",
+        },
+
+        verification: {
+            status:
+                captain?.verification?.status ||
+                "pending",
+            reviewedAt:
+                captain?.verification?.reviewedAt ||
+                null,
+            notes:
+                captain?.verification?.notes ||
+                "",
+        },
+
         vehicle: {
             color: captain?.vehicle?.color || "",
             plate: captain?.vehicle?.plate || "",
+            brand: captain?.vehicle?.brand || "",
+            reference: captain?.vehicle?.reference || "",
+            model: captain?.vehicle?.model || "",
             capacity: captain?.vehicle?.capacity || 0,
-            vehicleType: captain?.vehicle?.vehicleType || "",
+            capacityUnit:
+                captain?.vehicle?.capacityUnit ||
+                "kg",
+            capacityKg:
+                captain?.vehicle?.capacityKg ||
+                captain?.vehicle?.capacity ||
+                0,
+            vehicleType:
+                captain?.vehicle?.vehicleType ||
+                "",
+            bodyType:
+                captain?.vehicle?.bodyType ||
+                "not_specified",
+            axleCount:
+                captain?.vehicle?.axleCount ||
+                null,
         },
 
         profileImage:
@@ -181,12 +270,90 @@ module.exports.registerCaptain = async (req, res, next) => {
             fullname,
             email,
             password,
+            identification,
             vehicle,
             documents,
         } = req.body;
 
         const cleanEmail = String(email || "").trim().toLowerCase();
         const plate = String(vehicle?.plate || "").trim().toUpperCase();
+
+        const identificationNumber =
+            cleanString(
+                identification?.number,
+                40
+            );
+
+        const identificationType =
+            cleanString(
+                identification?.type || "CC",
+                20
+            ).toUpperCase();
+
+        const capacityUnit =
+            normalizeCapacityUnit(
+                vehicle?.capacityUnit
+            );
+
+        const capacity =
+            toNumber(
+                vehicle?.capacity,
+                0
+            );
+
+        const capacityKg =
+            capacityToKg(
+                capacity,
+                capacityUnit
+            );
+
+        const bodyType =
+            VALID_BODY_TYPES.includes(
+                vehicle?.bodyType
+            )
+                ? vehicle.bodyType
+                : "not_specified";
+
+        const identificationCard =
+            normalizeDocumentPair(
+                documents?.identificationCard
+            );
+
+        const drivingLicense =
+            normalizeDocumentPair(
+                documents?.drivingLicense
+            );
+
+        const vehicleRegistration =
+            normalizeDocumentPair(
+                documents?.vehicleRegistration
+            );
+
+        /*
+         * Compatibilidad con el formulario anterior:
+         * acepta los campos antiguos de una sola imagen.
+         */
+        if (
+            !drivingLicense.front &&
+            documents?.drivingLicenseImage
+        ) {
+            drivingLicense.front =
+                cleanString(
+                    documents.drivingLicenseImage,
+                    10_000_000
+                );
+        }
+
+        if (
+            !vehicleRegistration.front &&
+            documents?.vehicleRegistrationImage
+        ) {
+            vehicleRegistration.front =
+                cleanString(
+                    documents.vehicleRegistrationImage,
+                    10_000_000
+                );
+        }
 
         if (!fullname?.firstname || String(fullname.firstname).trim().length < 3) {
             return res.status(400).json({
@@ -218,9 +385,20 @@ module.exports.registerCaptain = async (req, res, next) => {
             });
         }
 
-        if (!vehicle?.capacity || Number(vehicle.capacity) < 1) {
+        if (capacity <= 0 || capacityKg <= 0) {
             return res.status(400).json({
-                message: "La capacidad del vehículo debe ser válida.",
+                message:
+                    "La capacidad del vehículo debe ser válida.",
+            });
+        }
+
+        if (
+            !identificationNumber ||
+            identificationNumber.length < 5
+        ) {
+            return res.status(400).json({
+                message:
+                    "El número de identificación es obligatorio.",
             });
         }
 
@@ -230,15 +408,33 @@ module.exports.registerCaptain = async (req, res, next) => {
             });
         }
 
-        if (!documents?.drivingLicenseImage) {
+        if (
+            !identificationCard.front ||
+            !identificationCard.back
+        ) {
             return res.status(400).json({
-                message: "Debes subir la foto de la licencia de conducción.",
+                message:
+                    "Debes subir la cédula por delante y por detrás.",
             });
         }
 
-        if (!documents?.vehicleRegistrationImage) {
+        if (
+            !drivingLicense.front ||
+            !drivingLicense.back
+        ) {
             return res.status(400).json({
-                message: "Debes subir la foto de la matrícula o tarjeta de propiedad del vehículo.",
+                message:
+                    "Debes subir la licencia de conducción por delante y por detrás.",
+            });
+        }
+
+        if (
+            !vehicleRegistration.front ||
+            !vehicleRegistration.back
+        ) {
+            return res.status(400).json({
+                message:
+                    "Debes subir la tarjeta de propiedad por delante y por detrás.",
             });
         }
 
@@ -249,6 +445,19 @@ module.exports.registerCaptain = async (req, res, next) => {
         if (existingCaptain) {
             return res.status(400).json({
                 message: "Ya existe un conductor registrado con ese correo.",
+            });
+        }
+
+        const existingIdentificationCaptain =
+            await captainModel.findOne({
+                "identification.number":
+                    identificationNumber,
+            });
+
+        if (existingIdentificationCaptain) {
+            return res.status(400).json({
+                message:
+                    "Ya existe un conductor registrado con ese número de identificación.",
             });
         }
 
@@ -266,6 +475,10 @@ module.exports.registerCaptain = async (req, res, next) => {
             $or: [
                 { email: cleanEmail },
                 { "vehicle.plate": plate },
+                {
+                    "identification.number":
+                        identificationNumber,
+                },
             ],
             status: "pending",
         });
@@ -280,21 +493,89 @@ module.exports.registerCaptain = async (req, res, next) => {
 
         const application = await DriverApplication.create({
             fullname: {
-                firstname: String(fullname.firstname || "").trim(),
-                lastname: String(fullname.lastname || "").trim(),
+                firstname:
+                    String(
+                        fullname.firstname ||
+                            ""
+                    ).trim(),
+                lastname:
+                    String(
+                        fullname.lastname ||
+                            ""
+                    ).trim(),
             },
+
             email: cleanEmail,
             password: hashedPassword,
+
+            identification: {
+                number:
+                    identificationNumber,
+                type:
+                    identificationType,
+            },
+
             vehicle: {
-                color: String(vehicle.color || "").trim(),
+                color:
+                    cleanString(
+                        vehicle.color,
+                        80
+                    ),
                 plate,
-                capacity: Number(vehicle.capacity || 1),
-                vehicleType: vehicle.vehicleType,
+                brand:
+                    cleanString(
+                        vehicle?.brand,
+                        80
+                    ),
+                reference:
+                    cleanString(
+                        vehicle?.reference,
+                        80
+                    ),
+                model:
+                    cleanString(
+                        vehicle?.model,
+                        40
+                    ),
+                capacity,
+                capacityUnit,
+                capacityKg,
+                vehicleType:
+                    vehicle.vehicleType,
+                bodyType,
+                axleCount:
+                    toNumber(
+                        vehicle?.axleCount,
+                        0
+                    ) || null,
+                photo:
+                    cleanString(
+                        vehicle?.photo,
+                        10_000_000
+                    ),
             },
+
             documents: {
-                drivingLicenseImage: documents.drivingLicenseImage,
-                vehicleRegistrationImage: documents.vehicleRegistrationImage,
+                identificationCard: {
+                    front:
+                        identificationCard.front,
+                    back:
+                        identificationCard.back,
+                },
+                drivingLicense: {
+                    front:
+                        drivingLicense.front,
+                    back:
+                        drivingLicense.back,
+                },
+                vehicleRegistration: {
+                    front:
+                        vehicleRegistration.front,
+                    back:
+                        vehicleRegistration.back,
+                },
             },
+
             status: "pending",
         });
 
@@ -306,7 +587,17 @@ module.exports.registerCaptain = async (req, res, next) => {
                 id: application._id,
                 status: application.status,
                 email: application.email,
+                identification: {
+                    type:
+                        application?.identification?.type ||
+                        identificationType,
+                },
                 vehicle: application.vehicle,
+                documentsReceived: {
+                    identificationCard: true,
+                    drivingLicense: true,
+                    vehicleRegistration: true,
+                },
                 createdAt: application.createdAt,
             },
         });
