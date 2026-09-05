@@ -104,6 +104,124 @@ const rideSchema = new mongoose.Schema(
             },
         },
 
+        /*
+         * Tipo de servicio.
+         * Por ahora Central GO usa este flujo para domicilios y carga local.
+         */
+        serviceType: {
+            type: String,
+            enum: ["local_delivery"],
+            default: "local_delivery",
+            index: true,
+        },
+
+        /*
+         * Tipo de remitente.
+         * personal = envío de una persona.
+         * business = envío solicitado por negocio o empresa.
+         */
+        senderType: {
+            type: String,
+            enum: ["personal", "business"],
+            default: "personal",
+            index: true,
+        },
+
+        /*
+         * Momento del servicio:
+         * now       = se necesita lo antes posible.
+         * scheduled = se publica con anticipación para una fecha/hora futura.
+         */
+        serviceTiming: {
+            type: String,
+            enum: ["now", "scheduled"],
+            default: "now",
+            index: true,
+        },
+
+        /*
+         * Programación de recogida.
+         *
+         * Ejemplo:
+         * pickupStartAt = 2026-09-04 08:00
+         * pickupEndAt   = 2026-09-04 09:00
+         *
+         * Para serviceTiming = "now" ambos pueden quedar null.
+         */
+        schedule: {
+            pickupStartAt: {
+                type: Date,
+                default: null,
+            },
+
+            pickupEndAt: {
+                type: Date,
+                default: null,
+            },
+
+            timezone: {
+                type: String,
+                trim: true,
+                default: "America/Bogota",
+            },
+
+            notes: {
+                type: String,
+                trim: true,
+                maxlength: 300,
+                default: "",
+            },
+        },
+
+        /*
+         * Información de la mercancía.
+         */
+        cargo: {
+            category: {
+                type: String,
+                enum: [
+                    "market",
+                    "boxes",
+                    "packages",
+                    "sacks",
+                    "baskets",
+                    "general_merchandise",
+                    "other",
+                ],
+                default: "packages",
+            },
+
+            quantity: {
+                type: Number,
+                min: 1,
+                default: 1,
+            },
+
+            approximateWeight: {
+                type: Number,
+                min: 0,
+                default: null,
+            },
+
+            weightUnit: {
+                type: String,
+                enum: ["kg", "lb"],
+                default: "kg",
+            },
+
+            weightUnknown: {
+                type: Boolean,
+                default: false,
+            },
+
+            description: {
+                type: String,
+                trim: true,
+                maxlength: 300,
+                default: "",
+            },
+        },
+
         status: {
             type: String,
             enum: [
@@ -243,6 +361,17 @@ const rideSchema = new mongoose.Schema(
             default: null,
         },
 
+        /*
+         * Para domicilios programados:
+         * aceptar la oferta NO significa que el conductor ya va en camino.
+         * Este campo se llena únicamente cuando el conductor toca
+         * "Iniciar domicilio".
+         */
+        scheduledDispatchStartedAt: {
+            type: Date,
+            default: null,
+        },
+
         startedAt: {
             type: Date,
             default: null,
@@ -303,6 +432,49 @@ rideSchema.index({ captain: 1, status: 1, updatedAt: -1 });
 rideSchema.index({ user: 1, status: 1, updatedAt: -1 });
 rideSchema.index({ status: 1, negotiationStatus: 1, createdAt: -1 });
 rideSchema.index({ user: 1, negotiationStatus: 1, status: 1, updatedAt: -1 });
+
+/*
+ * Índices para recalcular reputación de usuario y conductor.
+ * Solo se usan valoraciones de servicios completados.
+ */
+rideSchema.index({
+    captain: 1,
+    status: 1,
+    cancelledAt: 1,
+    "userRatingToCaptain.rating": 1,
+});
+
+rideSchema.index({
+    user: 1,
+    status: 1,
+    cancelledAt: 1,
+    "captainRatingToUser.rating": 1,
+});
+
+
+/*
+ * Índices útiles para filtrar solicitudes
+ * de persona/empresa y servicios locales.
+ */
+rideSchema.index({ serviceType: 1, status: 1, createdAt: -1 });
+rideSchema.index({ senderType: 1, status: 1, createdAt: -1 });
+
+/*
+ * Índices para servicios programados.
+ * Permiten encontrar rápidamente servicios futuros por fecha de recogida.
+ */
+rideSchema.index({
+    serviceTiming: 1,
+    "schedule.pickupStartAt": 1,
+    status: 1,
+});
+
+rideSchema.index({
+    status: 1,
+    negotiationStatus: 1,
+    serviceTiming: 1,
+    "schedule.pickupStartAt": 1,
+});
 
 const rideModel = mongoose.model("Ride", rideSchema);
 

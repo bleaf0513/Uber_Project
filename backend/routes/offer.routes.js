@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 
-const { body, query } = require("express-validator");
+const { body, query, param } = require("express-validator");
 
 const authMiddleware = require("../middlewares/auth.middleware");
 const offerController = require("../controllers/offer.controller");
@@ -1426,5 +1426,96 @@ router.get(
 
     offerController.getMySentBids
 );
+
+
+/*
+ * =========================================================
+ * CHAT PRIVADO DE OPERACIONES ACEPTADAS
+ * =========================================================
+ *
+ * Se habilita únicamente cuando una propuesta queda aceptada.
+ * Aplica para:
+ * - goods  = mercancía
+ * - space  = carga
+ * - seat   = cupos
+ *
+ * El controlador valida que solo participen el usuario y el
+ * conductor relacionados con la propuesta.
+ */
+
+router.get(
+    "/bid/:bidId/chat/user",
+    authMiddleware.authUser,
+
+    param("bidId")
+        .isMongoId()
+        .withMessage(
+            "El identificador de la oferta es inválido."
+        ),
+
+    offerController.getAcceptedBidChat
+);
+
+router.get(
+    "/bid/:bidId/chat/captain",
+    authMiddleware.authCaptain,
+
+    param("bidId")
+        .isMongoId()
+        .withMessage(
+            "El identificador de la oferta es inválido."
+        ),
+
+    offerController.getAcceptedBidChat
+);
+
+router.post(
+    "/bid/chat/user",
+    authMiddleware.authUser,
+
+    body("bidId")
+        .isMongoId()
+        .withMessage(
+            "El identificador de la oferta es inválido."
+        ),
+
+    body("message")
+        .isString()
+        .trim()
+        .notEmpty()
+        .isLength({
+            max: 1000,
+        })
+        .withMessage(
+            "El mensaje es inválido."
+        ),
+
+    offerController.sendAcceptedBidChatMessage
+);
+
+router.post(
+    "/bid/chat/captain",
+    authMiddleware.authCaptain,
+
+    body("bidId")
+        .isMongoId()
+        .withMessage(
+            "El identificador de la oferta es inválido."
+        ),
+
+    body("message")
+        .isString()
+        .trim()
+        .notEmpty()
+        .isLength({
+            max: 1000,
+        })
+        .withMessage(
+            "El mensaje es inválido."
+        ),
+
+    offerController.sendAcceptedBidChatMessage
+);
+
 
 module.exports = router;

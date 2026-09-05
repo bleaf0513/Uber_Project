@@ -37,10 +37,10 @@ const DriverSelected = (props) => {
 
   const quickMessages = useMemo(
     () => [
-      "Ya estoy afuera",
-      "Voy bajando",
-      "¿Dónde estás?",
-      "Te espero en portería",
+      "La mercancía está lista",
+      "Ya voy al punto de recogida",
+      "¿Dónde te encuentras exactamente?",
+      "Te espero en el punto de recogida",
     ],
     []
   );
@@ -402,13 +402,13 @@ const DriverSelected = (props) => {
       }
 
       setUserConfirmedPickup(true);
-      alert("Listo. Le avisamos al conductor que ya estás en el punto.");
+      alert("Listo. Le avisamos al conductor que la mercancía está lista para cargar.");
     } catch (error) {
       console.error("Error confirmando recogida:", error);
 
       alert(
         error?.response?.data?.message ||
-          "No se pudo confirmar que ya estás en el punto."
+          "No se pudo confirmar que la mercancía está lista para cargar."
       );
     } finally {
       setConfirmingPickup(false);
@@ -500,12 +500,24 @@ const DriverSelected = (props) => {
 
   const vehicleLabel = getVehicleTypeLabel(vehicleType);
   const driverPhoto = getDriverPhoto(captain);
+
+  const driverRatingRaw = Number(captain?.rating);
+  const driverRating = Number.isFinite(driverRatingRaw)
+    ? Math.min(5, Math.max(0, driverRatingRaw))
+    : 5;
+
+  const driverRatingCountRaw = Number(captain?.ratingCount);
+  const driverRatingCount =
+    Number.isFinite(driverRatingCountRaw) && driverRatingCountRaw > 0
+      ? Math.floor(driverRatingCountRaw)
+      : 0;
+
   const finalFare = currentRide?.fare ?? currentRide?.offeredFare ?? 0;
 
   const etaText = rideEnded
-    ? "Tu viaje finalizó"
+    ? "Tu domicilio finalizó"
     : rideStarted || currentRide?.status === "ongoing"
-    ? "Tu viaje está en curso"
+    ? "Tu domicilio está en curso"
     : userConfirmedPickup || currentRide?.userConfirmedAtPickup
     ? "Esperando que el conductor inicie"
     : localCaptainArrived
@@ -517,9 +529,9 @@ const DriverSelected = (props) => {
   const etaSubText = rideEnded
     ? "Califica al conductor para cerrar tu experiencia."
     : rideStarted || currentRide?.status === "ongoing"
-    ? "Vas camino a tu destino."
+    ? "Tu mercancía va camino al destino."
     : userConfirmedPickup || currentRide?.userConfirmedAtPickup
-    ? "Ya avisamos al conductor que estás en el punto."
+    ? "Ya avisamos al conductor que la mercancía está lista para cargar."
     : localCaptainArrived
     ? arrivalCountdown > 0
       ? `El contador termina en ${arrivalCountdown}s, pero puedes confirmar si ya estás en el punto.`
@@ -601,7 +613,7 @@ const DriverSelected = (props) => {
                       background: PURPLE_GRADIENT,
                     }}
                   >
-                    {confirmingPickup ? "Confirmando..." : "Ya estoy acá"}
+                    {confirmingPickup ? "Confirmando..." : "Mercancía lista para cargar"}
                   </button>
 
                   {arrivalCountdown > 0 && (
@@ -673,12 +685,20 @@ const DriverSelected = (props) => {
 
               <div className="absolute -top-1 -right-3 bg-white shadow rounded-full px-1.5 py-0.5 flex items-center gap-0.5">
                 <i className="ri-star-fill text-yellow-400 text-xs"></i>
-                <span className="text-xs font-bold text-gray-700">4.94</span>
+                <span className="text-xs font-bold text-gray-700">
+                  {driverRating.toFixed(1)}
+                </span>
               </div>
             </div>
 
             <p className="text-base font-bold text-gray-900 mt-3 leading-5">
               {driverName}
+            </p>
+
+            <p className="text-[11px] font-bold text-gray-500 mt-1">
+              {driverRatingCount > 0
+                ? `${driverRatingCount} calificación${driverRatingCount === 1 ? "" : "es"}`
+                : "Conductor nuevo"}
             </p>
           </div>
 

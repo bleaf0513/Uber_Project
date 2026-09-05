@@ -22,10 +22,7 @@ const CANCEL_REASONS = [
 ];
 
 const PURPLE_GRADIENT = "linear-gradient(135deg, #6D28D9, #A855F7, #D946EF)";
-const PURPLE_DEEP = "linear-gradient(135deg, #3B0764, #6D28D9, #C026D3)";
 const PURPLE_SOFT = "linear-gradient(135deg, #F3E8FF, #FAE8FF)";
-const GREEN_GRADIENT = "linear-gradient(135deg, #16A34A, #22C55E)";
-const DARK_GRADIENT = "linear-gradient(135deg, #111827, #374151)";
 
 const CaptainRiding = () => {
   const [showCancelModal, setShowCancelModal] = useState(false);
@@ -35,12 +32,14 @@ const CaptainRiding = () => {
   const [sendingArrived, setSendingArrived] = useState(false);
   const [sendingCancel, setSendingCancel] = useState(false);
   const [startingRide, setStartingRide] = useState(false);
+  const [startingScheduledDispatch, setStartingScheduledDispatch] = useState(false);
   const [finishingRide, setFinishingRide] = useState(false);
 
   const [driverArrived, setDriverArrived] = useState(false);
   const [userConfirmedPickup, setUserConfirmedPickup] = useState(false);
   const [rideStarted, setRideStarted] = useState(false);
   const [rideFinished, setRideFinished] = useState(false);
+  const [scheduledPanelMinimized, setScheduledPanelMinimized] = useState(false);
 
   const [loadingActiveRide, setLoadingActiveRide] = useState(false);
   const [triedLoadingActiveRide, setTriedLoadingActiveRide] = useState(false);
@@ -61,16 +60,8 @@ const CaptainRiding = () => {
   const [messages, setMessages] = useState([]);
   const [sendingMessage, setSendingMessage] = useState(false);
 
-  const [navigationSheetOpen, setNavigationSheetOpen] = useState(false);
-  const [navigationTarget, setNavigationTarget] = useState("pickup");
-  const [hasOpenedPickupNavigation, setHasOpenedPickupNavigation] =
-    useState(false);
-  const [hasOpenedDestinationNavigation, setHasOpenedDestinationNavigation] =
-    useState(false);
-
   const cancelModalRef = useRef(null);
   const ratingModalRef = useRef(null);
-  const navigationModalRef = useRef(null);
   const messagesEndRef = useRef(null);
 
   const location = useLocation();
@@ -84,7 +75,7 @@ const CaptainRiding = () => {
 
   const quickMessages = useMemo(
     () => [
-      "Ya llegué",
+      "Ya llegué a recoger",
       "Voy en camino",
       "Estoy en la entrada",
       "No veo el punto exacto",
@@ -93,39 +84,16 @@ const CaptainRiding = () => {
     []
   );
 
-  const isUserPickupConfirmed = (rideData) => {
-    return Boolean(
-      rideData?.userConfirmedAtPickup ||
-        rideData?.userConfirmedPickup ||
-        rideData?.pickupConfirmedByUser ||
-        rideData?.userReadyAtPickup ||
-        rideData?.userIsAtPickup ||
-        rideData?.confirmedAtPickup
-    );
-  };
-
-  const isDriverArrivedAtPickup = (rideData) => {
-    return Boolean(
-      rideData?.arrivedAtPickup ||
-        rideData?.captainArrivedAtPickup ||
-        rideData?.driverArrivedAtPickup ||
-        rideData?.arrived ||
-        rideData?.status === "arrived"
-    );
-  };
-
   const syncRideState = (rideData) => {
     if (!rideData?._id) return;
 
-    const normalizedRide = {
-      ...rideData,
-      arrivedAtPickup: isDriverArrivedAtPickup(rideData),
-      userConfirmedAtPickup: isUserPickupConfirmed(rideData),
-    };
+    setCurrentRide(rideData);
 
-    setCurrentRide(normalizedRide);
-    setDriverArrived(isDriverArrivedAtPickup(rideData));
-    setUserConfirmedPickup(isUserPickupConfirmed(rideData));
+    setDriverArrived(
+      Boolean(rideData?.arrivedAtPickup) || rideData?.status === "arrived"
+    );
+
+    setUserConfirmedPickup(Boolean(rideData?.userConfirmedAtPickup));
     setRideStarted(rideData?.status === "ongoing");
     setRideFinished(rideData?.status === "completed");
   };
@@ -138,12 +106,7 @@ const CaptainRiding = () => {
     currentRide?._id,
     currentRide?.status,
     currentRide?.userConfirmedAtPickup,
-    currentRide?.userConfirmedPickup,
-    currentRide?.pickupConfirmedByUser,
-    currentRide?.userReadyAtPickup,
     currentRide?.arrivedAtPickup,
-    currentRide?.captainArrivedAtPickup,
-    currentRide?.driverArrivedAtPickup,
   ]);
 
   useEffect(() => {
@@ -190,43 +153,6 @@ const CaptainRiding = () => {
     loadCaptainActiveRide();
   }, [currentRide?._id, navigate]);
 
-  useEffect(() => {
-    if (!currentRide?._id) return;
-    if (rideFinished || currentRide?.status === "completed") return;
-
-    const interval = setInterval(async () => {
-      try {
-        const token = localStorage.getItem("token");
-        if (!token) return;
-
-        const response = await axios.get(
-          `${getApiBaseUrl()}/rides/captain/active`,
-          {
-            headers: {
-              Authorization: `Bearer ${token}`,
-            },
-          }
-        );
-
-        const activeRide = response?.data?.ride || null;
-
-        if (
-          activeRide?._id &&
-          String(activeRide._id) === String(currentRide._id)
-        ) {
-          syncRideState(activeRide);
-        }
-      } catch (error) {
-        console.warn(
-          "[captain-riding] No se pudo actualizar la carrera activa:",
-          error?.response?.data?.message || error?.message
-        );
-      }
-    }, 2000);
-
-    return () => clearInterval(interval);
-  }, [currentRide?._id, rideFinished, currentRide?.status]);
-
   useGSAP(() => {
     if (showCancelModal) {
       gsap.to(cancelModalRef.current, {
@@ -262,24 +188,6 @@ const CaptainRiding = () => {
       });
     }
   }, [showRatingModal]);
-
-  useGSAP(() => {
-    if (navigationSheetOpen) {
-      gsap.to(navigationModalRef.current, {
-        y: "0%",
-        opacity: 1,
-        duration: 0.25,
-        ease: "power2.out",
-      });
-    } else {
-      gsap.to(navigationModalRef.current, {
-        y: "100%",
-        opacity: 0,
-        duration: 0.2,
-        ease: "power2.inOut",
-      });
-    }
-  }, [navigationSheetOpen]);
 
   useEffect(() => {
     if (!socket || !captain?._id) return;
@@ -387,15 +295,6 @@ const CaptainRiding = () => {
         syncRideState(nextRide);
       } else {
         setUserConfirmedPickup(true);
-        setCurrentRide((prev) =>
-          prev
-            ? {
-                ...prev,
-                userConfirmedAtPickup: true,
-                userConfirmedPickup: true,
-              }
-            : prev
-        );
       }
 
       toast.success("El usuario confirmó que ya está en el punto.");
@@ -410,7 +309,7 @@ const CaptainRiding = () => {
       }
 
       setRideStarted(true);
-      toast.success("Viaje iniciado.");
+      toast.success("Domicilio iniciado.");
     };
 
     const handleRideEnded = (payload) => {
@@ -429,9 +328,6 @@ const CaptainRiding = () => {
     socket.on("ride-chat-message", handleRideMessage);
     socket.on("user-confirmed-at-pickup", handleUserConfirmedPickup);
     socket.on("user-confirmed-pickup", handleUserConfirmedPickup);
-    socket.on("ride-user-confirmed-pickup", handleUserConfirmedPickup);
-    socket.on("user-ready-at-pickup", handleUserConfirmedPickup);
-    socket.on("pickup-confirmed-by-user", handleUserConfirmedPickup);
     socket.on("ride-updated", handleRideUpdated);
     socket.on("ride-started", handleRideStarted);
     socket.on("ride-ended", handleRideEnded);
@@ -441,9 +337,6 @@ const CaptainRiding = () => {
       socket.off("ride-chat-message", handleRideMessage);
       socket.off("user-confirmed-at-pickup", handleUserConfirmedPickup);
       socket.off("user-confirmed-pickup", handleUserConfirmedPickup);
-      socket.off("ride-user-confirmed-pickup", handleUserConfirmedPickup);
-      socket.off("user-ready-at-pickup", handleUserConfirmedPickup);
-      socket.off("pickup-confirmed-by-user", handleUserConfirmedPickup);
       socket.off("ride-updated", handleRideUpdated);
       socket.off("ride-started", handleRideStarted);
       socket.off("ride-ended", handleRideEnded);
@@ -520,27 +413,6 @@ const CaptainRiding = () => {
       : `${hours} h`;
   };
 
-  const parseEtaDistanceToKm = (value = "") => {
-    const text = String(value || "")
-      .toLowerCase()
-      .replace(",", ".")
-      .trim();
-
-    if (!text) return null;
-
-    const match = text.match(/([\d.]+)/);
-    if (!match) return null;
-
-    const number = Number(match[1]);
-    if (!Number.isFinite(number)) return null;
-
-    if (text.includes("m") && !text.includes("km")) {
-      return number / 1000;
-    }
-
-    return number;
-  };
-
   const getUserPhoto = () =>
     currentRide?.user?.profileImage ||
     currentRide?.user?.photo ||
@@ -564,25 +436,23 @@ const CaptainRiding = () => {
     return labels[vehicleType] || "Vehículo";
   };
 
-  const getAddressByTarget = (target = navigationTarget) => {
-    if (target === "destination") {
+  const shouldNavigateToDestination =
+    rideStarted || currentRide?.status === "ongoing";
+
+  const getNavigationTargetAddress = () => {
+    if (shouldNavigateToDestination) {
       return currentRide?.destination || "";
     }
 
     return currentRide?.pickup || "";
   };
 
-  const getNavigationTargetLabel = (target = navigationTarget) => {
-    return target === "destination" ? "destino" : "punto de recogida";
+  const getNavigationTargetLabel = () => {
+    return shouldNavigateToDestination ? "destino" : "punto de recogida";
   };
 
-  const openNavigationSelector = (target = "pickup") => {
-    setNavigationTarget(target);
-    setNavigationSheetOpen(true);
-  };
-
-  const openWazeNavigation = (target = navigationTarget) => {
-    const address = getAddressByTarget(target);
+  const openWazeNavigation = () => {
+    const address = getNavigationTargetAddress();
 
     if (!address) {
       toast.error("No hay dirección disponible para navegar.");
@@ -590,22 +460,12 @@ const CaptainRiding = () => {
     }
 
     const encodedAddress = encodeURIComponent(address);
-
-    if (target === "pickup") {
-      setHasOpenedPickupNavigation(true);
-    }
-
-    if (target === "destination") {
-      setHasOpenedDestinationNavigation(true);
-    }
-
-    setNavigationSheetOpen(false);
 
     window.open(`https://waze.com/ul?q=${encodedAddress}&navigate=yes`, "_blank");
   };
 
-  const openGoogleMapsNavigation = (target = navigationTarget) => {
-    const address = getAddressByTarget(target);
+  const openGoogleMapsNavigation = () => {
+    const address = getNavigationTargetAddress();
 
     if (!address) {
       toast.error("No hay dirección disponible para navegar.");
@@ -613,16 +473,6 @@ const CaptainRiding = () => {
     }
 
     const encodedAddress = encodeURIComponent(address);
-
-    if (target === "pickup") {
-      setHasOpenedPickupNavigation(true);
-    }
-
-    if (target === "destination") {
-      setHasOpenedDestinationNavigation(true);
-    }
-
-    setNavigationSheetOpen(false);
 
     window.open(
       `https://www.google.com/maps/dir/?api=1&destination=${encodedAddress}&travelmode=driving`,
@@ -725,6 +575,43 @@ const CaptainRiding = () => {
     }
   };
 
+  const handleStartScheduledDispatch = async () => {
+    if (!currentRide?._id || startingScheduledDispatch) return;
+
+    try {
+      setStartingScheduledDispatch(true);
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/rides/start-scheduled-dispatch`,
+        { rideId: currentRide._id },
+        {
+          headers: {
+            Authorization: `Bearer ${localStorage.getItem("token")}`,
+          },
+        }
+      );
+
+      const nextRide = response?.data?.ride || currentRide;
+
+      if (nextRide?._id) {
+        syncRideState(nextRide);
+      }
+
+      toast.success(
+        "Domicilio iniciado. Ahora sí puedes dirigirte al punto de recogida."
+      );
+    } catch (error) {
+      console.error("Error iniciando domicilio programado:", error);
+
+      toast.error(
+        error?.response?.data?.message ||
+          "No se pudo iniciar el domicilio programado."
+      );
+    } finally {
+      setStartingScheduledDispatch(false);
+    }
+  };
+
   const handleArrived = async () => {
     if (!currentRide?._id || sendingArrived) return;
 
@@ -767,10 +654,7 @@ const CaptainRiding = () => {
   const handleStartRide = async () => {
     if (!currentRide?._id || startingRide) return;
 
-    const userIsReady =
-      userConfirmedPickup || isUserPickupConfirmed(currentRide);
-
-    if (!userIsReady) {
+    if (!userConfirmedPickup && !currentRide?.userConfirmedAtPickup) {
       toast.info("Espera a que el usuario confirme que ya está en el punto.");
       return;
     }
@@ -795,15 +679,15 @@ const CaptainRiding = () => {
       }
 
       setRideStarted(true);
-      toast.success("Viaje iniciado. Elige Waze o Google Maps para navegar.");
+      toast.success("Domicilio iniciado. Ahora navega hacia el destino.");
 
       setTimeout(() => {
-        openNavigationSelector("destination");
-      }, 400);
+        openWazeNavigation();
+      }, 600);
     } catch (error) {
       console.error("Error iniciando viaje:", error);
       toast.error(
-        error?.response?.data?.message || "No se pudo iniciar el viaje."
+        error?.response?.data?.message || "No se pudo iniciar el domicilio."
       );
     } finally {
       setStartingRide(false);
@@ -852,7 +736,7 @@ const CaptainRiding = () => {
     if (!currentRide?._id || finishingRide) return;
 
     if (!rideStarted && currentRide?.status !== "ongoing") {
-      toast.info("Primero debes iniciar el viaje.");
+      toast.info("Primero debes iniciar el domicilio.");
       return;
     }
 
@@ -997,6 +881,17 @@ const CaptainRiding = () => {
       currentRide?.user?.fullname?.lastname || ""
     }`.trim() || "Usuario";
 
+  const userRatingRaw = Number(currentRide?.user?.rating);
+  const userRating = Number.isFinite(userRatingRaw)
+    ? Math.min(5, Math.max(0, userRatingRaw))
+    : 5;
+
+  const userRatingCountRaw = Number(currentRide?.user?.ratingCount);
+  const userRatingCount =
+    Number.isFinite(userRatingCountRaw) && userRatingCountRaw > 0
+      ? Math.floor(userRatingCountRaw)
+      : 0;
+
   const userPhone =
     currentRide?.user?.phone ||
     currentRide?.user?.phoneNumber ||
@@ -1024,57 +919,70 @@ const CaptainRiding = () => {
 
   const fare = currentRide?.fare ?? currentRide?.offeredFare ?? 0;
 
-  const isRideOngoing = rideStarted || currentRide?.status === "ongoing";
-  const isRideCompleted = rideFinished || currentRide?.status === "completed";
-  const userIsReady = userConfirmedPickup || isUserPickupConfirmed(currentRide);
+  const isScheduledService =
+    currentRide?.serviceTiming === "scheduled" ||
+    Boolean(currentRide?.schedule?.pickupStartAt);
 
-  const shouldNavigateToDestination = isRideOngoing;
+  const scheduledDispatchStarted =
+    Boolean(currentRide?.scheduledDispatchStartedAt);
+
+  const isScheduledReserved =
+    isScheduledService &&
+    currentRide?.status === "accepted" &&
+    !scheduledDispatchStarted &&
+    !rideStarted;
+
+  const scheduledPickupText = (() => {
+    const raw = currentRide?.schedule?.pickupStartAt;
+
+    if (!raw) return "Horario programado";
+
+    const date = new Date(raw);
+    if (Number.isNaN(date.getTime())) return "Horario programado";
+
+    return new Intl.DateTimeFormat("es-CO", {
+      weekday: "long",
+      day: "numeric",
+      month: "long",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    }).format(date);
+  })();
 
   const canStartRide =
     driverArrived &&
-    userIsReady &&
+    (userConfirmedPickup || currentRide?.userConfirmedAtPickup) &&
     !rideStarted &&
     currentRide?.status !== "ongoing" &&
     currentRide?.status !== "completed";
 
   const canFinishRide = rideStarted || currentRide?.status === "ongoing";
 
-  const etaDistanceKm = parseEtaDistanceToKm(etaInfo?.distanceText);
-  const driverLooksCloseToPickup =
-    !isRideOngoing &&
-    Number.isFinite(etaDistanceKm) &&
-    etaDistanceKm > 0 &&
-    etaDistanceKm <= 0.25;
-
-  const showFastArrivedButton =
-    !driverArrived &&
-    !rideStarted &&
-    !rideFinished &&
-    (hasOpenedPickupNavigation || driverLooksCloseToPickup);
-
-  const headerStatus = isRideCompleted
-    ? "Viaje finalizado"
-    : isRideOngoing
-    ? "Viaje iniciado"
-    : userIsReady
-    ? "Usuario listo"
+  const headerStatus = rideFinished
+    ? "Domicilio finalizado"
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Domicilio iniciado"
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "Mercancía lista"
     : driverArrived
-    ? "Esperando al usuario"
+    ? "Esperando carga"
     : "En camino a recoger";
 
-  const headerSubtext = isRideCompleted
-    ? "El recorrido terminó. Califica al usuario para cerrar el servicio."
-    : isRideOngoing
-    ? "Dirígete al destino del usuario con Waze o Google Maps."
-    : userIsReady
-    ? "El usuario confirmó que ya está en el punto. Puedes iniciar el viaje."
+  const headerSubtext = rideFinished
+    ? "El domicilio terminó. Califica el servicio para cerrarlo."
+    : rideStarted || currentRide?.status === "ongoing"
+    ? "Dirígete al destino con Waze o Google Maps."
+    : userConfirmedPickup || currentRide?.userConfirmedAtPickup
+    ? "El usuario confirmó que la mercancía está lista para cargar. Puedes continuar con el domicilio."
     : driverArrived
-    ? "El usuario recibió la notificación. Debe confirmar tocando “Ya estoy acá”."
+    ? "El usuario recibió la notificación. Debe confirmar tocando “Mercancía lista para cargar”."
     : etaInfo?.etaText
     ? `Tiempo estimado: ${etaInfo.etaText}${
         etaInfo?.distanceText ? ` · ${etaInfo.distanceText}` : ""
       }`
-    : "Dirígete al punto de recogida del usuario.";
+    : "Dirígete al punto de recogida de la mercancía.";
 
   return (
     <div className="overflow-hidden h-screen w-screen bg-gray-50">
@@ -1084,7 +992,7 @@ const CaptainRiding = () => {
           destination={currentRide?.destination || ""}
           routeStops={routeStops}
           selectedCaptainId={currentRide?.captain?._id || null}
-          showRouteToPickup={!shouldNavigateToDestination}
+          showRouteToPickup={!isScheduledReserved && !shouldNavigateToDestination}
           showPickupRadar={false}
           autoFetchNearbyDrivers={false}
           onEtaUpdate={setEtaInfo}
@@ -1125,12 +1033,224 @@ const CaptainRiding = () => {
         <i className="ri-message-3-line text-3xl text-white"></i>
       </button>
 
+      {isScheduledReserved && !scheduledPanelMinimized && (
+        <div className="absolute inset-x-0 bottom-0 z-50 px-3 pb-3">
+          <div className="rounded-[28px] bg-white shadow-2xl border border-purple-100 overflow-hidden max-h-[82vh] overflow-y-auto">
+            <div
+              className="px-4 pt-3 pb-4 text-white"
+              style={{ background: PURPLE_GRADIENT }}
+            >
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <button
+                  type="button"
+                  onClick={() => navigate("/captain-home")}
+                  className="w-10 h-10 rounded-full bg-white/15 border border-white/20 flex items-center justify-center"
+                  aria-label="Volver al panel"
+                  title="Volver al panel"
+                >
+                  <i className="ri-arrow-left-line text-xl"></i>
+                </button>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setScheduledPanelMinimized(true)}
+                    className="h-10 px-3 rounded-full bg-white/15 border border-white/20 flex items-center gap-2 text-sm font-black"
+                    aria-label="Minimizar"
+                    title="Minimizar"
+                  >
+                    <i className="ri-subtract-line text-lg"></i>
+                    Minimizar
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => navigate("/captain-home")}
+                    className="w-10 h-10 rounded-full bg-black/25 border border-white/15 flex items-center justify-center"
+                    aria-label="Ir al inicio"
+                    title="Ir al inicio"
+                  >
+                    <i className="ri-home-5-line text-xl"></i>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] uppercase tracking-wider text-white/80">
+                    Domicilio programado asignado
+                  </p>
+                  <h2 className="text-xl font-black mt-1">
+                    Servicio reservado
+                  </h2>
+                  <p className="text-sm text-white/90 mt-1 capitalize">
+                    {scheduledPickupText}
+                  </p>
+                </div>
+
+                <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center shrink-0">
+                  <i className="ri-calendar-check-fill text-2xl"></i>
+                </div>
+              </div>
+            </div>
+
+            <div className="p-4 space-y-3">
+              <div className="rounded-2xl border border-purple-100 bg-purple-50 p-3">
+                <p className="text-sm font-black text-purple-950">
+                  Aún no estás en camino
+                </p>
+                <p className="text-xs text-purple-700 mt-1 leading-5">
+                  El usuario ya aceptó tu oferta. El seguimiento, ETA y estado
+                  “en camino” se activarán únicamente cuando toques
+                  “Iniciar domicilio”.
+                </p>
+              </div>
+
+              <div className="rounded-2xl border border-purple-100 bg-purple-50 p-3">
+                <div className="flex items-center gap-3">
+                  <img
+                    src={getUserPhoto()}
+                    alt={userFullName}
+                    className="w-11 h-11 rounded-2xl object-cover bg-gray-200"
+                  />
+
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-black text-gray-950 truncate">
+                      {userFullName}
+                    </p>
+
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <i className="ri-star-fill text-amber-500 text-xs"></i>
+                      <span className="text-xs font-black text-gray-900">
+                        {userRating.toFixed(1)}
+                      </span>
+                      <span className="text-[10px] font-bold text-gray-500">
+                        {userRatingCount > 0
+                          ? `(${userRatingCount})`
+                          : "(Nuevo)"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <i className="ri-shield-check-fill text-xl text-emerald-500"></i>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-gray-200 bg-white p-3">
+                <p className="text-[11px] font-black uppercase tracking-wider text-gray-400">
+                  Recogida
+                </p>
+                <p className="text-sm font-black text-gray-900 mt-1">
+                  {currentRide?.pickup || "Punto de recogida"}
+                </p>
+
+                <p className="text-[11px] font-black uppercase tracking-wider text-gray-400 mt-3">
+                  Entrega
+                </p>
+                <p className="text-sm font-black text-gray-900 mt-1">
+                  {currentRide?.destination || "Destino"}
+                </p>
+              </div>
+
+              <div className="flex items-center justify-between rounded-2xl bg-gray-950 text-white px-4 py-3">
+                <div>
+                  <p className="text-[10px] uppercase tracking-wider text-white/60">
+                    Valor acordado
+                  </p>
+                  <p className="text-xl font-black mt-1">
+                    {formatCOP(fare)}
+                  </p>
+                </div>
+
+                <i className="ri-shield-check-fill text-2xl text-emerald-400"></i>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleStartScheduledDispatch}
+                disabled={startingScheduledDispatch}
+                className="w-full rounded-2xl py-4 text-white font-black disabled:opacity-60"
+                style={{
+                  background:
+                    "linear-gradient(135deg, #16A34A, #22C55E)",
+                }}
+              >
+                {startingScheduledDispatch
+                  ? "Iniciando domicilio..."
+                  : "Iniciar domicilio"}
+              </button>
+
+              <p className="text-center text-[11px] text-gray-500">
+                Al iniciar, el usuario verá que vas en camino y se activará el
+                seguimiento normal.
+              </p>
+
+              <button
+                type="button"
+                onClick={() => setShowCancelModal(true)}
+                className="w-full rounded-2xl border border-red-200 bg-red-50 py-3 text-sm font-black text-red-600"
+              >
+                Cancelar servicio
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {isScheduledReserved && scheduledPanelMinimized && (
+        <div className="absolute inset-x-0 bottom-3 z-50 px-3">
+          <div className="rounded-[22px] bg-white border border-purple-200 shadow-2xl p-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigate("/captain-home")}
+              className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center shrink-0"
+              aria-label="Volver al panel"
+            >
+              <i className="ri-arrow-left-line text-xl text-gray-800"></i>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScheduledPanelMinimized(false)}
+              className="min-w-0 flex-1 text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="rounded-full bg-purple-100 text-purple-700 px-2 py-1 text-[10px] font-black uppercase">
+                  Programado
+                </span>
+                <span className="text-[10px] text-gray-500 capitalize truncate">
+                  {scheduledPickupText}
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-black text-gray-950 truncate">
+                Servicio reservado · {formatCOP(fare)}
+              </p>
+              <p className="text-[11px] text-gray-500">
+                Toca para ver detalles o iniciar
+              </p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setScheduledPanelMinimized(false)}
+              className="w-10 h-10 rounded-full bg-purple-700 text-white flex items-center justify-center shrink-0"
+              aria-label="Ver servicio"
+            >
+              <i className="ri-arrow-up-s-line text-xl"></i>
+            </button>
+          </div>
+        </div>
+      )}
+
+      {!isScheduledReserved && (
       <div className="absolute inset-x-0 bottom-0 z-30 px-3 pb-3">
-        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[68vh] overflow-y-auto">
+        <div className="rounded-[28px] bg-white/96 backdrop-blur shadow-2xl border border-gray-200 overflow-hidden max-h-[62vh] overflow-y-auto">
           <div
             className="px-4 py-4 text-white"
             style={{
-              background: isRideCompleted ? DARK_GRADIENT : PURPLE_DEEP,
+              background: rideFinished
+                ? "linear-gradient(135deg, #111827, #374151)"
+                : PURPLE_GRADIENT,
             }}
           >
             <div className="flex items-start justify-between gap-3">
@@ -1156,7 +1276,7 @@ const CaptainRiding = () => {
             </div>
           </div>
 
-          <div className="p-4 space-y-3 pb-40">
+          <div className="p-4 space-y-3">
             <div className="flex items-center gap-3 rounded-3xl border border-purple-100 bg-purple-50 p-3">
               <img
                 src={getUserPhoto()}
@@ -1168,6 +1288,21 @@ const CaptainRiding = () => {
                 <p className="text-lg font-bold text-gray-900 truncate">
                   {userFullName}
                 </p>
+
+                <div className="mt-1 flex items-center gap-1.5">
+                  <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 border border-amber-100 px-2 py-1">
+                    <i className="ri-star-fill text-amber-500 text-xs"></i>
+                    <span className="text-xs font-black text-gray-900">
+                      {userRating.toFixed(1)}
+                    </span>
+                  </div>
+
+                  <span className="text-[11px] font-bold text-gray-500">
+                    {userRatingCount > 0
+                      ? `${userRatingCount} calificación${userRatingCount === 1 ? "" : "es"}`
+                      : "Usuario nuevo"}
+                  </span>
+                </div>
 
                 <p className="text-sm text-gray-600 mt-1">{userPhone}</p>
 
@@ -1188,7 +1323,7 @@ const CaptainRiding = () => {
                 </p>
 
                 <p className="text-xs text-gray-500 mt-1">
-                  Recogida, paradas y destino
+                  Recogida, domicilios y destino
                 </p>
               </div>
 
@@ -1207,48 +1342,52 @@ const CaptainRiding = () => {
               </div>
             </div>
 
-            {driverArrived && !userIsReady && !rideStarted && (
-              <div
-                className="rounded-3xl border border-purple-100 px-4 py-3"
-                style={{ background: PURPLE_SOFT }}
-              >
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
-                    <i className="ri-timer-line text-2xl text-purple-700"></i>
-                  </div>
+            {driverArrived &&
+              !userConfirmedPickup &&
+              !currentRide?.userConfirmedAtPickup &&
+              !rideStarted && (
+                <div
+                  className="rounded-3xl border border-purple-100 px-4 py-3"
+                  style={{ background: PURPLE_SOFT }}
+                >
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
+                      <i className="ri-timer-line text-2xl text-purple-700"></i>
+                    </div>
 
-                  <div>
-                    <p className="text-sm font-black text-purple-900">
-                      Esperando confirmación del usuario
-                    </p>
-                    <p className="text-xs text-purple-700 mt-1 leading-5">
-                      El usuario debe tocar “Ya estoy acá”. Cuando lo haga, este
-                      panel se actualiza solo sin F5.
-                    </p>
+                    <div>
+                      <p className="text-sm font-black text-purple-900">
+                        Esperando confirmación del usuario
+                      </p>
+                      <p className="text-xs text-purple-700 mt-1 leading-5">
+                        El usuario debe tocar “Mercancía lista para cargar”. Después de eso se
+                        habilita el botón para continuar con el domicilio.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {userIsReady && !rideStarted && currentRide?.status !== "ongoing" && (
-              <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-                <div className="flex items-start gap-3">
-                  <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
-                    <i className="ri-checkbox-circle-fill text-2xl text-emerald-600"></i>
-                  </div>
+            {(userConfirmedPickup || currentRide?.userConfirmedAtPickup) &&
+              !rideStarted &&
+              currentRide?.status !== "ongoing" && (
+                <div className="rounded-3xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+                  <div className="flex items-start gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-white flex items-center justify-center shrink-0">
+                      <i className="ri-checkbox-circle-fill text-2xl text-emerald-600"></i>
+                    </div>
 
-                  <div>
-                    <p className="text-sm font-black text-emerald-900">
-                      Usuario listo para abordar
-                    </p>
-                    <p className="text-xs text-emerald-700 mt-1 leading-5">
-                      Toca “Iniciar viaje” y luego elige Waze o Google Maps para
-                      navegar hacia el destino.
-                    </p>
+                    <div>
+                      <p className="text-sm font-black text-emerald-900">
+                        Mercancía lista para cargar
+                      </p>
+                      <p className="text-xs text-emerald-700 mt-1 leading-5">
+                        La mercancía está lista. Cuando termines de cargar, continúa hacia el destino.
+                      </p>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
             <div className="grid grid-cols-3 gap-3 text-center">
               <button
@@ -1306,18 +1445,16 @@ const CaptainRiding = () => {
                 <div
                   className="w-14 h-14 rounded-full flex items-center justify-center"
                   style={{
-                    background: driverArrived ? GREEN_GRADIENT : PURPLE_GRADIENT,
+                    background: driverArrived
+                      ? "linear-gradient(135deg, #16A34A, #4ADE80)"
+                      : PURPLE_GRADIENT,
                   }}
                 >
                   <i className="ri-map-pin-user-fill text-2xl text-white"></i>
                 </div>
 
                 <p className="text-xs font-bold text-purple-800 mt-2">
-                  {sendingArrived
-                    ? "Enviando"
-                    : driverArrived
-                    ? "Notificado"
-                    : "Llegué"}
+                  {driverArrived ? "Notificado" : "Llegué a recoger"}
                 </p>
               </button>
             </div>
@@ -1343,6 +1480,54 @@ const CaptainRiding = () => {
 
               <i className="ri-arrow-right-s-line text-2xl text-purple-700"></i>
             </button>
+
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={openWazeNavigation}
+                className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-navigation-fill text-xl text-white"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-sm font-black text-purple-900">Waze</p>
+                  <p className="text-[11px] text-purple-600">
+                    Ir al {getNavigationTargetLabel()}
+                  </p>
+                </div>
+              </button>
+
+              <button
+                type="button"
+                onClick={openGoogleMapsNavigation}
+                className="rounded-2xl border border-purple-200 bg-white p-3 flex items-center justify-center gap-2 shadow-sm"
+              >
+                <div
+                  className="w-10 h-10 rounded-full flex items-center justify-center"
+                  style={{
+                    background: PURPLE_GRADIENT,
+                  }}
+                >
+                  <i className="ri-map-2-fill text-xl text-white"></i>
+                </div>
+
+                <div className="text-left">
+                  <p className="text-sm font-black text-purple-900">
+                    Google Maps
+                  </p>
+                  <p className="text-[11px] text-purple-600">
+                    Ir al {getNavigationTargetLabel()}
+                  </p>
+                </div>
+              </button>
+            </div>
 
             <div className="rounded-3xl border border-gray-200 bg-white p-3">
               <div className="flex items-start gap-3">
@@ -1381,15 +1566,15 @@ const CaptainRiding = () => {
 
                       <div className="min-w-0">
                         <p className="text-xs font-black uppercase tracking-[0.12em] text-purple-700">
-                          Parada {index + 1}
+                          Domicilio {index + 1}
                         </p>
 
                         <p className="text-base font-bold text-gray-900">
-                          {stopAddress.firstPart || `Parada ${index + 1}`}
+                          {stopAddress.firstPart || `Domicilio ${index + 1}`}
                         </p>
 
                         <p className="text-sm text-gray-600">
-                          {stopAddress.secondPart || "Parada del recorrido"}
+                          {stopAddress.secondPart || "Domicilio del recorrido"}
                         </p>
                       </div>
                     </div>
@@ -1433,188 +1618,62 @@ const CaptainRiding = () => {
                 </p>
               </div>
             )}
-          </div>
-        </div>
-      </div>
 
-      <div className="fixed left-0 right-0 bottom-0 z-[120] px-4 pb-4 pointer-events-none">
-        <div className="pointer-events-auto rounded-[28px] bg-white/95 backdrop-blur-xl border border-purple-100 shadow-2xl p-3">
-          {!isRideOngoing && !userIsReady && !driverArrived && (
+            {!rideStarted &&
+              currentRide?.status !== "ongoing" &&
+              !rideFinished && (
+                <button
+                  type="button"
+                  onClick={handleStartRide}
+                  disabled={!canStartRide || startingRide}
+                  className="w-full rounded-2xl py-4 text-white font-black disabled:opacity-50"
+                  style={{
+                    background: canStartRide
+                      ? "linear-gradient(135deg, #16A34A, #22C55E)"
+                      : "linear-gradient(135deg, #9CA3AF, #6B7280)",
+                  }}
+                >
+                  {startingRide
+                    ? "Iniciando..."
+                    : canStartRide
+                    ? "Iniciar viaje"
+                    : "Esperando confirmación del usuario"}
+                </button>
+              )}
+
             <div className="grid grid-cols-2 gap-3">
               <button
                 type="button"
-                onClick={() => openWazeNavigation("pickup")}
-                className="rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2"
-                style={{ background: PURPLE_GRADIENT }}
+                onClick={() => setShowCancelModal(true)}
+                disabled={rideFinished}
+                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-50"
+                style={{
+                  background: "linear-gradient(135deg, #7C3AED, #9333EA)",
+                }}
               >
-                <i className="ri-navigation-fill text-2xl"></i>
-                Waze
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openGoogleMapsNavigation("pickup")}
-                className="rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2"
-                style={{ background: PURPLE_GRADIENT }}
-              >
-                <i className="ri-map-2-fill text-2xl"></i>
-                Maps
-              </button>
-
-              <button
-                type="button"
-                onClick={handleArrived}
-                disabled={sendingArrived}
-                className="col-span-2 rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2 disabled:opacity-60"
-                style={{ background: GREEN_GRADIENT }}
-              >
-                <i className="ri-map-pin-user-fill text-2xl"></i>
-                {sendingArrived ? "Notificando..." : "Ya llegué al punto"}
-              </button>
-            </div>
-          )}
-
-          {!isRideOngoing && driverArrived && !userIsReady && (
-            <button
-              type="button"
-              disabled
-              className="w-full rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2 opacity-80"
-              style={{ background: PURPLE_GRADIENT }}
-            >
-              <i className="ri-timer-line text-2xl"></i>
-              Esperando confirmación del usuario
-            </button>
-          )}
-
-          {!isRideOngoing && userIsReady && (
-            <button
-              type="button"
-              onClick={handleStartRide}
-              disabled={startingRide || !canStartRide}
-              className="w-full rounded-2xl py-5 text-white font-black text-lg flex items-center justify-center gap-2 disabled:opacity-60"
-              style={{ background: GREEN_GRADIENT }}
-            >
-              <i className="ri-play-circle-fill text-2xl"></i>
-              {startingRide ? "Iniciando..." : "Iniciar viaje"}
-            </button>
-          )}
-
-          {isRideOngoing && (
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                type="button"
-                onClick={() => openWazeNavigation("destination")}
-                className="rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2"
-                style={{ background: PURPLE_GRADIENT }}
-              >
-                <i className="ri-navigation-fill text-2xl"></i>
-                Waze destino
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openGoogleMapsNavigation("destination")}
-                className="rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2"
-                style={{ background: PURPLE_GRADIENT }}
-              >
-                <i className="ri-map-2-fill text-2xl"></i>
-                Maps destino
+                Cancelar
               </button>
 
               <button
                 type="button"
                 onClick={handleFinishRide}
                 disabled={finishingRide || !canFinishRide || rideFinished}
-                className="col-span-2 rounded-2xl py-4 text-white font-black flex items-center justify-center gap-2 disabled:opacity-60"
-                style={{ background: DARK_GRADIENT }}
+                className="w-full rounded-2xl py-3.5 text-white font-bold disabled:opacity-50"
+                style={{
+                  background: PURPLE_GRADIENT,
+                }}
               >
-                <i className="ri-flag-fill text-2xl"></i>
-                {finishingRide ? "Finalizando..." : "Finalizar viaje"}
+                {finishingRide
+                  ? "Finalizando..."
+                  : rideFinished
+                  ? "Finalizado"
+                  : "Finalizar"}
               </button>
             </div>
-          )}
+          </div>
         </div>
       </div>
 
-      {navigationSheetOpen && (
-        <div className="fixed inset-0 z-[950] bg-black/50 flex items-end">
-          <div
-            ref={navigationModalRef}
-            className="w-full translate-y-full opacity-0 rounded-t-[30px] bg-white p-5 shadow-2xl"
-          >
-            <div className="flex justify-center mb-3">
-              <div className="w-14 h-1.5 rounded-full bg-gray-300"></div>
-            </div>
-
-            <div
-              className="rounded-[26px] px-5 py-5 text-white"
-              style={{
-                background: PURPLE_DEEP,
-              }}
-            >
-              <p className="text-xs uppercase tracking-[0.14em] text-white/75 font-black">
-                Navegación rápida
-              </p>
-
-              <h3 className="text-2xl font-black mt-1">
-                Ir al {getNavigationTargetLabel(navigationTarget)}
-              </h3>
-
-              <p className="text-sm text-white/85 mt-2 leading-5">
-                Elige la app de navegación. Está pensado para que el conductor
-                toque rápido y siga la ruta.
-              </p>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <button
-                type="button"
-                onClick={() => openWazeNavigation(navigationTarget)}
-                className="rounded-[24px] border border-purple-100 bg-purple-50 p-5 text-left active:scale-[0.99] transition"
-              >
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: PURPLE_GRADIENT }}
-                >
-                  <i className="ri-navigation-fill text-3xl text-white"></i>
-                </div>
-
-                <p className="text-xl font-black text-gray-950 mt-4">Waze</p>
-                <p className="text-sm text-purple-700 mt-1">
-                  Abrir ruta ahora
-                </p>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => openGoogleMapsNavigation(navigationTarget)}
-                className="rounded-[24px] border border-purple-100 bg-purple-50 p-5 text-left active:scale-[0.99] transition"
-              >
-                <div
-                  className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: PURPLE_GRADIENT }}
-                >
-                  <i className="ri-map-2-fill text-3xl text-white"></i>
-                </div>
-
-                <p className="text-xl font-black text-gray-950 mt-4">
-                  Google Maps
-                </p>
-                <p className="text-sm text-purple-700 mt-1">
-                  Abrir ruta ahora
-                </p>
-              </button>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setNavigationSheetOpen(false)}
-              className="w-full mt-4 rounded-2xl border border-gray-200 bg-white py-4 font-black text-gray-700"
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
       )}
 
       {chatOpen && (
@@ -1642,9 +1701,15 @@ const CaptainRiding = () => {
                     {userFullName}
                   </p>
 
-                  <p className="text-sm text-white/80 truncate">
-                    Usuario del servicio
-                  </p>
+                  <div className="flex items-center gap-1.5 text-sm text-white/90">
+                    <i className="ri-star-fill text-amber-300"></i>
+                    <span className="font-black">{userRating.toFixed(1)}</span>
+                    <span className="text-white/70">
+                      {userRatingCount > 0
+                        ? `(${userRatingCount})`
+                        : "(Nuevo)"}
+                    </span>
+                  </div>
                 </div>
               </div>
 
@@ -1879,8 +1944,7 @@ const CaptainRiding = () => {
               </h3>
 
               <p className="text-sm text-gray-600 mt-2">
-                Tu calificación ayuda a mantener una comunidad segura y
-                confiable.
+                Tu calificación ayuda a mantener una comunidad segura y confiable.
               </p>
             </div>
 

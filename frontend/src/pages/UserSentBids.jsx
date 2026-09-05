@@ -1,8 +1,9 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import axios from "axios";
-import { io } from "socket.io-client";
 import { getApiBaseUrl } from "../apiBase";
+import { SocketContext } from "../context/SocketContext";
+import { UserDataContext } from "../context/UserContext";
 
 const formatCOP = (value) => {
   const number = Number(value) || 0;
@@ -174,6 +175,225 @@ const getTheme = (listingType) => {
   };
 };
 
+const AcceptedBidChat = ({ bid, token, onClose }) => {
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [loadingChat, setLoadingChat] = useState(true);
+  const [sendingChat, setSendingChat] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  const bidId = bid?._id;
+  const source = bid?.goodsOffer || bid?.spaceOffer || bid?.seatOffer || {};
+
+  const loadChat = useCallback(async () => {
+    if (!bidId || !token) return;
+
+    try {
+      setChatError("");
+
+      const response = await axios.get(
+        `${getApiBaseUrl()}/offers/bid/${bidId}/chat/user`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setMessages(
+        Array.isArray(response?.data?.messages)
+          ? response.data.messages
+          : []
+      );
+    } catch (err) {
+      setChatError(
+        err?.response?.data?.message ||
+          "No se pudo cargar la conversación."
+      );
+    } finally {
+      setLoadingChat(false);
+    }
+  }, [bidId, token]);
+
+  useEffect(() => {
+    loadChat();
+    const interval = window.setInterval(loadChat, 5000);
+    return () => window.clearInterval(interval);
+  }, [loadChat]);
+
+  const sendMessage = async () => {
+    const cleanMessage = draft.trim();
+    if (!cleanMessage || sendingChat) return;
+
+    try {
+      setSendingChat(true);
+      setChatError("");
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/offers/bid/chat/user`,
+        {
+          bidId,
+          message: cleanMessage,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response?.data?.message) {
+        setMessages((prev) => [...prev, response.data.message]);
+      }
+
+      setDraft("");
+    } catch (err) {
+      setChatError(
+        err?.response?.data?.message ||
+          "No se pudo enviar el mensaje."
+      );
+    } finally {
+      setSendingChat(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-md h-[86vh] sm:h-[720px] bg-white rounded-t-[30px] sm:rounded-[30px] overflow-hidden shadow-2xl flex flex-col">
+        <div className="bg-gradient-to-r from-violet-800 to-fuchsia-600 text-white px-4 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center"
+              aria-label="Cerrar chat"
+            >
+              <i className="ri-arrow-left-line text-xl" />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase tracking-wider text-white/70 font-black">
+                Oferta aceptada · Chat habilitado
+              </p>
+              <h3 className="font-black text-lg truncate">
+                {getListingTitle(bid)}
+              </h3>
+              <p className="text-xs text-white/80 truncate">
+                {source?.origin || "Origen"} → {source?.destination || "Destino"}
+              </p>
+            </div>
+
+            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center">
+              <i className="ri-chat-3-fill text-xl" />
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100">
+          <p className="text-[11px] text-emerald-800 font-bold">
+            Conversación privada con el transportador de esta operación.
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4 space-y-2">
+          {loadingChat && messages.length === 0 ? (
+            <p className="text-center text-sm text-gray-500 py-8">
+              Cargando conversación...
+            </p>
+          ) : messages.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center mx-auto">
+                <i className="ri-chat-smile-3-line text-2xl" />
+              </div>
+              <p className="font-black text-gray-900 mt-3">
+                Ya pueden comunicarse
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Envía el primer mensaje para coordinar la operación.
+              </p>
+            </div>
+          ) : (
+            messages.map((item, index) => {
+              const mine = item?.senderType === "user";
+
+              return (
+                <div
+                  key={item?._id || `${item?.createdAt}-${index}`}
+                  className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[82%] rounded-[18px] px-3 py-2.5 ${
+                      mine
+                        ? "bg-violet-700 text-white rounded-br-md"
+                        : "bg-white border border-gray-200 text-gray-900 rounded-bl-md"
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {item?.message}
+                    </p>
+                    <p
+                      className={`text-[9px] mt-1 ${
+                        mine ? "text-white/65" : "text-gray-400"
+                      }`}
+                    >
+                      {item?.createdAt
+                        ? new Date(item.createdAt).toLocaleTimeString("es-CO", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          {chatError ? (
+            <div className="rounded-xl bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-700">
+              {chatError}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-gray-200 bg-white p-3">
+          <div className="flex items-end gap-2">
+            <textarea
+              rows={1}
+              maxLength={1000}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Escribe un mensaje..."
+              className="min-h-[46px] max-h-28 flex-1 resize-none rounded-2xl bg-gray-100 px-4 py-3 text-sm outline-none"
+            />
+
+            <button
+              type="button"
+              onClick={sendMessage}
+              disabled={!draft.trim() || sendingChat}
+              className="w-12 h-12 rounded-2xl bg-violet-700 text-white flex items-center justify-center disabled:opacity-40"
+            >
+              <i
+                className={
+                  sendingChat
+                    ? "ri-loader-4-line animate-spin text-xl"
+                    : "ri-send-plane-2-fill text-xl"
+                }
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const UserSentBids = () => {
   const [loading, setLoading] = useState(false);
   const [bids, setBids] = useState([]);
@@ -181,11 +401,19 @@ const UserSentBids = () => {
   const [actingId, setActingId] = useState("");
   const [socketStatus, setSocketStatus] = useState("Desconectado");
   const [notificationBanner, setNotificationBanner] = useState(null);
+  const [chatBid, setChatBid] = useState(null);
 
-  const socketRef = useRef(null);
   const token = localStorage.getItem("token");
 
-  const userId = useMemo(() => getStoredUserId(), []);
+  // Reutilizamos la conexión global de Central GO.
+  // No abrimos un segundo Socket.IO solo para esta pantalla.
+  const { socket } = useContext(SocketContext);
+  const { user } = useContext(UserDataContext);
+
+  const userId = useMemo(
+    () => user?._id || user?.id || getStoredUserId(),
+    [user?._id, user?.id]
+  );
 
   const fetchMySentBids = useCallback(
     async (showLoader = true) => {
@@ -222,44 +450,48 @@ const UserSentBids = () => {
   }, [token, fetchMySentBids]);
 
   useEffect(() => {
-    if (!userId) return;
-
-    const socket = io(getApiBaseUrl(), {
-      transports: ["websocket", "polling"],
-      withCredentials: true,
-      reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
-      reconnectionDelayMax: 5000,
-    });
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      setSocketStatus("Conectado");
-
-      socket.emit("join", {
-        userId,
-        userType: "user",
-      });
-    });
-
-    socket.on("disconnect", () => {
+    if (!socket || !userId) {
       setSocketStatus("Desconectado");
-    });
+      return;
+    }
 
-    socket.on("connect_error", (socketError) => {
+    const joinUserSocket = () => {
+      try {
+        socket.emit("join", {
+          userId,
+          userType: "user",
+        });
+
+        // Mientras esperamos confirmación del servidor,
+        // ya sabemos que el transporte está conectado.
+        setSocketStatus(socket.connected ? "Conectado" : "Conectando");
+      } catch (error) {
+        console.error("Error haciendo join de usuario:", error);
+        setSocketStatus("Error de conexión");
+      }
+    };
+
+    const handleConnect = () => {
+      setSocketStatus("Conectado");
+      joinUserSocket();
+    };
+
+    const handleDisconnect = () => {
+      setSocketStatus("Desconectado");
+    };
+
+    const handleConnectError = (socketError) => {
       console.error("Socket error usuario:", socketError);
       setSocketStatus("Error de conexión");
-    });
+    };
 
-    socket.on("socket-joined", (data) => {
-      if (data?.ok) {
+    const handleSocketJoined = (data) => {
+      if (data?.ok !== false) {
         setSocketStatus("Notificaciones activas");
       }
-    });
+    };
 
-    socket.on("offer-bid-updated", async (data = {}) => {
+    const handleOfferBidUpdated = async (data = {}) => {
       const title = data.notificationTitle || "Respuesta a tu oferta";
       const body =
         data.notificationBody ||
@@ -279,17 +511,44 @@ const UserSentBids = () => {
       setTimeout(() => {
         setNotificationBanner(null);
       }, 9000);
-    });
+    };
+
+    // El chat del marketplace puede notificar por socket.
+    // El modal ya hace respaldo por polling cada 5 segundos.
+    const handleAcceptedBidChatMessage = async () => {
+      await fetchMySentBids(false);
+    };
+
+    socket.on("connect", handleConnect);
+    socket.on("disconnect", handleDisconnect);
+    socket.on("connect_error", handleConnectError);
+    socket.on("socket-joined", handleSocketJoined);
+    socket.on("offer-bid-updated", handleOfferBidUpdated);
+    socket.on("accepted-bid-chat-message", handleAcceptedBidChatMessage);
+
+    // Si llegamos a esta pantalla con el socket global YA conectado,
+    // 'connect' no volverá a dispararse; por eso hacemos join de una vez.
+    if (socket.connected) {
+      setSocketStatus("Conectado");
+      joinUserSocket();
+    } else {
+      setSocketStatus("Conectando");
+      socket.connect?.();
+    }
 
     return () => {
-      socket.off("connect");
-      socket.off("disconnect");
-      socket.off("connect_error");
-      socket.off("socket-joined");
-      socket.off("offer-bid-updated");
-      socket.disconnect();
+      socket.off("connect", handleConnect);
+      socket.off("disconnect", handleDisconnect);
+      socket.off("connect_error", handleConnectError);
+      socket.off("socket-joined", handleSocketJoined);
+      socket.off("offer-bid-updated", handleOfferBidUpdated);
+      socket.off("accepted-bid-chat-message", handleAcceptedBidChatMessage);
+
+      // MUY IMPORTANTE:
+      // No hacemos socket.disconnect() porque esta conexión es compartida
+      // por toda Central GO mediante SocketContext.
     };
-  }, [userId, fetchMySentBids]);
+  }, [socket, userId, fetchMySentBids]);
 
   const handleCustomerResponse = async (bidId, action) => {
     try {
@@ -411,6 +670,17 @@ const UserSentBids = () => {
               </div>
             ) : null}
 
+            {bid.status === "accepted" ? (
+              <button
+                type="button"
+                onClick={() => setChatBid(bid)}
+                className="w-full rounded-2xl bg-violet-700 text-white py-3.5 font-black flex items-center justify-center gap-2 shadow-lg shadow-violet-700/20"
+              >
+                <i className="ri-chat-3-fill text-lg" />
+                Abrir chat con el transportador
+              </button>
+            ) : null}
+
             {bid.status === "rejected" ? (
               <div className="rounded-2xl bg-red-100 border border-red-200 px-4 py-3">
                 <p className="text-sm text-red-800 font-black">
@@ -455,7 +725,6 @@ const UserSentBids = () => {
                 disabled={actingId === `${bid._id}-rejected`}
                 className="rounded-2xl bg-red-600 text-white py-3 font-black disabled:opacity-60 shadow-lg shadow-red-600/20"
               >
-                {actingId === `${bid._id}-rejected`}
                 {actingId === `${bid._id}-rejected`
                   ? "Rechazando..."
                   : "Rechazar"}
@@ -499,9 +768,21 @@ const UserSentBids = () => {
         </div>
 
         <div className="mt-3 flex items-center justify-between gap-3">
-          <div className="text-[11px] text-gray-600">
-            Estado socket:{" "}
-            <span className="font-black text-gray-900">{socketStatus}</span>
+          <div className="flex items-center gap-2 text-[11px] text-gray-600">
+            <span
+              className={`w-2.5 h-2.5 rounded-full ${
+                socketStatus === "Notificaciones activas" ||
+                socketStatus === "Conectado"
+                  ? "bg-emerald-500"
+                  : socketStatus === "Conectando"
+                  ? "bg-amber-400"
+                  : "bg-red-500"
+              }`}
+            />
+            <span>
+              Tiempo real:{" "}
+              <span className="font-black text-gray-900">{socketStatus}</span>
+            </span>
           </div>
         </div>
       </div>
@@ -548,6 +829,14 @@ const UserSentBids = () => {
           <div className="space-y-5">{bids.map(renderBidCard)}</div>
         )}
       </div>
+
+      {chatBid ? (
+        <AcceptedBidChat
+          bid={chatBid}
+          token={token}
+          onClose={() => setChatBid(null)}
+        />
+      ) : null}
     </div>
   );
 };

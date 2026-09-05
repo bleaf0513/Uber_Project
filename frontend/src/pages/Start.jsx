@@ -1,269 +1,218 @@
 import React from "react";
 import { Link } from "react-router-dom";
 
-const ACCESS_OPTIONS = [
-  {
-    key: "user",
-    title: "Pedir transporte",
-    badgeLabel: "Usuarios",
-    description:
-      "Solicita carro, moto o transporte de carga de forma rápida y segura.",
-    action: "Pedir ahora",
-    to: "/login",
-    icon: "ri-car-line",
-    accent:
-      "from-violet-700 via-purple-700 to-fuchsia-600",
-    iconBox:
-      "bg-purple-100 text-purple-700",
-    badgeClass:
-      "bg-purple-50 text-purple-700 border-purple-100",
-  },
-  {
-    key: "captain",
-    title: "Soy transportador",
-    badgeLabel: "Conductores",
-    description:
-      "Encuentra cargas, envía propuestas y gestiona tus servicios.",
-    action: "Quiero trabajar",
-    to: "/captain-login",
-    icon: "ri-truck-line",
-    accent:
-      "from-emerald-600 via-teal-600 to-cyan-600",
-    iconBox:
-      "bg-emerald-100 text-emerald-700",
-    badgeClass:
-      "bg-emerald-50 text-emerald-700 border-emerald-100",
-  },
-  {
-    key: "enterprise",
-    title: "Central Go Empresas",
-    badgeLabel: "Empresas",
-    description:
-      "Administra entregas, conductores, seguimiento y rutas.",
-    action: "Entrar a Empresas",
-    to: "/enterprise-access",
-    icon: "ri-building-2-line",
-    accent:
-      "from-slate-950 via-slate-900 to-blue-950",
-    iconBox:
-      "bg-slate-100 text-slate-800",
-    badgeClass:
-      "bg-slate-100 text-slate-700 border-slate-200",
-  },
-];
-
-const BENEFITS = [
-  {
-    icon: "ri-map-pin-time-line",
-    title: "Seguimiento en vivo",
-  },
-  {
-    icon: "ri-shield-check-line",
-    title: "Operación segura",
-  },
-  {
-    icon: "ri-route-line",
-    title: "Logística conectada",
-  },
-];
+import heroImg from "../assets/equipo_de_entregas_con_ubicación_inteligente.png";
+import pedirImg from "../assets/coche_morado_con_pin_de_ubicación_brillante.png";
+import conductorImg from "../assets/camión_neón_con_paquetes_flotantes.png";
+import empresaImg from "../assets/complejo_corporativo_con_panel_analítico_3d.png";
 
 const Start = () => {
   return (
-    <div className="min-h-screen w-full bg-[#0e0718] text-white overflow-x-hidden relative">
-      <div className="absolute -top-32 -right-24 w-80 h-80 bg-purple-600/30 rounded-full blur-3xl" />
-      <div className="absolute top-48 -left-24 w-72 h-72 bg-fuchsia-500/20 rounded-full blur-3xl" />
-      <div className="absolute bottom-0 right-0 w-80 h-80 bg-blue-600/15 rounded-full blur-3xl" />
+    <div className="min-h-[100dvh] w-full overflow-x-hidden bg-[#020617] text-white">
+      <div className="relative mx-auto min-h-[100dvh] max-w-[980px] overflow-hidden px-5 pb-6 pt-6 sm:px-8">
+        {/* Fondo */}
+        <div className="pointer-events-none absolute -right-28 top-10 h-80 w-80 rounded-full bg-violet-700/25 blur-3xl" />
+        <div className="pointer-events-none absolute -left-24 top-[28%] h-72 w-72 rounded-full bg-fuchsia-600/12 blur-3xl" />
+        <div className="pointer-events-none absolute bottom-0 right-0 h-80 w-80 rounded-full bg-cyan-600/10 blur-3xl" />
 
-      <div className="relative z-10 min-h-screen">
-        <header className="px-4 pt-5 sm:px-6 sm:pt-7">
-          <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
+        <div className="relative z-10">
+          {/* Header */}
+          <header className="flex items-start justify-between gap-4">
             <img
               src="/logo-centralgo.png"
               alt="Central Go"
-              className="w-32 sm:w-40 object-contain"
+              className="w-[126px] object-contain sm:w-[150px]"
             />
 
-            <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-2 text-[10px] sm:text-xs font-black text-white/80 backdrop-blur-xl">
-              <span className="w-2 h-2 bg-emerald-400 rounded-full animate-pulse" />
+            <div className="mt-1 inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[12px] font-black text-white/90 backdrop-blur-xl">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-cyan-400 shadow-[0_0_14px_rgba(34,211,238,.8)]" />
               Activa
             </div>
-          </div>
-        </header>
+          </header>
 
-        <main>
-          <section className="px-4 pt-6 pb-6 sm:px-6 sm:pt-10 sm:pb-10">
-            <div className="max-w-6xl mx-auto">
-              <div className="grid lg:grid-cols-2 gap-7 lg:gap-12 items-center">
-                <div className="text-center lg:text-left">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 border border-white/15 px-3 py-2 text-[11px] sm:text-sm text-white/85 backdrop-blur-xl">
-                    <i className="ri-flashlight-line text-emerald-300" />
-                    Movilidad, carga y logística
-                  </div>
+          {/* Hero */}
+          <section className="mt-6 grid grid-cols-[1.12fr_.88fr] items-center gap-1 sm:gap-6">
+            <div className="min-w-0">
+              <h1 className="text-[42px] font-black leading-[0.98] tracking-[-0.045em] sm:text-[56px]">
+                Muévete,
+                <br />
+                trabaja y crece
+                <br />
+                con{" "}
+                <span className="bg-gradient-to-r from-violet-300 via-fuchsia-300 to-cyan-300 bg-clip-text text-transparent">
+                  Central Go
+                </span>
+              </h1>
 
-                  <h1 className="mt-5 text-[2.35rem] sm:text-5xl lg:text-6xl font-black leading-[1.02] tracking-tight">
-                    Muévete, trabaja y haz crecer tu negocio con{" "}
-                    <span className="text-transparent bg-clip-text bg-gradient-to-r from-purple-300 via-fuchsia-300 to-cyan-300">
-                      Central Go
-                    </span>
-                  </h1>
+              <p className="mt-5 max-w-[540px] text-[17px] font-medium leading-7 text-white/72 sm:text-[19px]">
+                Usuarios, transportadores y empresas en una sola plataforma.
+              </p>
+            </div>
 
-                  <p className="mt-4 text-sm sm:text-lg text-white/70 leading-6 sm:leading-8 max-w-xl mx-auto lg:mx-0">
-                    Usuarios, transportadores y empresas conectados en una sola plataforma.
-                  </p>
+            <div className="relative flex min-h-[250px] items-end justify-center sm:min-h-[330px]">
+              <div className="absolute right-3 top-2 h-24 w-24 rounded-full bg-cyan-400/10 blur-2xl" />
+              <img
+                src={heroImg}
+                alt="Central Go"
+                className="relative z-10 w-full max-w-[390px] object-contain drop-shadow-[0_22px_36px_rgba(0,0,0,.35)]"
+              />
+            </div>
+          </section>
 
-                  <div className="grid grid-cols-3 gap-2 mt-6 max-w-xl mx-auto lg:mx-0">
-                    {BENEFITS.map((benefit) => (
-                      <div
-                        key={benefit.title}
-                        className="rounded-2xl bg-white/8 border border-white/10 px-2 py-3 backdrop-blur-xl"
-                      >
-                        <i className={`${benefit.icon} text-lg text-purple-300`} />
+          {/* Métricas */}
+          <section className="mt-5 rounded-[28px] border border-cyan-400/15 bg-slate-950/55 px-4 py-4 shadow-[0_20px_60px_rgba(0,0,0,.24)] backdrop-blur-xl">
+            <div className="grid grid-cols-3">
+              <div className="border-r border-white/10 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-fuchsia-400/40 bg-gradient-to-br from-violet-700 to-fuchsia-700 text-2xl font-black shadow-lg">
+                  1
+                </div>
+                <p className="mt-2 text-[14px] font-bold">Plataforma</p>
+              </div>
 
-                        <p className="text-[9px] sm:text-xs font-black text-white/80 mt-2 leading-3 sm:leading-4">
-                          {benefit.title}
+              <div className="border-r border-white/10 text-center">
+                <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/40 bg-gradient-to-br from-cyan-700 to-blue-700 text-2xl font-black shadow-lg">
+                  3
+                </div>
+                <p className="mt-2 text-[14px] font-bold">Accesos</p>
+              </div>
+
+              <div className="text-center">
+                <div className="mx-auto flex h-12 min-w-16 items-center justify-center rounded-2xl border border-emerald-300/40 bg-gradient-to-br from-emerald-700 to-teal-700 px-2 text-2xl font-black shadow-lg">
+                  24/7
+                </div>
+                <p className="mt-2 text-[14px] font-bold">Conectividad</p>
+              </div>
+            </div>
+          </section>
+
+          {/* Accesos */}
+          <section className="mt-5 rounded-[30px] border border-white/10 bg-[#06101f]/90 p-4 shadow-[0_26px_80px_rgba(0,0,0,.30)] backdrop-blur-xl">
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-700/20 text-violet-300">
+                <i className="ri-group-fill text-2xl" />
+              </div>
+              <div>
+                <h2 className="text-[22px] font-black">Elige tu acceso</h2>
+                <p className="text-[13px] text-white/55">
+                  Selecciona la opción que mejor se adapte a ti.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+              {/* Usuario */}
+              <Link to="/login" className="block">
+                <article className="relative min-h-[230px] overflow-hidden rounded-[28px] border border-fuchsia-300/20 bg-gradient-to-br from-[#3c0f7b] via-[#4b1593] to-[#1f144d] p-4 shadow-[0_22px_50px_rgba(76,29,149,.28)] transition active:scale-[0.985]">
+                  <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-2xl" />
+
+                  <div className="relative z-10">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="max-w-[58%]">
+                        <h3 className="text-[23px] font-black leading-[1.02]">
+                          Pedir
+                          <br />
+                          transporte
+                        </h3>
+
+                        <p className="mt-3 text-[14px] leading-5 text-white/70">
+                          Solicita carro,
+                          <br />
+                          moto o carga
                         </p>
                       </div>
-                    ))}
-                  </div>
-                </div>
 
-                <div className="relative">
-                  <div className="absolute inset-4 bg-gradient-to-r from-purple-600/25 to-cyan-500/20 rounded-[2rem] blur-3xl" />
-
-                  <div className="relative rounded-[1.8rem] border border-white/15 bg-white/10 backdrop-blur-2xl p-3 sm:p-5 shadow-2xl">
-                    <div className="rounded-[1.4rem] bg-gradient-to-br from-white/10 to-white/5 border border-white/10 h-48 sm:h-72 lg:h-80 flex items-center justify-center overflow-hidden">
                       <img
-                        src="https://dropinblog.net/34254033/files/featured/Storyboard_Images/City_driver-rafiki.png"
-                        alt="Central Go transporte y logística"
-                        className="w-full h-full object-contain"
+                        src={pedirImg}
+                        alt=""
+                        className="mt-1 w-[46%] max-w-[145px] object-contain"
                       />
                     </div>
 
-                    <div className="grid grid-cols-3 gap-2 mt-3">
-                      <div className="rounded-2xl bg-white/10 border border-white/10 px-2 py-2.5 text-center">
-                        <p className="text-base sm:text-lg font-black">
-                          1
-                        </p>
-                        <p className="text-[9px] sm:text-[10px] text-white/60 mt-1">
-                          Plataforma
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-fuchsia-300/25 bg-black/10 px-3 py-2 text-[12px] font-black text-white/85">
+                      <i className="ri-user-3-fill" />
+                      Usuarios
+                    </div>
+                  </div>
+                </article>
+              </Link>
+
+              {/* Conductor */}
+              <Link to="/captain-login" className="block">
+                <article className="relative min-h-[230px] overflow-hidden rounded-[28px] border border-cyan-300/20 bg-gradient-to-br from-[#075f5e] via-[#087a78] to-[#063e50] p-4 shadow-[0_22px_50px_rgba(8,122,120,.25)] transition active:scale-[0.985]">
+                  <div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-cyan-400/20 blur-2xl" />
+
+                  <div className="relative z-10">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="max-w-[58%]">
+                        <h3 className="text-[23px] font-black leading-[1.02]">
+                          Soy
+                          <br />
+                          transportador
+                        </h3>
+
+                        <p className="mt-3 text-[14px] leading-5 text-white/70">
+                          Encuentra cargas
+                          <br />
+                          y servicios
                         </p>
                       </div>
 
-                      <div className="rounded-2xl bg-white/10 border border-white/10 px-2 py-2.5 text-center">
-                        <p className="text-base sm:text-lg font-black">
-                          3
-                        </p>
-                        <p className="text-[9px] sm:text-[10px] text-white/60 mt-1">
-                          Accesos
-                        </p>
-                      </div>
+                      <img
+                        src={conductorImg}
+                        alt=""
+                        className="mt-1 w-[46%] max-w-[145px] object-contain"
+                      />
+                    </div>
 
-                      <div className="rounded-2xl bg-white/10 border border-white/10 px-2 py-2.5 text-center">
-                        <p className="text-base sm:text-lg font-black">
-                          24/7
-                        </p>
-                        <p className="text-[9px] sm:text-[10px] text-white/60 mt-1">
-                          Conectividad
-                        </p>
+                    <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-cyan-200/25 bg-black/10 px-3 py-2 text-[12px] font-black text-white/85">
+                      <i className="ri-user-3-fill" />
+                      Conductores
+                    </div>
+                  </div>
+                </article>
+              </Link>
+
+              {/* Empresa */}
+              <Link to="/enterprise-access" className="col-span-2 block">
+                <article className="relative overflow-hidden rounded-[28px] border border-blue-300/20 bg-gradient-to-r from-[#082f71] via-[#0c3d89] to-[#071a46] p-4 shadow-[0_22px_50px_rgba(15,58,141,.28)] transition active:scale-[0.99]">
+                  <div className="absolute -right-10 -top-10 h-32 w-32 rounded-full bg-blue-400/20 blur-2xl" />
+
+                  <div className="relative z-10 flex items-center gap-4">
+                    <img
+                      src={empresaImg}
+                      alt=""
+                      className="w-[32%] max-w-[170px] shrink-0 object-contain"
+                    />
+
+                    <div className="min-w-0 flex-1">
+                      <h3 className="text-[24px] font-black leading-tight">
+                        Central Go Empresas
+                      </h3>
+
+                      <p className="mt-2 text-[14px] leading-5 text-white/68">
+                        Administra entregas
+                        <br />
+                        y conductores
+                      </p>
+
+                      <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-blue-200/20 bg-black/10 px-3 py-2 text-[12px] font-black text-white/85">
+                        <i className="ri-briefcase-fill" />
+                        Empresas
                       </div>
                     </div>
                   </div>
-                </div>
-              </div>
+                </article>
+              </Link>
             </div>
           </section>
 
-          <section className="bg-white text-gray-950 rounded-t-[2.2rem] sm:rounded-t-[3rem] shadow-[0_-20px_60px_rgba(0,0,0,0.22)]">
-            <div className="max-w-6xl mx-auto px-4 sm:px-6 py-7 sm:py-11">
-              <div className="text-center">
-                <p className="text-[10px] sm:text-xs font-black uppercase tracking-[0.18em] text-purple-700">
-                  Elige tu acceso
-                </p>
-
-                <h2 className="text-2xl sm:text-4xl font-black text-gray-950 mt-2">
-                  ¿Cómo quieres usar Central Go?
-                </h2>
-
-                <p className="text-xs sm:text-base text-gray-600 mt-2">
-                  Selecciona una opción para continuar.
-                </p>
-              </div>
-
-              <div className="grid md:grid-cols-3 gap-3 sm:gap-5 mt-6 sm:mt-8">
-                {ACCESS_OPTIONS.map((option) => (
-                  <Link
-                    key={option.key}
-                    to={option.to}
-                    className="group block"
-                  >
-                    <article className="rounded-[1.6rem] border border-gray-200 bg-white shadow-[0_14px_35px_rgba(15,23,42,0.08)] overflow-hidden transition active:scale-[0.99] md:h-full">
-                      <div className={`h-1.5 bg-gradient-to-r ${option.accent}`} />
-
-                      <div className="p-4 sm:p-5">
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`w-12 h-12 sm:w-14 sm:h-14 rounded-2xl ${option.iconBox} flex items-center justify-center shrink-0`}
-                          >
-                            <i className={`${option.icon} text-xl sm:text-2xl`} />
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center justify-between gap-2">
-                              <h3 className="text-lg sm:text-xl font-black text-gray-950 truncate">
-                                {option.title}
-                              </h3>
-
-                              <span
-                                className={`shrink-0 rounded-full border px-2.5 py-1 text-[8px] sm:text-[10px] font-black uppercase tracking-wide ${option.badgeClass}`}
-                              >
-                                {option.badgeLabel}
-                              </span>
-                            </div>
-
-                            <p className="text-xs sm:text-sm text-gray-600 mt-1 leading-5">
-                              {option.description}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div
-                          className={`mt-4 rounded-2xl bg-gradient-to-r ${option.accent} text-white px-4 py-3 font-black flex items-center justify-between shadow-lg`}
-                        >
-                          <span className="text-sm sm:text-base">
-                            {option.action}
-                          </span>
-
-                          <i className="ri-arrow-right-line text-lg sm:text-xl" />
-                        </div>
-                      </div>
-                    </article>
-                  </Link>
-                ))}
-              </div>
-
-              <div className="mt-6 rounded-[1.4rem] bg-gray-50 border border-gray-200 px-4 py-4">
-                <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
-                  <div className="text-center sm:text-left">
-                    <p className="text-sm font-black text-gray-900">
-                      Central Go
-                    </p>
-
-                    <p className="text-[11px] sm:text-xs text-gray-500 mt-1">
-                      Movilidad, carga y logística en tiempo real.
-                    </p>
-                  </div>
-
-                  <div className="flex items-center gap-2 text-[11px] sm:text-xs font-bold text-gray-500">
-                    <i className="ri-shield-check-line text-emerald-600" />
-                    Plataforma segura y organizada
-                  </div>
-                </div>
-              </div>
-
-              <div className="h-4 sm:hidden" />
-            </div>
-          </section>
-        </main>
+          <footer className="mt-5 flex items-center justify-center gap-3 text-[12px] font-semibold text-white/45">
+            <span className="h-px flex-1 bg-white/10" />
+            <i className="ri-shield-check-fill text-emerald-400" />
+            Plataforma segura y organizada
+            <span className="h-px flex-1 bg-white/10" />
+          </footer>
+        </div>
       </div>
     </div>
   );

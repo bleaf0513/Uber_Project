@@ -282,6 +282,11 @@ const createRide = async ({
     routeStops = [],
     vehicle,
     offeredFare,
+    serviceType = "local_delivery",
+    senderType = "personal",
+    cargo = {},
+    serviceTiming = "now",
+    schedule = {},
 }) => {
     if (!user || !pickup || !destination || !vehicle) {
         throw new Error("All fields are required");
@@ -338,6 +343,66 @@ const createRide = async ({
         offeredFare: finalFare,
         fare: finalFare,
         vehicleType: vehicle,
+
+        /*
+         * Central GO - información del domicilio/carga local.
+         * Estos datos vienen normalizados desde ride.controller.js
+         * y quedan persistidos junto con la solicitud.
+         */
+        serviceType:
+            serviceType === "local_delivery"
+                ? "local_delivery"
+                : "local_delivery",
+
+        senderType:
+            senderType === "business"
+                ? "business"
+                : "personal",
+
+        /*
+         * Momento del servicio.
+         * "now" conserva el flujo inmediato actual.
+         * "scheduled" guarda la fecha/ventana elegida para una recogida futura.
+         */
+        serviceTiming:
+            serviceTiming === "scheduled"
+                ? "scheduled"
+                : "now",
+
+        schedule: {
+            pickupStartAt:
+                serviceTiming === "scheduled" && schedule?.pickupStartAt
+                    ? new Date(schedule.pickupStartAt)
+                    : null,
+            pickupEndAt:
+                serviceTiming === "scheduled" && schedule?.pickupEndAt
+                    ? new Date(schedule.pickupEndAt)
+                    : null,
+            timezone: String(schedule?.timezone || "America/Bogota")
+                .trim()
+                .slice(0, 100),
+            notes: String(schedule?.notes || "")
+                .trim()
+                .slice(0, 300),
+        },
+
+        cargo: {
+            category: String(cargo?.category || "packages"),
+            quantity: Math.max(1, Math.floor(Number(cargo?.quantity) || 1)),
+            approximateWeight:
+                cargo?.weightUnknown === true
+                    ? null
+                    : Number.isFinite(Number(cargo?.approximateWeight)) &&
+                      Number(cargo?.approximateWeight) >= 0
+                    ? Number(cargo.approximateWeight)
+                    : null,
+            weightUnit: cargo?.weightUnit === "lb" ? "lb" : "kg",
+            weightUnknown: Boolean(cargo?.weightUnknown),
+            description: String(cargo?.description || "")
+                .trim()
+                .slice(0, 300),
+        },
+
         distance: Number.isFinite(meters) ? meters : null,
         duration: Number.isFinite(seconds) ? seconds : null,
         driverOffers: [],

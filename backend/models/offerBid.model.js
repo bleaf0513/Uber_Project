@@ -102,6 +102,16 @@ const UNIDADES_CAPACIDAD = [
     "m3",
 ];
 
+const offerChatMessageSchema = new mongoose.Schema(
+    {
+        senderType: { type: String, enum: ["user", "captain", "system"], required: true },
+        sender: { type: mongoose.Schema.Types.ObjectId, default: null },
+        message: { type: String, required: true, trim: true, maxlength: 1000 },
+        createdAt: { type: Date, default: Date.now },
+    },
+    { _id: true }
+);
+
 const offerBidSchema = new mongoose.Schema(
     {
         /*
@@ -362,6 +372,11 @@ const offerBidSchema = new mongoose.Schema(
             default: null,
         },
 
+
+        chatEnabled: { type: Boolean, default: false, index: true },
+        chatEnabledAt: { type: Date, default: null },
+        chatMessages: { type: [offerChatMessageSchema], default: [] },
+
         acceptedAt: {
             type: Date,
             default: null,
@@ -542,6 +557,8 @@ offerBidSchema.pre("validate", function (next) {
         ) {
             this.acceptedAt = new Date();
             this.respondedAt = new Date();
+            this.chatEnabled = true;
+            this.chatEnabledAt = this.chatEnabledAt || new Date();
         }
 
         if (

@@ -699,6 +699,73 @@ module.exports.loginCaptain = async (req, res, next) => {
     }
 };
 
+module.exports.updateCaptainProfileImage = async (req, res) => {
+    try {
+        const captainId = req.captain?._id;
+        const profileImage = String(req.body?.profileImage || "").trim();
+
+        if (!captainId) {
+            return res.status(401).json({
+                message: "Sesión de conductor no válida.",
+            });
+        }
+
+        if (!profileImage) {
+            return res.status(400).json({
+                message: "Debes seleccionar una imagen.",
+            });
+        }
+
+        const isAllowedImage =
+            /^data:image\/(jpeg|jpg|png|webp);base64,/i.test(profileImage);
+
+        if (!isAllowedImage) {
+            return res.status(400).json({
+                message: "Formato de imagen no permitido.",
+            });
+        }
+
+        // La foto ya llega comprimida desde el frontend (512 x 512).
+        // Límite adicional para evitar guardar imágenes excesivas en Mongo.
+        if (profileImage.length > 900000) {
+            return res.status(413).json({
+                message: "La imagen es demasiado pesada. Intenta con otra foto.",
+            });
+        }
+
+        const updatedCaptain = await captainModel.findByIdAndUpdate(
+            captainId,
+            {
+                $set: {
+                    profileImage,
+                },
+            },
+            {
+                new: true,
+                runValidators: true,
+            }
+        );
+
+        if (!updatedCaptain) {
+            return res.status(404).json({
+                message: "Conductor no encontrado.",
+            });
+        }
+
+        return res.status(200).json({
+            message: "Foto de perfil actualizada.",
+            captain: buildCaptainResponse(updatedCaptain),
+        });
+    } catch (error) {
+        console.error("updateCaptainProfileImage error:", error);
+
+        return res.status(500).json({
+            message: "No se pudo actualizar la foto de perfil.",
+            error: error.message,
+        });
+    }
+};
+
 module.exports.getCaptainProfile = async (req, res, next) => {
     try {
         if (req.captain?._id) {

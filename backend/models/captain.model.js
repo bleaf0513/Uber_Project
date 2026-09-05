@@ -298,6 +298,16 @@ const captainSchema = new mongoose.Schema(
             max: 5,
         },
 
+        /*
+         * Cantidad real de calificaciones recibidas.
+         * Permite diferenciar un conductor nuevo de uno con historial.
+         */
+        ratingCount: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+
         onlineSession: {
             isOnline: {
                 type: Boolean,

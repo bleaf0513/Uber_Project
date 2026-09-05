@@ -238,6 +238,230 @@ const getTheme = (listingType) => {
   };
 };
 
+const AcceptedBidChat = ({ bid, token, onClose }) => {
+  const [messages, setMessages] = useState([]);
+  const [draft, setDraft] = useState("");
+  const [loadingChat, setLoadingChat] = useState(true);
+  const [sendingChat, setSendingChat] = useState(false);
+  const [chatError, setChatError] = useState("");
+
+  const bidId = bid?._id;
+  const source = getListingSource(bid);
+
+  const loadChat = useCallback(async () => {
+    if (!bidId || !token) return;
+
+    try {
+      setChatError("");
+
+      const response = await axios.get(
+        `${getApiBaseUrl()}/offers/bid/${bidId}/chat/captain`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setMessages(
+        Array.isArray(response?.data?.messages)
+          ? response.data.messages
+          : []
+      );
+    } catch (error) {
+      setChatError(
+        error?.response?.data?.message ||
+          "No se pudo cargar la conversación."
+      );
+    } finally {
+      setLoadingChat(false);
+    }
+  }, [bidId, token]);
+
+  useEffect(() => {
+    loadChat();
+
+    const interval = window.setInterval(() => {
+      loadChat();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
+  }, [loadChat]);
+
+  const sendMessage = async () => {
+    const cleanMessage = draft.trim();
+
+    if (!cleanMessage || sendingChat) return;
+
+    try {
+      setSendingChat(true);
+      setChatError("");
+
+      const response = await axios.post(
+        `${getApiBaseUrl()}/offers/bid/chat/captain`,
+        {
+          bidId,
+          message: cleanMessage,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      if (response?.data?.message) {
+        setMessages((prev) => [...prev, response.data.message]);
+      }
+
+      setDraft("");
+    } catch (error) {
+      setChatError(
+        error?.response?.data?.message ||
+          "No se pudo enviar el mensaje."
+      );
+    } finally {
+      setSendingChat(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[100] bg-black/50 flex items-end sm:items-center justify-center">
+      <div className="w-full sm:max-w-md h-[86vh] sm:h-[720px] bg-white rounded-t-[30px] sm:rounded-[30px] overflow-hidden shadow-2xl flex flex-col">
+        <div className="bg-gradient-to-r from-violet-800 to-fuchsia-600 text-white px-4 py-4">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-10 h-10 rounded-full bg-white/15 flex items-center justify-center"
+              aria-label="Cerrar chat"
+            >
+              <i className="ri-arrow-left-line text-xl" />
+            </button>
+
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] uppercase tracking-wider text-white/70 font-black">
+                Oferta aceptada · Chat habilitado
+              </p>
+              <h3 className="font-black text-lg truncate">
+                {getListingTitle(bid)}
+              </h3>
+              <p className="text-xs text-white/80 truncate">
+                {source?.origin || "Origen"} → {source?.destination || "Destino"}
+              </p>
+            </div>
+
+            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center">
+              <i className="ri-chat-3-fill text-xl" />
+            </div>
+          </div>
+        </div>
+
+        <div className="px-4 py-2 bg-emerald-50 border-b border-emerald-100">
+          <p className="text-[11px] text-emerald-800 font-bold">
+            Conversación privada con el cliente de esta operación.
+          </p>
+        </div>
+
+        <div className="flex-1 overflow-y-auto bg-gray-50 px-4 py-4 space-y-2">
+          {loadingChat && messages.length === 0 ? (
+            <p className="text-center text-sm text-gray-500 py-8">
+              Cargando conversación...
+            </p>
+          ) : messages.length === 0 ? (
+            <div className="text-center py-10">
+              <div className="w-14 h-14 rounded-2xl bg-violet-100 text-violet-700 flex items-center justify-center mx-auto">
+                <i className="ri-chat-smile-3-line text-2xl" />
+              </div>
+              <p className="font-black text-gray-900 mt-3">
+                Ya pueden comunicarse
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                Envía el primer mensaje para coordinar la operación.
+              </p>
+            </div>
+          ) : (
+            messages.map((item, index) => {
+              const mine = item?.senderType === "captain";
+
+              return (
+                <div
+                  key={item?._id || `${item?.createdAt}-${index}`}
+                  className={`flex ${mine ? "justify-end" : "justify-start"}`}
+                >
+                  <div
+                    className={`max-w-[82%] rounded-[18px] px-3 py-2.5 ${
+                      mine
+                        ? "bg-violet-700 text-white rounded-br-md"
+                        : "bg-white border border-gray-200 text-gray-900 rounded-bl-md"
+                    }`}
+                  >
+                    <p className="text-sm whitespace-pre-wrap break-words">
+                      {item?.message}
+                    </p>
+                    <p
+                      className={`text-[9px] mt-1 ${
+                        mine ? "text-white/65" : "text-gray-400"
+                      }`}
+                    >
+                      {item?.createdAt
+                        ? new Date(item.createdAt).toLocaleTimeString("es-CO", {
+                            hour: "numeric",
+                            minute: "2-digit",
+                          })
+                        : ""}
+                    </p>
+                  </div>
+                </div>
+              );
+            })
+          )}
+
+          {chatError ? (
+            <div className="rounded-xl bg-red-50 border border-red-100 px-3 py-2 text-xs text-red-700">
+              {chatError}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="border-t border-gray-200 bg-white p-3">
+          <div className="flex items-end gap-2">
+            <textarea
+              rows={1}
+              maxLength={1000}
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  sendMessage();
+                }
+              }}
+              placeholder="Escribe un mensaje..."
+              className="min-h-[46px] max-h-28 flex-1 resize-none rounded-2xl bg-gray-100 px-4 py-3 text-sm outline-none"
+            />
+
+            <button
+              type="button"
+              onClick={sendMessage}
+              disabled={!draft.trim() || sendingChat}
+              className="w-12 h-12 rounded-2xl bg-violet-700 text-white flex items-center justify-center disabled:opacity-40"
+            >
+              <i
+                className={
+                  sendingChat
+                    ? "ri-loader-4-line animate-spin text-xl"
+                    : "ri-send-plane-2-fill text-xl"
+                }
+              />
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const CaptainReceivedBids = () => {
   const { captain } = useContext(CaptainDataContext);
 
@@ -248,6 +472,7 @@ const CaptainReceivedBids = () => {
   const [message, setMessage] = useState("");
   const [socketStatus, setSocketStatus] = useState("Desconectado");
   const [notificationBanner, setNotificationBanner] = useState(null);
+  const [chatBid, setChatBid] = useState(null);
 
   const socketRef = useRef(null);
   const token = localStorage.getItem("token");
@@ -536,6 +761,17 @@ const CaptainReceivedBids = () => {
               </div>
             ) : null}
 
+            {bid.status === "accepted" ? (
+              <button
+                type="button"
+                onClick={() => setChatBid(bid)}
+                className="w-full rounded-2xl bg-violet-700 text-white py-3.5 font-black flex items-center justify-center gap-2 shadow-lg shadow-violet-700/20"
+              >
+                <i className="ri-chat-3-fill text-lg" />
+                Abrir chat con el cliente
+              </button>
+            ) : null}
+
             {bid.status === "countered" && bid.counterPrice ? (
               <div className="rounded-2xl bg-amber-100 border border-amber-200 px-4 py-3">
                 <p className="text-sm text-amber-800">
@@ -756,6 +992,14 @@ const CaptainReceivedBids = () => {
           <div className="space-y-5">{bids.map(renderBidCard)}</div>
         )}
       </div>
+
+      {chatBid ? (
+        <AcceptedBidChat
+          bid={chatBid}
+          token={token}
+          onClose={() => setChatBid(null)}
+        />
+      ) : null}
     </div>
   );
 };

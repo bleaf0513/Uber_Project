@@ -80,35 +80,6 @@ const BODY_LABELS = Object.fromEntries(
   BODY_OPTIONS.map((item) => [item.value, item.label])
 );
 
-const PROFILE_TO_MARKETPLACE_VEHICLE = {
-  motorcycle: "moto", car: "carro", motocarro: "motocarro", pickup: "camioneta", van: "van",
-  light_truck: "camion_liviano", medium_truck: "camion_mediano", heavy_truck: "camion_pesado",
-  simple_truck: "camion_sencillo", double_troque: "doble_troque", dump_truck: "volqueta",
-  mini_trailer: "minimula", tractor_trailer: "tractomula", lowboy: "cama_baja",
-  special_vehicle: "vehiculo_especial",
-};
-
-const PROFILE_TO_MARKETPLACE_BODY = {
-  not_specified: "no_especificada", closed_van: "furgon_cerrado", stakes: "estacas",
-  platform: "plataforma", refrigerated: "refrigerada", dump: "volco", tank: "tanque",
-  container_carrier: "portacontenedor", lowboy: "cama_baja", open_body: "carroceria_abierta", other: "otro",
-};
-
-const getOfferRequiredCapacityKg = (offer) => {
-  const recommended = Number(offer?.recommendedMinCapacityKg);
-  if (Number.isFinite(recommended) && recommended > 0) return recommended;
-  const weight = Number(offer?.weight) || 0;
-  const unit = String(offer?.weightUnit || "kg").toLowerCase();
-  return unit.includes("ton") ? weight * 1000 : weight;
-};
-
-const getProfileCapacityKg = (captain) => {
-  const capacityKg = Number(captain?.vehicle?.capacityKg);
-  if (Number.isFinite(capacityKg) && capacityKg > 0) return capacityKg;
-  const capacity = Number(captain?.vehicle?.capacity) || 0;
-  return captain?.vehicle?.capacityUnit === "ton" ? capacity * 1000 : capacity;
-};
-
 const formatCOP = (value) => {
   const number = Number(value) || 0;
 
@@ -156,6 +127,105 @@ const getCaptainToken = () => {
   );
 };
 
+/*
+ * CENTRAL GO - servicios programados provenientes del Home.
+ * Después de 5 minutos dejan de competir con las solicitudes inmediatas
+ * y aparecen automáticamente en Explorar cargas.
+ */
+const RIDE_SNOOZE_PREFIX = "centralgo:ride-snooze:";
+
+const getRideSnoozeKey = (captainId, rideId) =>
+  `${RIDE_SNOOZE_PREFIX}${captainId || "anonymous"}:${rideId || "unknown"}`;
+
+const getStoredCaptainId = () =>
+  localStorage.getItem("captainId") ||
+  localStorage.getItem("captain_id") ||
+  "";
+
+const isRideSnoozed = (captainId, rideId) => {
+  if (!captainId || !rideId) return false;
+
+  const key = getRideSnoozeKey(captainId, rideId);
+  const until = Number(localStorage.getItem(key) || 0);
+
+  if (!Number.isFinite(until) || until <= Date.now()) {
+    localStorage.removeItem(key);
+    return false;
+  }
+
+  return true;
+};
+
+const snoozeScheduledRide = (captainId, rideId) => {
+  if (!captainId || !rideId) return;
+
+  const until = Date.now() + 30 * 60 * 1000;
+
+  localStorage.setItem(
+    getRideSnoozeKey(captainId, rideId),
+    String(until)
+  );
+};
+
+const LOCAL_VEHICLE_LABELS = {
+  motorcycle: "Moto",
+  car: "Carro",
+  motocarro: "Motocarguero",
+  pickup: "Pickup",
+  van: "Van",
+  truck: "Camión",
+  light_cargo: "Carga liviana",
+};
+
+const LOCAL_CARGO_LABELS = {
+  market: "Mercado",
+  boxes: "Cajas",
+  packages: "Paquetes",
+  sacks: "Bultos",
+  baskets: "Canastillas",
+  general_merchandise: "Mercancía general",
+  other: "Otro",
+};
+
+const formatScheduledWindow = (ride) => {
+  const startRaw = ride?.schedule?.pickupStartAt;
+  const endRaw = ride?.schedule?.pickupEndAt;
+
+  if (!startRaw) return "Fecha programada";
+
+  const start = new Date(startRaw);
+  const end = endRaw ? new Date(endRaw) : null;
+
+  if (Number.isNaN(start.getTime())) return "Fecha programada";
+
+  const dateText = new Intl.DateTimeFormat("es-CO", {
+    weekday: "short",
+    day: "numeric",
+    month: "short",
+    timeZone: "America/Bogota",
+  }).format(start);
+
+  const timeText = new Intl.DateTimeFormat("es-CO", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+    timeZone: "America/Bogota",
+  }).format(start);
+
+  if (end && !Number.isNaN(end.getTime())) {
+    const endText = new Intl.DateTimeFormat("es-CO", {
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "America/Bogota",
+    }).format(end);
+
+    return `${dateText} · ${timeText} - ${endText}`;
+  }
+
+  return `${dateText} · ${timeText}`;
+};
+
 const CaptainSpaceOffers = () => {
   const navigate = useNavigate();
 
@@ -163,8 +233,14 @@ const CaptainSpaceOffers = () => {
 
   const [offers, setOffers] = useState([]);
   const [myBids, setMyBids] = useState([]);
-  const [captainProfile, setCaptainProfile] = useState(null);
-  const [profileLoading, setProfileLoading] = useState(false);
+
+  const [scheduledRides, setScheduledRides] = useState([]);
+  const [loadingScheduledRides, setLoadingScheduledRides] = useState(false);
+  const [processingScheduledRideId, setProcessingScheduledRideId] =
+    useState("");
+  const [scheduledOfferRide, setScheduledOfferRide] = useState(null);
+  const [scheduledOfferPrice, setScheduledOfferPrice] = useState("");
+  const [scheduledOfferMessage, setScheduledOfferMessage] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [loadingMyBids, setLoadingMyBids] =
@@ -213,38 +289,6 @@ const CaptainSpaceOffers = () => {
     includesFuel: true,
     includesInsurance: false,
   });
-
-  const captainCapacityKg = useMemo(
-    () => getProfileCapacityKg(captainProfile),
-    [captainProfile]
-  );
-
-  const captainMarketplaceVehicleType = useMemo(
-    () => PROFILE_TO_MARKETPLACE_VEHICLE[captainProfile?.vehicle?.vehicleType] || "",
-    [captainProfile]
-  );
-
-  const captainMarketplaceBodyType = useMemo(
-    () => PROFILE_TO_MARKETPLACE_BODY[captainProfile?.vehicle?.bodyType] || "no_especificada",
-    [captainProfile]
-  );
-
-  const recommendedOffers = useMemo(
-    () => offers.filter((offer) => {
-      const required = getOfferRequiredCapacityKg(offer);
-      return captainCapacityKg > 0 && required > 0 && required <= captainCapacityKg;
-    }),
-    [offers, captainCapacityKg]
-  );
-
-  const otherOffers = useMemo(
-    () => offers.filter((offer) => {
-      const required = getOfferRequiredCapacityKg(offer);
-      if (captainCapacityKg <= 0) return true;
-      return required <= 0 || required > captainCapacityKg;
-    }),
-    [offers, captainCapacityKg]
-  );
 
   const activeBidOfferIds = useMemo(() => {
     const ids = new Set();
@@ -309,25 +353,6 @@ const CaptainSpaceOffers = () => {
     return query ? `?${query}` : "";
   };
 
-  const fetchCaptainProfile = async () => {
-    try {
-      setProfileLoading(true);
-      const response = await axios.get(`${getApiBaseUrl()}/captain/profile`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setCaptainProfile(response?.data?.captain || response?.data || null);
-    } catch (error) {
-      console.error("Error cargando perfil del conductor:", error);
-      if (error?.response?.status === 401) {
-        localStorage.removeItem("captainToken");
-        localStorage.removeItem("token");
-        navigate("/captain-login");
-      }
-    } finally {
-      setProfileLoading(false);
-    }
-  };
-
   const fetchOffers = async () => {
     try {
       setLoading(true);
@@ -360,6 +385,164 @@ const CaptainSpaceOffers = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const fetchScheduledRides = async () => {
+    try {
+      setLoadingScheduledRides(true);
+
+      const response = await axios.get(
+        `${getApiBaseUrl()}/rides/available-for-captain?marketplace=1`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const captainId =
+        response?.data?.captainId ||
+        getStoredCaptainId();
+
+      if (captainId) {
+        localStorage.setItem("captainId", String(captainId));
+      }
+
+      const rides = Array.isArray(response?.data?.rides)
+        ? response.data.rides
+        : [];
+
+      const visible = rides.filter((ride) => {
+        if (!ride?._id) return false;
+
+        return !isRideSnoozed(
+          captainId,
+          String(ride._id)
+        );
+      });
+
+      setScheduledRides(visible);
+    } catch (error) {
+      console.error(
+        "Error cargando domicilios programados:",
+        error
+      );
+    } finally {
+      setLoadingScheduledRides(false);
+    }
+  };
+
+  const openScheduledOfferModal = (ride) => {
+    if (!ride?._id) return;
+
+    const publishedPrice = Number(
+      ride?.offeredFare ??
+      ride?.fare ??
+      ride?.suggestedFare ??
+      0
+    );
+
+    setScheduledOfferRide(ride);
+    setScheduledOfferPrice(
+      publishedPrice > 0 ? String(publishedPrice) : ""
+    );
+    setScheduledOfferMessage(
+      "Tengo disponibilidad para realizar este domicilio programado."
+    );
+    setPageError("");
+    setSuccessMessage("");
+  };
+
+  const closeScheduledOfferModal = () => {
+    if (processingScheduledRideId) return;
+
+    setScheduledOfferRide(null);
+    setScheduledOfferPrice("");
+    setScheduledOfferMessage("");
+  };
+
+  const submitScheduledOffer = async () => {
+    try {
+      if (!scheduledOfferRide?._id) return;
+
+      const price = Number(scheduledOfferPrice);
+
+      if (!Number.isFinite(price) || price <= 0) {
+        setPageError("Ingresa el valor de tu oferta.");
+        return;
+      }
+
+      setProcessingScheduledRideId(
+        String(scheduledOfferRide._id)
+      );
+      setPageError("");
+      setSuccessMessage("");
+
+      await axios.post(
+        `${getApiBaseUrl()}/rides/captain-offer`,
+        {
+          rideId: scheduledOfferRide._id,
+          price,
+          message:
+            String(scheduledOfferMessage || "").trim() ||
+            "Oferta del conductor para domicilio programado.",
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      setScheduledRides((previous) =>
+        previous.filter(
+          (item) =>
+            String(item?._id) !==
+            String(scheduledOfferRide._id)
+        )
+      );
+
+      setSuccessMessage(
+        `Oferta por ${formatCOP(price)} enviada al usuario.`
+      );
+
+      setScheduledOfferRide(null);
+      setScheduledOfferPrice("");
+      setScheduledOfferMessage("");
+    } catch (error) {
+      setPageError(
+        error?.response?.data?.message ||
+          "No se pudo enviar la oferta."
+      );
+    } finally {
+      setProcessingScheduledRideId("");
+    }
+  };
+
+  const hideScheduledRide = (ride) => {
+    if (!ride?._id) return;
+
+    const captainId = getStoredCaptainId();
+
+    if (captainId) {
+      snoozeScheduledRide(
+        captainId,
+        String(ride._id)
+      );
+    }
+
+    setScheduledRides((previous) =>
+      previous.filter(
+        (item) => String(item?._id) !== String(ride._id)
+      )
+    );
+  };
+
+  const refreshMarketplace = async () => {
+    await Promise.allSettled([
+      fetchOffers(),
+      fetchScheduledRides(),
+    ]);
   };
 
   const fetchMyBids = async () => {
@@ -396,9 +579,16 @@ const CaptainSpaceOffers = () => {
       return;
     }
 
-    fetchCaptainProfile();
-    fetchOffers();
+    refreshMarketplace();
     fetchMyBids();
+
+    const scheduledRefreshInterval = setInterval(() => {
+      fetchScheduledRides();
+    }, 30000);
+
+    return () => {
+      clearInterval(scheduledRefreshInterval);
+    };
   }, []);
 
   const handleFilterChange = (event) => {
@@ -420,7 +610,7 @@ const CaptainSpaceOffers = () => {
     });
 
     setTimeout(() => {
-      fetchOffers();
+      refreshMarketplace();
     }, 0);
   };
 
@@ -449,30 +639,38 @@ const CaptainSpaceOffers = () => {
   };
 
   const openBidModal = (offer) => {
-    const requiredCapacity = getOfferRequiredCapacityKg(offer);
-    const exceedsCapacity = captainCapacityKg > 0 && requiredCapacity > captainCapacityKg;
-
-    if (exceedsCapacity) {
-      const confirmed = window.confirm(
-        `Esta carga requiere aproximadamente ${formatNumber(requiredCapacity)} kg y tu vehículo tiene registrada una capacidad de ${formatNumber(captainCapacityKg)} kg.\n\nPuedes verla y enviar propuesta, pero confirma que realmente cuentas con un vehículo adecuado. ¿Deseas continuar?`
-      );
-      if (!confirmed) return;
-    }
-
     setSelectedOffer(offer);
+
     setBidForm((previous) => ({
       ...previous,
-      offeredPrice: Number(offer?.suggestedPrice) > 0 ? String(offer.suggestedPrice) : "",
-      proposedVehicleType: captainMarketplaceVehicleType || offer?.requiredVehicleType || offer?.suggestedVehicleType || "",
-      proposedVehicleBrand: captainProfile?.vehicle?.brand || "",
-      proposedVehicleReference: captainProfile?.vehicle?.reference || "",
-      proposedVehicleModel: captainProfile?.vehicle?.model || "",
-      proposedVehiclePlate: captainProfile?.vehicle?.plate || "",
-      proposedBodyType: captainMarketplaceBodyType || offer?.requiredBodyType || "no_especificada",
-      proposedVehicleCapacity: captainCapacityKg > 0 ? String(captainCapacityKg) : "",
+
+      offeredPrice:
+        Number(offer?.suggestedPrice) > 0
+          ? String(offer.suggestedPrice)
+          : "",
+
+      proposedVehicleType:
+        offer?.requiredVehicleType ||
+        offer?.suggestedVehicleType ||
+        "",
+
+      proposedBodyType:
+        offer?.requiredBodyType ||
+        "no_especificada",
+
+      proposedVehicleCapacity:
+        offer?.recommendedMinCapacityKg
+          ? String(offer.recommendedMinCapacityKg)
+          : "",
+
       proposedVehicleCapacityUnit: "kg",
-      message: `Tengo disponibilidad para transportar la carga ${offer?.origin || "desde el origen"} hacia ${offer?.destination || "el destino"} con mi vehículo registrado en Central Go.`,
+
+      message:
+        `Tengo disponibilidad para transportar la carga ` +
+        `${offer?.origin || "desde el origen"} hacia ` +
+        `${offer?.destination || "el destino"}.`,
     }));
+
     setPageError("");
     setSuccessMessage("");
     setBidModalOpen(true);
@@ -542,6 +740,15 @@ const CaptainSpaceOffers = () => {
         selectedOffer.recommendedMinCapacityKg
       ) || 0;
 
+    if (
+      requiredCapacity > 0 &&
+      capacityKg < requiredCapacity
+    ) {
+      return (
+        `La capacidad debe ser mínimo de ` +
+        `${formatNumber(requiredCapacity)} kg.`
+      );
+    }
 
     if (
       bidForm.availablePickupTime &&
@@ -716,11 +923,13 @@ const CaptainSpaceOffers = () => {
 
     const publishedPrice = Number(offer.suggestedPrice) || 0;
     const vehicleType =
-      captainMarketplaceVehicleType ||
       offer.requiredVehicleType ||
       offer.suggestedVehicleType ||
       "";
-    const capacity = captainCapacityKg || getOfferRequiredCapacityKg(offer);
+    const capacity =
+      Number(offer.recommendedMinCapacityKg) ||
+      Number(offer.weight) ||
+      0;
 
     if (publishedPrice <= 0) {
       openBidModal(offer);
@@ -759,11 +968,12 @@ const CaptainSpaceOffers = () => {
           message:
             "Acepto el valor publicado y tengo disponibilidad para realizar el transporte.",
           proposedVehicleType: vehicleType,
-          proposedVehicleBrand: captainProfile?.vehicle?.brand || "",
-          proposedVehicleReference: captainProfile?.vehicle?.reference || "",
-          proposedVehicleModel: captainProfile?.vehicle?.model || "",
-          proposedVehiclePlate: captainProfile?.vehicle?.plate || "",
-          proposedBodyType: captainMarketplaceBodyType || offer.requiredBodyType || "no_especificada",
+          proposedVehicleBrand: "",
+          proposedVehicleReference: "",
+          proposedVehicleModel: "",
+          proposedVehiclePlate: "",
+          proposedBodyType:
+            offer.requiredBodyType || "no_especificada",
           proposedVehicleCapacity: capacity,
           proposedVehicleCapacityUnit: "kg",
           availablePickupTime: offer.pickupTime || null,
@@ -816,6 +1026,137 @@ const CaptainSpaceOffers = () => {
     }
   };
 
+  const renderScheduledRideCard = (ride) => {
+    const rideId = String(ride?._id || "");
+    const processing =
+      processingScheduledRideId === rideId;
+
+    const vehicle =
+      LOCAL_VEHICLE_LABELS[
+        ride?.vehicleType || ride?.vehicle
+      ] || "Vehículo";
+
+    const cargo =
+      LOCAL_CARGO_LABELS[
+        ride?.cargo?.category
+      ] || "Mercancía";
+
+    const quantity = Math.max(
+      1,
+      Number(ride?.cargo?.quantity) || 1
+    );
+
+    const weight = ride?.cargo?.weightUnknown
+      ? "Peso por confirmar"
+      : Number(ride?.cargo?.approximateWeight) > 0
+        ? `${ride.cargo.approximateWeight} ${ride?.cargo?.weightUnit || "kg"}`
+        : "Peso no informado";
+
+    const fare = Number(
+      ride?.offeredFare ??
+      ride?.fare ??
+      ride?.suggestedFare ??
+      0
+    );
+
+    return (
+      <article
+        key={`scheduled-${rideId}`}
+        className="overflow-hidden rounded-[28px] border border-purple-200 bg-white shadow-[0_18px_50px_rgba(88,28,135,0.12)]"
+      >
+        <div className="h-2 bg-gradient-to-r from-purple-700 via-fuchsia-500 to-pink-400" />
+
+        <div className="p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="rounded-full bg-purple-100 text-purple-700 px-2.5 py-1 text-[11px] font-black">
+                  PROGRAMADO
+                </span>
+
+                <span className="rounded-full bg-slate-100 text-slate-700 px-2.5 py-1 text-[11px] font-black">
+                  {ride?.senderType === "business"
+                    ? "EMPRESA"
+                    : "PERSONAL"}
+                </span>
+              </div>
+
+              <h2 className="text-lg font-black text-gray-950 mt-3">
+                {cargo} · {quantity} entrega{quantity === 1 ? "" : "s"}
+              </h2>
+
+              <p className="text-sm text-gray-600 mt-1">
+                {ride?.pickup || "Recogida"} →{" "}
+                {ride?.destination || "Entrega"}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => hideScheduledRide(ride)}
+              className="w-9 h-9 shrink-0 rounded-full bg-gray-100 text-gray-500 flex items-center justify-center"
+              aria-label="Ocultar por 30 minutos"
+              title="Ocultar por 30 minutos"
+            >
+              <i className="ri-close-line text-xl" />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 mt-4">
+            <div className="rounded-2xl bg-purple-50 border border-purple-200 p-3">
+              <p className="text-[11px] font-bold text-purple-700">
+                Recogida
+              </p>
+              <p className="text-sm font-black text-purple-950 mt-1">
+                {formatScheduledWindow(ride)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl bg-slate-950 text-white p-3">
+              <p className="text-[11px] font-bold text-white/60">
+                Valor
+              </p>
+              <p className="text-lg font-black mt-1">
+                {fare > 0 ? formatCOP(fare) : "Por definir"}
+              </p>
+            </div>
+          </div>
+
+          <div className="rounded-2xl bg-gray-50 border border-gray-200 p-3 mt-3">
+            <p className="text-sm text-gray-700">
+              <span className="font-black">Vehículo:</span>{" "}
+              {vehicle}
+            </p>
+            <p className="text-sm text-gray-700 mt-1">
+              <span className="font-black">Carga:</span>{" "}
+              {quantity} {cargo.toLowerCase()} · {weight}
+            </p>
+            <p className="text-sm text-gray-700 mt-1">
+              <span className="font-black">Entregas:</span>{" "}
+              {(Array.isArray(ride?.routeStops)
+                ? ride.routeStops.length
+                : 0) + 1}
+            </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openScheduledOfferModal(ride)}
+            disabled={processing}
+            className="w-full mt-3 rounded-2xl bg-purple-700 text-white py-3 font-black disabled:opacity-50"
+          >
+            <i className="ri-price-tag-3-line mr-2" />
+            Hacer oferta
+          </button>
+
+          <p className="mt-2 text-center text-[11px] text-gray-500">
+            El valor publicado es una referencia. Tú decides cuánto ofertar.
+          </p>
+        </div>
+      </article>
+    );
+  };
+
   const renderOfferCard = (offer) => {
     const alreadyBid =
       activeBidOfferIds.has(String(offer._id));
@@ -836,12 +1177,10 @@ const CaptainSpaceOffers = () => {
 
     const body =
       offer.requiredBodyLabel ||
-      BODY_LABELS[offer.requiredBodyType] ||
+      BODY_LABELS[
+        offer.requiredBodyType
+      ] ||
       "No especificada";
-
-    const requiredCapacityKg = getOfferRequiredCapacityKg(offer);
-    const isRecommended = captainCapacityKg > 0 && requiredCapacityKg > 0 && requiredCapacityKg <= captainCapacityKg;
-    const exceedsCapacity = captainCapacityKg > 0 && requiredCapacityKg > captainCapacityKg;
 
     return (
       <article
@@ -880,18 +1219,6 @@ const CaptainSpaceOffers = () => {
               Disponible
             </span>
           </div>
-
-          {isRecommended ? (
-            <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-black text-emerald-700">
-              <i className="ri-shield-check-line mr-1" />
-              Recomendada para tu vehículo
-            </div>
-          ) : exceedsCapacity ? (
-            <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
-              <p className="text-sm font-black text-amber-800"><i className="ri-alert-line mr-1" />Supera la capacidad registrada</p>
-              <p className="mt-1 text-xs text-amber-700">Requiere {formatNumber(requiredCapacityKg)} kg y tu vehículo tiene {formatNumber(captainCapacityKg)} kg registrados.</p>
-            </div>
-          ) : null}
 
           <div className="grid grid-cols-2 gap-3 mt-4">
             <div className="rounded-2xl bg-slate-950 text-white p-4">
@@ -1112,29 +1439,6 @@ const CaptainSpaceOffers = () => {
           </p>
         </section>
 
-        <section className="rounded-[26px] border border-purple-200 bg-gradient-to-r from-purple-50 to-blue-50 p-4 shadow-sm">
-          <div className="flex items-start gap-3">
-            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-purple-700 text-white"><i className="ri-truck-line text-2xl" /></div>
-            <div className="min-w-0 flex-1">
-              <p className="text-[10px] font-black uppercase tracking-wider text-purple-700">Tu vehículo registrado</p>
-              {profileLoading ? (
-                <p className="mt-2 text-sm font-bold text-gray-600">Cargando información...</p>
-              ) : captainProfile?.vehicle ? (
-                <>
-                  <h3 className="mt-1 text-lg font-black text-gray-950">{VEHICLE_LABELS[captainMarketplaceVehicleType] || captainProfile.vehicle.vehicleType}</h3>
-                  <p className="mt-1 text-sm text-gray-700">{captainProfile.vehicle.brand || "Sin marca"} {captainProfile.vehicle.reference || ""} · {captainProfile.vehicle.plate || "Sin placa"}</p>
-                  <div className="mt-3 grid grid-cols-2 gap-2">
-                    <div className="rounded-xl bg-white px-3 py-2"><p className="text-[10px] font-black uppercase text-gray-400">Capacidad</p><p className="text-sm font-black text-gray-900">{formatNumber(captainCapacityKg)} kg</p></div>
-                    <div className="rounded-xl bg-white px-3 py-2"><p className="text-[10px] font-black uppercase text-gray-400">Carrocería</p><p className="text-sm font-black text-gray-900">{BODY_LABELS[captainMarketplaceBodyType] || "No especificada"}</p></div>
-                  </div>
-                </>
-              ) : (
-                <p className="mt-2 text-sm text-red-700">No pudimos cargar el vehículo de tu perfil.</p>
-              )}
-            </div>
-          </div>
-        </section>
-
         <section className="rounded-[26px] bg-white border border-gray-200 shadow-sm p-4">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -1221,7 +1525,7 @@ const CaptainSpaceOffers = () => {
 
             <button
               type="button"
-              onClick={fetchOffers}
+              onClick={refreshMarketplace}
               className="w-full rounded-2xl bg-blue-600 text-white py-3 font-black"
             >
               Buscar cargas
@@ -1240,6 +1544,40 @@ const CaptainSpaceOffers = () => {
             {successMessage}
           </div>
         ) : null}
+
+        <section className="rounded-[26px] bg-white border border-purple-200 shadow-sm p-4">
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div>
+              <p className="text-xs font-black uppercase tracking-wider text-purple-700">
+                Domicilios programados
+              </p>
+              <h2 className="font-black text-gray-950 mt-1">
+                Servicios que pasaron del Home
+              </h2>
+              <p className="text-xs text-gray-500 mt-1">
+                Aparecen aquí automáticamente después de 5 minutos.
+              </p>
+            </div>
+
+            <span className="rounded-full bg-purple-100 text-purple-700 px-3 py-1 text-xs font-black">
+              {scheduledRides.length}
+            </span>
+          </div>
+
+          {loadingScheduledRides && scheduledRides.length === 0 ? (
+            <p className="text-sm text-gray-500">
+              Actualizando programados...
+            </p>
+          ) : scheduledRides.length === 0 ? (
+            <div className="rounded-2xl bg-purple-50 border border-purple-100 p-4 text-sm text-purple-800">
+              No hay domicilios programados disponibles en este momento.
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {scheduledRides.map(renderScheduledRideCard)}
+            </div>
+          )}
+        </section>
 
         {loading ? (
           <div className="rounded-2xl bg-white border border-gray-200 p-5 text-sm text-gray-600">
@@ -1261,26 +1599,9 @@ const CaptainSpaceOffers = () => {
             </p>
           </div>
         ) : (
-          <div className="space-y-7">
-            {recommendedOffers.length > 0 ? (
-              <section>
-                <div className="mb-3 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
-                  <h2 className="text-base font-black text-emerald-900"><i className="ri-star-smile-line mr-1" />Recomendadas para tu vehículo</h2>
-                  <p className="mt-1 text-xs text-emerald-700">Estas cargas están dentro de tu capacidad registrada de {formatNumber(captainCapacityKg)} kg.</p>
-                </div>
-                <div className="space-y-5">{recommendedOffers.map(renderOfferCard)}</div>
-              </section>
-            ) : null}
-            {otherOffers.length > 0 ? (
-              <section>
-                <div className="mb-3 rounded-2xl border border-gray-200 bg-white p-4">
-                  <h2 className="text-base font-black text-gray-950">Otras cargas disponibles</h2>
-                  <p className="mt-1 text-xs text-gray-500">Puedes revisarlas, aunque algunas podrían superar la capacidad registrada de tu vehículo.</p>
-                </div>
-                <div className="space-y-5">{otherOffers.map(renderOfferCard)}</div>
-              </section>
-            ) : null}
-          </div>
+          <section className="space-y-5">
+            {offers.map(renderOfferCard)}
+          </section>
         )}
 
         {loadingMyBids ? (
@@ -1289,6 +1610,139 @@ const CaptainSpaceOffers = () => {
           </p>
         ) : null}
       </main>
+
+      {scheduledOfferRide ? (
+        <div className="fixed inset-0 z-[110] bg-black/55 flex items-end">
+          <div className="w-full max-h-[92vh] overflow-y-auto rounded-t-[30px] bg-white p-4 shadow-2xl">
+            <div className="w-16 h-1.5 rounded-full bg-gray-300 mx-auto mb-4" />
+
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-black uppercase tracking-wider text-purple-700">
+                  Domicilio programado
+                </p>
+                <h2 className="text-xl font-black text-gray-950 mt-1">
+                  Haz tu oferta
+                </h2>
+                <p className="text-sm text-gray-600 mt-1">
+                  El usuario recibirá tu precio y decidirá si lo acepta.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={closeScheduledOfferModal}
+                className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <i className="ri-close-line text-xl" />
+              </button>
+            </div>
+
+            <div className="rounded-2xl bg-purple-50 border border-purple-200 p-4 mt-4">
+              <p className="text-xs font-bold text-purple-700">
+                Valor publicado por el usuario
+              </p>
+              <p className="text-xl font-black text-purple-950 mt-1">
+                {formatCOP(
+                  scheduledOfferRide?.offeredFare ??
+                  scheduledOfferRide?.fare ??
+                  scheduledOfferRide?.suggestedFare ??
+                  0
+                )}
+              </p>
+            </div>
+
+            <label className="block mt-4">
+              <span className="text-sm font-black text-gray-800">
+                ¿Cuánto quieres cobrar?
+              </span>
+              <div className="mt-2 flex items-center rounded-2xl border border-gray-200 px-3">
+                <span className="font-black text-gray-500">$</span>
+                <input
+                  type="number"
+                  min="1"
+                  step="500"
+                  value={scheduledOfferPrice}
+                  onChange={(event) =>
+                    setScheduledOfferPrice(event.target.value)
+                  }
+                  className="w-full px-2 py-3.5 text-lg font-black outline-none"
+                  placeholder="Ej. 22000"
+                />
+              </div>
+            </label>
+
+            <div className="grid grid-cols-3 gap-2 mt-3">
+              {[0, 2000, 5000].map((extra) => {
+                const base = Number(
+                  scheduledOfferRide?.offeredFare ??
+                  scheduledOfferRide?.fare ??
+                  scheduledOfferRide?.suggestedFare ??
+                  0
+                );
+
+                return (
+                  <button
+                    key={extra}
+                    type="button"
+                    onClick={() =>
+                      setScheduledOfferPrice(
+                        String(Math.max(0, base + extra))
+                      )
+                    }
+                    className="rounded-xl bg-gray-100 py-2.5 text-[11px] font-black text-gray-700"
+                  >
+                    {extra === 0
+                      ? "Mismo valor"
+                      : `+ ${formatCOP(extra)}`}
+                  </button>
+                );
+              })}
+            </div>
+
+            <label className="block mt-4">
+              <span className="text-sm font-black text-gray-800">
+                Mensaje al usuario
+              </span>
+              <textarea
+                rows={3}
+                maxLength={300}
+                value={scheduledOfferMessage}
+                onChange={(event) =>
+                  setScheduledOfferMessage(event.target.value)
+                }
+                className="mt-2 w-full resize-none rounded-2xl border border-gray-200 px-3 py-3 text-sm outline-none"
+                placeholder="Ej. Puedo recoger a la hora programada."
+              />
+            </label>
+
+            <div className="grid grid-cols-2 gap-2 mt-5">
+              <button
+                type="button"
+                onClick={closeScheduledOfferModal}
+                disabled={Boolean(processingScheduledRideId)}
+                className="rounded-2xl bg-gray-100 py-3.5 font-black text-gray-700 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={submitScheduledOffer}
+                disabled={
+                  Boolean(processingScheduledRideId) ||
+                  Number(scheduledOfferPrice) <= 0
+                }
+                className="rounded-2xl bg-purple-700 py-3.5 font-black text-white disabled:opacity-50"
+              >
+                {processingScheduledRideId
+                  ? "Enviando..."
+                  : "Enviar oferta"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {bidModalOpen ? (
         <div className="fixed inset-0 z-[100] bg-black/55 flex items-end">
@@ -1348,15 +1802,6 @@ const CaptainSpaceOffers = () => {
                   "Por definir"}
               </p>
             </div>
-
-            {captainProfile?.vehicle ? (
-              <div className="mt-4 rounded-2xl border border-purple-200 bg-purple-50 p-4">
-                <p className="text-[10px] font-black uppercase tracking-wider text-purple-700">Vehículo que usarás</p>
-                <p className="mt-1 text-base font-black text-purple-950">{VEHICLE_LABELS[bidForm.proposedVehicleType] || "Vehículo registrado"}</p>
-                <p className="mt-1 text-sm text-purple-800">{bidForm.proposedVehicleBrand || "Sin marca"} {bidForm.proposedVehicleReference || ""} · {bidForm.proposedVehiclePlate || "Sin placa"}</p>
-                <p className="mt-1 text-xs text-purple-700">Capacidad: {formatNumber(bidForm.proposedVehicleCapacity)} kg</p>
-              </div>
-            ) : null}
 
             <form
               onSubmit={submitBid}

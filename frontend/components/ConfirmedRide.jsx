@@ -261,7 +261,11 @@ const ConfirmedRide = (props) => {
             </div>
 
             {routeStops.length > 0 && (
-              <div className="mt-3 pl-5 border-l-2 border-dashed border-purple-200 space-y-2">
+              <div className="mt-3">
+                <p className="mb-2 text-[11px] font-black uppercase tracking-[0.12em] text-purple-700">
+                  Entregas de la ruta
+                </p>
+                <div className="pl-5 border-l-2 border-dashed border-purple-200 space-y-2">
                 {routeStops.map((stop, index) => (
                   <div key={`${stop}-${index}`} className="flex items-start gap-3">
                     <div className="w-8 h-8 rounded-full bg-purple-100 text-purple-900 flex items-center justify-center text-xs font-black shrink-0">
@@ -270,7 +274,7 @@ const ConfirmedRide = (props) => {
 
                     <div className="min-w-0 flex-1">
                       <p className="text-xs font-bold text-purple-700">
-                        Parada {index + 1}
+                        Entrega {index + 1}
                       </p>
                       <p className="text-sm font-bold text-gray-900 truncate">
                         {stop}
@@ -278,6 +282,7 @@ const ConfirmedRide = (props) => {
                     </div>
                   </div>
                 ))}
+                </div>
               </div>
             )}
 
@@ -288,10 +293,10 @@ const ConfirmedRide = (props) => {
 
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-black uppercase tracking-[0.12em] text-gray-400">
-                  Destino
+                  Entrega {routeStops.length + 1} · Última
                 </p>
                 <p className="text-base font-black text-gray-950 truncate">
-                  {destFirstPart || "Destino"}
+                  {destFirstPart || `Entrega ${routeStops.length + 1}`}
                 </p>
                 {destSecondPart ? (
                   <p className="text-xs text-gray-500 mt-0.5">

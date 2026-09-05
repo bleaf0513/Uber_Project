@@ -1,4 +1,4 @@
-import React, { useContext, useEffect, useMemo, useState } from "react";
+import React, { useContext, useEffect, useMemo, useRef, useState } from "react";
 import "remixicon/fonts/remixicon.css";
 import axios from "axios";
 import { CaptainDataContext } from "../src/context/CaptainContext";
@@ -19,7 +19,7 @@ const getCaptainToken = () => {
 };
 
 const CaptainDetails = () => {
-  const { captain } = useContext(CaptainDataContext);
+  const { captain, setCaptain } = useContext(CaptainDataContext);
 
   const [summaryOpen, setSummaryOpen] = useState(false);
   const [summaryMode, setSummaryMode] = useState("summary");
@@ -32,6 +32,10 @@ const CaptainDetails = () => {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [historyError, setHistoryError] = useState("");
   const [historyRides, setHistoryRides] = useState([]);
+
+  const [profileUploading, setProfileUploading] = useState(false);
+  const [profileImageError, setProfileImageError] = useState("");
+  const profileImageInputRef = useRef(null);
 
   const firstname = captain?.fullname?.firstname ?? "";
   const lastname = captain?.fullname?.lastname ?? "";
@@ -47,6 +51,7 @@ const CaptainDetails = () => {
     DEFAULT_PROFILE_IMAGE;
 
   const rating = Number(captain?.rating ?? 5);
+  const ratingCount = Number(captain?.ratingCount ?? 0);
   const isOnline = Boolean(captain?.onlineSession?.isOnline);
 
   const fallbackStats = captain?.stats || {};
@@ -138,6 +143,127 @@ const CaptainDetails = () => {
     }
 
     return dateFormatter.format(date);
+  };
+
+  const resizeProfileImage = (file) =>
+    new Promise((resolve, reject) => {
+      if (!file) {
+        reject(new Error("No se seleccionó ninguna imagen."));
+        return;
+      }
+
+      if (!String(file.type || "").startsWith("image/")) {
+        reject(new Error("Selecciona una imagen válida."));
+        return;
+      }
+
+      const reader = new FileReader();
+
+      reader.onerror = () => {
+        reject(new Error("No se pudo leer la imagen."));
+      };
+
+      reader.onload = () => {
+        const image = new Image();
+
+        image.onerror = () => {
+          reject(new Error("No se pudo procesar la imagen."));
+        };
+
+        image.onload = () => {
+          const size = 512;
+          const canvas = document.createElement("canvas");
+          canvas.width = size;
+          canvas.height = size;
+
+          const context = canvas.getContext("2d");
+
+          if (!context) {
+            reject(new Error("No se pudo preparar la imagen."));
+            return;
+          }
+
+          const sourceWidth = image.naturalWidth || image.width;
+          const sourceHeight = image.naturalHeight || image.height;
+          const sourceSize = Math.min(sourceWidth, sourceHeight);
+          const sourceX = Math.max(0, (sourceWidth - sourceSize) / 2);
+          const sourceY = Math.max(0, (sourceHeight - sourceSize) / 2);
+
+          context.drawImage(
+            image,
+            sourceX,
+            sourceY,
+            sourceSize,
+            sourceSize,
+            0,
+            0,
+            size,
+            size
+          );
+
+          resolve(canvas.toDataURL("image/jpeg", 0.82));
+        };
+
+        image.src = String(reader.result || "");
+      };
+
+      reader.readAsDataURL(file);
+    });
+
+  const handleProfileImageChange = async (event) => {
+    const file = event?.target?.files?.[0];
+
+    if (!file || profileUploading) return;
+
+    try {
+      setProfileUploading(true);
+      setProfileImageError("");
+
+      if (file.size > 8 * 1024 * 1024) {
+        throw new Error("La imagen no puede superar 8 MB.");
+      }
+
+      const profileImageData = await resizeProfileImage(file);
+      const token = getCaptainToken();
+
+      if (!token) {
+        throw new Error("No hay sesión activa del conductor.");
+      }
+
+      const response = await axios.patch(
+        `${getApiBaseUrl()}/captain/profile-image`,
+        {
+          profileImage: profileImageData,
+        },
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        }
+      );
+
+      const updatedCaptain = response?.data?.captain;
+
+      if (!updatedCaptain?._id) {
+        throw new Error("El servidor no devolvió el perfil actualizado.");
+      }
+
+      setCaptain(updatedCaptain);
+    } catch (error) {
+      console.error("Error actualizando foto de perfil:", error);
+
+      setProfileImageError(
+        error?.response?.data?.message ||
+          error?.message ||
+          "No se pudo actualizar la foto."
+      );
+    } finally {
+      setProfileUploading(false);
+
+      if (profileImageInputRef.current) {
+        profileImageInputRef.current.value = "";
+      }
+    }
   };
 
   const fetchCaptainStats = async () => {
@@ -273,7 +399,7 @@ const CaptainDetails = () => {
     iconClassName = "text-purple-700",
   }) => {
     return (
-      <div className="rounded-[20px] bg-white border border-gray-200 p-3 shadow-sm">
+      <div className="rounded-[20px] bg-[#fbf9ff] border border-purple-100 p-3 shadow-sm">
         <div className="flex items-center justify-between gap-2">
           <div className="w-9 h-9 rounded-2xl bg-purple-50 flex items-center justify-center">
             <i className={`${icon} text-xl ${iconClassName}`}></i>
@@ -304,8 +430,8 @@ const CaptainDetails = () => {
         onClick={onClick}
         className={`rounded-[20px] p-3 text-left shadow-sm active:scale-[0.99] transition border ${
           isDark
-            ? "bg-gray-950 border-gray-900 text-white"
-            : "bg-white border-gray-200 text-gray-950"
+            ? "bg-[linear-gradient(135deg,#111827,#2e1065)] border-purple-950 text-white"
+            : "bg-white border-purple-100 text-gray-950"
         }`}
       >
         <div className="flex items-center gap-3">
@@ -430,47 +556,77 @@ const CaptainDetails = () => {
 
   return (
     <>
-      <div className="px-4">
-        <div className="rounded-[30px] bg-white border border-gray-200 shadow-sm overflow-hidden">
+      <div className="px-4 pb-1">
+        <div className="rounded-[28px] bg-white border border-purple-100 shadow-[0_14px_38px_rgba(76,29,149,0.10)] overflow-hidden">
           <div className="p-4 sm:p-5">
-            <div
-              className="rounded-[26px] p-[1px]"
-              style={{
-                background: PURPLE_GRADIENT,
-              }}
-            >
-              <div className="rounded-[25px] bg-white p-4">
+            <div className="rounded-[26px] overflow-hidden bg-[linear-gradient(135deg,#2e1065_0%,#6d28d9_48%,#a21caf_100%)] relative">
+              <div className="absolute -top-16 -right-10 w-44 h-44 rounded-full bg-white/10 blur-3xl"></div>
+              <div className="absolute -bottom-20 -left-10 w-48 h-48 rounded-full bg-fuchsia-300/15 blur-3xl"></div>
+              <div className="relative p-4 text-white">
                 <div className="flex items-center gap-3">
                   <div className="relative shrink-0">
-                    <img
-                      className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md"
-                      src={profileImage}
-                      alt={displayName}
-                      onError={(e) => {
-                        e.currentTarget.src = DEFAULT_PROFILE_IMAGE;
-                      }}
+                    <button
+                      type="button"
+                      onClick={() => profileImageInputRef.current?.click()}
+                      disabled={profileUploading}
+                      className="relative block rounded-full disabled:opacity-70"
+                      title="Cambiar foto de perfil"
+                      aria-label="Cambiar foto de perfil"
+                    >
+                      <img
+                        className="w-16 h-16 rounded-full object-cover border-4 border-white shadow-md"
+                        src={profileImage}
+                        alt={displayName}
+                        onError={(e) => {
+                          e.currentTarget.src = DEFAULT_PROFILE_IMAGE;
+                        }}
+                      />
+
+                      <span className="absolute -right-1 -bottom-1 w-7 h-7 rounded-full bg-white text-purple-700 border-2 border-purple-200 shadow-md flex items-center justify-center">
+                        <i
+                          className={
+                            profileUploading
+                              ? "ri-loader-4-line animate-spin text-sm"
+                              : "ri-camera-fill text-sm"
+                          }
+                        ></i>
+                      </span>
+                    </button>
+
+                    <input
+                      ref={profileImageInputRef}
+                      type="file"
+                      accept="image/jpeg,image/png,image/webp"
+                      capture="user"
+                      onChange={handleProfileImageChange}
+                      className="hidden"
                     />
 
                     <span
-                      className={`absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-white ${
+                      className={`absolute -top-1 -right-1 w-5 h-5 rounded-full border-2 border-white ${
                         isOnline ? "bg-emerald-500" : "bg-gray-400"
                       }`}
                     ></span>
                   </div>
 
                   <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-black text-purple-700 uppercase tracking-wide">
+                    <p className="text-[10px] font-black text-white/65 uppercase tracking-[0.16em]">
                       Transportador Central Go
                     </p>
 
-                    <h3 className="text-[20px] font-black text-gray-950 capitalize leading-tight mt-1 truncate">
+                    <h3 className="text-[22px] font-black text-white capitalize leading-tight mt-1 truncate">
                       {displayName}
                     </h3>
 
                     <div className="mt-2 flex items-center gap-2 flex-wrap">
-                      <div className="inline-flex items-center gap-1 rounded-full bg-amber-50 text-amber-700 px-3 py-1.5 text-xs font-black">
+                      <div className="inline-flex items-center gap-1 rounded-full bg-white/12 border border-white/15 text-amber-200 px-3 py-1.5 text-xs font-black">
                         <i className="ri-star-fill"></i>
                         <span>{rating.toFixed(1)}</span>
+                        <span className="text-white/60 font-bold">
+                          {ratingCount > 0
+                            ? `(${ratingCount})`
+                            : "(Nuevo)"}
+                        </span>
                       </div>
 
                       <div
@@ -486,10 +642,21 @@ const CaptainDetails = () => {
                     </div>
                   </div>
                 </div>
+                <div className="mt-3 rounded-2xl bg-white/10 border border-white/10 px-3 py-2">
+                  <p className="text-[11px] text-white/85 font-bold flex items-center gap-2">
+                    <i className="ri-camera-line"></i>
+                    Toca tu foto para cambiarla
+                  </p>
+                  {profileImageError ? (
+                    <p className="text-[10px] text-red-100 mt-1">
+                      {profileImageError}
+                    </p>
+                  ) : null}
+                </div>
 
                 {!hasAnyStats && (
                   <div
-                    className="mt-4 rounded-2xl border border-purple-100 px-4 py-3"
+                    className="mt-4 rounded-2xl border border-white/10 px-4 py-3 bg-white/10"
                     style={{
                       background: PURPLE_SOFT,
                     }}
@@ -500,10 +667,10 @@ const CaptainDetails = () => {
                       </div>
 
                       <div>
-                        <p className="text-sm font-black text-gray-950">
+                        <p className="text-sm font-black text-white">
                           Sin servicios finalizados hoy
                         </p>
-                        <p className="text-xs text-gray-600 mt-1 leading-5">
+                        <p className="text-xs text-white/70 mt-1 leading-5">
                           Cuando finalices viajes, aquí aparecerán kilómetros,
                           ganancias y resumen real.
                         </p>
@@ -520,7 +687,45 @@ const CaptainDetails = () => {
               </div>
             </div>
 
-            <div className="mt-4 grid grid-cols-3 gap-3">
+            <div className="mt-3 rounded-[22px] border border-amber-100 bg-amber-50 px-4 py-3">
+              <div className="flex items-center gap-3">
+                <div className="w-11 h-11 rounded-2xl bg-white text-amber-500 flex items-center justify-center shadow-sm shrink-0">
+                  <i className="ri-star-fill text-2xl"></i>
+                </div>
+
+                <div className="min-w-0 flex-1">
+                  <p className="text-[10px] uppercase tracking-wide font-black text-amber-700">
+                    Reputación Central GO
+                  </p>
+
+                  <div className="flex items-end gap-2 mt-0.5">
+                    <p className="text-2xl font-black text-gray-950">
+                      {rating.toFixed(1)}
+                    </p>
+                    <p className="text-xs font-bold text-gray-500 pb-1">
+                      {ratingCount > 0
+                        ? `${ratingCount} calificación${ratingCount === 1 ? "" : "es"}`
+                        : "Sin calificaciones todavía"}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-0.5 mt-1">
+                    {[1, 2, 3, 4, 5].map((star) => (
+                      <i
+                        key={star}
+                        className={
+                          star <= Math.round(rating)
+                            ? "ri-star-fill text-amber-400"
+                            : "ri-star-line text-amber-300"
+                        }
+                      ></i>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
               <MetricCard
                 icon="ri-time-line"
                 label="Online"
@@ -547,10 +752,10 @@ const CaptainDetails = () => {
               <div className="flex items-center justify-between gap-3 mb-3">
                 <div>
                   <h4 className="text-base font-black text-gray-950">
-                    Menú del conductor
+                    Tu operación
                   </h4>
                   <p className="text-xs text-gray-500">
-                    Operación, rendimiento e historial.
+                    Controla tu actividad sin salir del panel.
                   </p>
                 </div>
 

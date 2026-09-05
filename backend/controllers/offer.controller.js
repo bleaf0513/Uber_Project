@@ -112,6 +112,9 @@ const runNotification = (label, callback) => {
     });
 };
 
+const isAcceptedBidChatOpen = (bid) => Boolean(bid && bid.status === "accepted" && bid.driver && bid.customer);
+const serializeBidChat = (bid) => (Array.isArray(bid?.chatMessages) ? bid.chatMessages : []).map((m) => ({ _id:m._id, senderType:m.senderType, sender:m.sender, message:m.message, createdAt:m.createdAt }));
+
 /* =========================================================
  * CAMPOS CALCULADOS
  * ========================================================= */
@@ -508,6 +511,8 @@ const acceptTraditionalBid = async (bid) => {
     }
 
     bid.status = "accepted";
+        bid.chatEnabled = true;
+        bid.chatEnabledAt = bid.chatEnabledAt || new Date();
     await bid.save();
 
     const availableAfter =
@@ -981,22 +986,6 @@ module.exports.createGoodsOffer = async (
                 notes:
                     req.body.notes ||
                     "",
-
-                photos:
-                    Array.isArray(
-                        req.body.photos
-                    )
-                        ? req.body.photos
-                              .filter(
-                                  (photo) =>
-                                      typeof photo ===
-                                          "string" &&
-                                      photo.trim()
-                                          .length >
-                                          0
-                              )
-                              .slice(0, 4)
-                        : [],
 
                 isNegotiable:
                     typeof req.body
@@ -2009,6 +1998,8 @@ module.exports.respondToSpaceBid = async (
             }
 
             bid.status = "accepted";
+        bid.chatEnabled = true;
+        bid.chatEnabledAt = bid.chatEnabledAt || new Date();
             await bid.save();
 
             const updatedListing =
@@ -2303,6 +2294,12 @@ async (req, res) => {
 
             bid.status =
                 "accepted";
+
+            // Al aceptar la contraoferta de una carga,
+            // habilitamos inmediatamente el chat privado.
+            bid.chatEnabled = true;
+            bid.chatEnabledAt =
+                bid.chatEnabledAt || new Date();
 
             await bid.save();
 
@@ -3232,4 +3229,36 @@ module.exports.getMySentBids = async (
                 "Error consultando solicitudes.",
         });
     }
+};
+
+/* CHAT PRIVADO: solo ofertas aceptadas (goods / space / seat) */
+module.exports.getAcceptedBidChat = async (req, res) => {
+  try {
+    const bid = await OfferBid.findById(req.params.bidId).populate("customer", "fullname email socketId").populate("driver", "fullname email socketId vehicle").populate("goodsOffer").populate("spaceOffer").populate("seatOffer");
+    if (!bid) return res.status(404).json({message:"Oferta no encontrada."});
+    const uid=req.user?._id?String(req.user._id):"", cid=req.captain?._id?String(req.captain._id):"";
+    const ok=(uid && String(bid.customer?._id||bid.customer)===uid)||(cid && String(bid.driver?._id||bid.driver)===cid);
+    if (!ok) return res.status(403).json({message:"No tienes autorización para ver este chat."});
+    if (!isAcceptedBidChatOpen(bid)) return res.status(403).json({message:"El chat se habilita cuando la oferta queda aceptada.",chatEnabled:false});
+    if (!bid.chatEnabled) { bid.chatEnabled=true; bid.chatEnabledAt=bid.chatEnabledAt||new Date(); await bid.save(); }
+    return res.json({chatEnabled:true,bidId:bid._id,listingType:bid.listingType,customer:bid.customer,driver:bid.driver,messages:serializeBidChat(bid)});
+  } catch(e){ console.error('[getAcceptedBidChat]',e); return res.status(500).json({message:e?.message||"No se pudo cargar el chat."}); }
+};
+module.exports.sendAcceptedBidChatMessage = async (req,res) => {
+  try {
+    const clean=String(req.body.message||"").trim();
+    if(!clean) return res.status(400).json({message:"Escribe un mensaje."});
+    if(clean.length > 1000) return res.status(400).json({message:"El mensaje no puede superar 1000 caracteres."});
+    const bid=await OfferBid.findById(req.body.bidId).populate("customer","fullname email socketId").populate("driver","fullname email socketId vehicle");
+    if(!bid) return res.status(404).json({message:"Oferta no encontrada."});
+    const uid=req.user?._id?String(req.user._id):"", cid=req.captain?._id?String(req.captain._id):""; let senderType="",sender=null,socketId="";
+    if(uid&&String(bid.customer?._id||bid.customer)===uid){senderType="user";sender=req.user._id;socketId=bid.driver?.socketId||"";}
+    else if(cid&&String(bid.driver?._id||bid.driver)===cid){senderType="captain";sender=req.captain._id;socketId=bid.customer?.socketId||"";}
+    else return res.status(403).json({message:"No tienes autorización para escribir en este chat."});
+    if(!isAcceptedBidChatOpen(bid)) return res.status(403).json({message:"El chat se habilita cuando la oferta queda aceptada."});
+    bid.chatEnabled=true; bid.chatEnabledAt=bid.chatEnabledAt||new Date(); bid.chatMessages.push({senderType,sender,message:clean,createdAt:new Date()}); await bid.save();
+    const m=bid.chatMessages[bid.chatMessages.length-1]; const payload={bidId:bid._id,listingType:bid.listingType,message:{_id:m._id,senderType:m.senderType,sender:m.sender,message:m.message,createdAt:m.createdAt}};
+    if(socketId) sendMessageToSocketId(socketId,{event:"accepted-bid-chat-message",data:payload});
+    return res.status(201).json({message:payload.message,chatEnabled:true});
+  } catch(e){ console.error('[sendAcceptedBidChatMessage]',e); return res.status(500).json({message:e?.message||"No se pudo enviar el mensaje."}); }
 };

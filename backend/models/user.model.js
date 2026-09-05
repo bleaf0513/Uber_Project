@@ -89,6 +89,27 @@ const userSchema = new mongoose.Schema(
         },
 
         /*
+         * Reputación del usuario dentro de Central GO.
+         * El promedio se recalcula únicamente con servicios completados.
+         */
+        rating: {
+            type: Number,
+            default: 5,
+            min: 0,
+            max: 5,
+        },
+
+        /*
+         * Número real de calificaciones recibidas.
+         * Si es 0, el frontend puede mostrar "Nuevo" en vez de fingir historial.
+         */
+        ratingCount: {
+            type: Number,
+            default: 0,
+            min: 0,
+        },
+
+        /*
          * Tokens de notificaciones push.
          * Aquí guardamos los dispositivos/navegadores del usuario
          * para poder avisarle aunque cierre la app.
@@ -127,6 +148,7 @@ userSchema.statics.hashPassword = async function (password) {
 
 userSchema.index({ email: 1 });
 userSchema.index({ "fcmTokens.token": 1 });
+userSchema.index({ rating: -1, ratingCount: -1 });
 
 const userModel = mongoose.model("user", userSchema);
 

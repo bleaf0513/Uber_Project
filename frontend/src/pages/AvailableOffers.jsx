@@ -290,6 +290,7 @@ const AvailableOffers = () => {
   const [activeTab, setActiveTab] = useState("goods");
 
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [goodsOffers, setGoodsOffers] = useState([]);
   const [spaceOffers, setSpaceOffers] = useState([]);
   const [seatOffers, setSeatOffers] = useState([]);
@@ -333,9 +334,14 @@ const AvailableOffers = () => {
     [goodsOffers, spaceOffers, seatOffers]
   );
 
-  const fetchOffers = async () => {
+  const fetchOffers = async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (silent) {
+        setRefreshing(true);
+      } else {
+        setLoading(true);
+      }
+
       setPageError("");
 
       const headers = token
@@ -519,7 +525,11 @@ const AvailableOffers = () => {
         "No se pudo conectar con el Marketplace. Intenta actualizar nuevamente."
       );
     } finally {
-      setLoading(false);
+      if (silent) {
+        setRefreshing(false);
+      } else {
+        setLoading(false);
+      }
     }
   };
 
@@ -531,7 +541,7 @@ const AvailableOffers = () => {
     if (!token) return undefined;
 
     const intervalId = window.setInterval(() => {
-      fetchOffers();
+      fetchOffers({ silent: true });
     }, 10000);
 
     return () => {
@@ -1713,11 +1723,16 @@ const AvailableOffers = () => {
 
             <button
               type="button"
-              onClick={fetchOffers}
-              className="w-10 h-10 rounded-2xl bg-gray-100 border border-gray-200 flex items-center justify-center"
+              onClick={() => fetchOffers({ silent: true })}
+              disabled={refreshing}
+              className="w-10 h-10 rounded-2xl bg-gray-100 border border-gray-200 flex items-center justify-center disabled:opacity-60"
               aria-label="Actualizar"
             >
-              <i className="ri-refresh-line text-lg" />
+              <i
+                className={`ri-refresh-line text-lg ${
+                  refreshing ? "animate-spin" : ""
+                }`}
+              />
             </button>
           </div>
         </div>

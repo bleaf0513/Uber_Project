@@ -172,6 +172,13 @@ router.post(
 );
 
 router.post(
+    "/start-scheduled-dispatch",
+    authMiddleware.authCaptain,
+    body("rideId").isMongoId().withMessage("Invalid ride id"),
+    rideController.startScheduledDispatch
+);
+
+router.post(
     "/start-ride",
     authMiddleware.authCaptain,
     body("rideId").isMongoId().withMessage("Invalid ride id"),

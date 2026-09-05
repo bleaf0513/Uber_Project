@@ -4,6 +4,7 @@ const mapService = require("../services/maps.service");
 const { sendMessageToSocketId } = require("../socket");
 const rideModel = require("../models/ride.model");
 const captainModel = require("../models/captain.model");
+const userModel = require("../models/user.model");
 const { mapsErrorStatus } = require("../utils/mapsHttpStatus");
 const walletService = require("../services/wallet.service");
 
@@ -163,6 +164,134 @@ function cleanComment(value) {
     return String(value || "").trim().slice(0, 500);
 }
 
+async function recalculateCaptainRating(captainId) {
+    if (!captainId) {
+        return {
+            rating: 5,
+            ratingCount: 0,
+        };
+    }
+
+    const result = await rideModel.aggregate([
+        {
+            $match: {
+                captain: captainId,
+                status: "completed",
+                cancelledAt: null,
+                "userRatingToCaptain.rating": {
+                    $gte: 1,
+                    $lte: 5,
+                },
+            },
+        },
+        {
+            $group: {
+                _id: "$captain",
+                rating: {
+                    $avg: "$userRatingToCaptain.rating",
+                },
+                ratingCount: {
+                    $sum: 1,
+                },
+            },
+        },
+    ]);
+
+    const summary = result[0] || {
+        rating: 5,
+        ratingCount: 0,
+    };
+
+    const finalRating =
+        summary.ratingCount > 0
+            ? Number(Number(summary.rating).toFixed(2))
+            : 5;
+
+    const finalCount = Number(summary.ratingCount || 0);
+
+    await captainModel.findByIdAndUpdate(
+        captainId,
+        {
+            $set: {
+                rating: finalRating,
+                ratingCount: finalCount,
+            },
+        },
+        {
+            runValidators: true,
+        }
+    );
+
+    return {
+        rating: finalRating,
+        ratingCount: finalCount,
+    };
+}
+
+async function recalculateUserRating(userId) {
+    if (!userId) {
+        return {
+            rating: 5,
+            ratingCount: 0,
+        };
+    }
+
+    const result = await rideModel.aggregate([
+        {
+            $match: {
+                user: userId,
+                status: "completed",
+                cancelledAt: null,
+                "captainRatingToUser.rating": {
+                    $gte: 1,
+                    $lte: 5,
+                },
+            },
+        },
+        {
+            $group: {
+                _id: "$user",
+                rating: {
+                    $avg: "$captainRatingToUser.rating",
+                },
+                ratingCount: {
+                    $sum: 1,
+                },
+            },
+        },
+    ]);
+
+    const summary = result[0] || {
+        rating: 5,
+        ratingCount: 0,
+    };
+
+    const finalRating =
+        summary.ratingCount > 0
+            ? Number(Number(summary.rating).toFixed(2))
+            : 5;
+
+    const finalCount = Number(summary.ratingCount || 0);
+
+    await userModel.findByIdAndUpdate(
+        userId,
+        {
+            $set: {
+                rating: finalRating,
+                ratingCount: finalCount,
+            },
+        },
+        {
+            runValidators: true,
+        }
+    );
+
+    return {
+        rating: finalRating,
+        ratingCount: finalCount,
+    };
+}
+
 function parseRouteStops(rawStops) {
     if (!rawStops) return [];
 
@@ -190,7 +319,18 @@ module.exports.createRide = async (req, res) => {
         return res.status(400).json({ errors: errors.array() });
     }
 
-    const { pickup, destination, routeStops, vehicle, offeredFare } = req.body;
+    const {
+        pickup,
+        destination,
+        routeStops,
+        vehicle,
+        offeredFare,
+        serviceType = "local_delivery",
+        senderType = "personal",
+        cargo = {},
+        serviceTiming = "now",
+        schedule = {},
+    } = req.body;
 
     try {
         const ACTIVE_USER_RIDE_MAX_AGE_HOURS = 6;
@@ -198,23 +338,48 @@ module.exports.createRide = async (req, res) => {
             Date.now() - ACTIVE_USER_RIDE_MAX_AGE_HOURS * 60 * 60 * 1000
         );
 
+        const requestedTiming =
+            serviceTiming === "scheduled" ? "scheduled" : "now";
+
+        /*
+         * CENTRAL GO:
+         * - Un usuario puede dejar varios domicilios PROGRAMADOS pendientes.
+         * - Un programado pendiente tampoco bloquea un domicilio "Ahora".
+         * - Sí bloqueamos si ya existe un servicio físicamente asignado/en curso.
+         * - Para "Ahora", evitamos duplicar otra solicitud inmediata pendiente.
+         */
+        const blockingRideCondition =
+            requestedTiming === "scheduled"
+                ? {
+                      status: {
+                          $in: ["accepted", "arrived", "ongoing"],
+                      },
+                  }
+                : {
+                      $or: [
+                          {
+                              status: {
+                                  $in: ["accepted", "arrived", "ongoing"],
+                              },
+                          },
+                          {
+                              status: {
+                                  $in: ["pending", "negotiating"],
+                              },
+                              serviceTiming: { $ne: "scheduled" },
+                          },
+                      ],
+                  };
+
         let existingActiveRide = await rideModel
             .findOne({
                 user: req.user._id,
-                status: {
-                    $in: [
-                        "pending",
-                        "negotiating",
-                        "accepted",
-                        "arrived",
-                        "ongoing",
-                    ],
-                },
                 cancelledAt: null,
                 cancelledBy: null,
                 updatedAt: {
                     $gte: activeSince,
                 },
+                ...blockingRideCondition,
             })
             .sort({ updatedAt: -1 })
             .populate("user")
@@ -254,6 +419,126 @@ module.exports.createRide = async (req, res) => {
             }
         }
 
+        /*
+         * Central GO - datos del domicilio/carga local.
+         * Se normalizan antes de enviarlos al servicio para evitar
+         * guardar valores inesperados desde el frontend.
+         */
+        const allowedSenderTypes = ["personal", "business"];
+        const allowedCargoCategories = [
+            "market",
+            "boxes",
+            "packages",
+            "sacks",
+            "baskets",
+            "general_merchandise",
+            "other",
+        ];
+        const allowedWeightUnits = ["kg", "lb"];
+
+        const normalizedSenderType = allowedSenderTypes.includes(senderType)
+            ? senderType
+            : "personal";
+
+        const normalizedCargoCategory = allowedCargoCategories.includes(cargo?.category)
+            ? cargo.category
+            : "packages";
+
+        const normalizedQuantity = Math.max(
+            1,
+            Math.floor(Number(cargo?.quantity) || 1)
+        );
+
+        const normalizedWeightUnknown = Boolean(cargo?.weightUnknown);
+
+        const rawWeight = Number(cargo?.approximateWeight);
+        const normalizedApproximateWeight =
+            normalizedWeightUnknown ||
+            !Number.isFinite(rawWeight) ||
+            rawWeight < 0
+                ? null
+                : rawWeight;
+
+        const normalizedWeightUnit = allowedWeightUnits.includes(cargo?.weightUnit)
+            ? cargo.weightUnit
+            : "kg";
+
+        const normalizedDescription = String(cargo?.description || "")
+            .trim()
+            .slice(0, 300);
+
+        /*
+         * Central GO - programación del servicio.
+         * "now" conserva exactamente el flujo actual.
+         * "scheduled" permite publicar hoy un servicio para una fecha futura.
+         */
+        const normalizedServiceTiming =
+            serviceTiming === "scheduled" ? "scheduled" : "now";
+
+        let normalizedSchedule = {
+            pickupStartAt: null,
+            pickupEndAt: null,
+            timezone: "America/Bogota",
+            notes: "",
+        };
+
+        if (normalizedServiceTiming === "scheduled") {
+            const pickupStartAt = schedule?.pickupStartAt
+                ? new Date(schedule.pickupStartAt)
+                : null;
+
+            const pickupEndAt = schedule?.pickupEndAt
+                ? new Date(schedule.pickupEndAt)
+                : null;
+
+            if (
+                !pickupStartAt ||
+                Number.isNaN(pickupStartAt.getTime())
+            ) {
+                return res.status(400).json({
+                    message:
+                        "Debes seleccionar una fecha y hora válidas para la recogida programada.",
+                    code: "INVALID_SCHEDULE_START",
+                });
+            }
+
+            if (pickupStartAt.getTime() <= Date.now()) {
+                return res.status(400).json({
+                    message:
+                        "La fecha programada debe ser posterior a la hora actual.",
+                    code: "SCHEDULE_MUST_BE_FUTURE",
+                });
+            }
+
+            if (
+                pickupEndAt &&
+                !Number.isNaN(pickupEndAt.getTime()) &&
+                pickupEndAt.getTime() <= pickupStartAt.getTime()
+            ) {
+                return res.status(400).json({
+                    message:
+                        "La hora final de recogida debe ser posterior a la hora inicial.",
+                    code: "INVALID_SCHEDULE_END",
+                });
+            }
+
+            normalizedSchedule = {
+                pickupStartAt,
+                pickupEndAt:
+                    pickupEndAt && !Number.isNaN(pickupEndAt.getTime())
+                        ? pickupEndAt
+                        : null,
+                timezone: String(
+                    schedule?.timezone || "America/Bogota"
+                )
+                    .trim()
+                    .slice(0, 100),
+                notes: String(schedule?.notes || "")
+                    .trim()
+                    .slice(0, 300),
+            };
+        }
+
         const ride = await rideService.createRide({
             user: req.user,
             pickup,
@@ -261,6 +546,25 @@ module.exports.createRide = async (req, res) => {
             routeStops,
             vehicle,
             offeredFare,
+
+            serviceType:
+                serviceType === "local_delivery"
+                    ? serviceType
+                    : "local_delivery",
+
+            senderType: normalizedSenderType,
+
+            serviceTiming: normalizedServiceTiming,
+            schedule: normalizedSchedule,
+
+            cargo: {
+                category: normalizedCargoCategory,
+                quantity: normalizedQuantity,
+                approximateWeight: normalizedApproximateWeight,
+                weightUnit: normalizedWeightUnit,
+                weightUnknown: normalizedWeightUnknown,
+                description: normalizedDescription,
+            },
         });
 
         await rideModel.updateOne(
@@ -924,6 +1228,7 @@ module.exports.userRespondToCaptainOffer = async (req, res) => {
                     arrivedAtPickupAt: null,
                     userConfirmedAtPickup: false,
                     userConfirmedAtPickupAt: null,
+                    scheduledDispatchStartedAt: null,
                     startedAt: null,
                     completedAt: null,
                     driverOffers: updatedOffers,
@@ -1103,6 +1408,77 @@ module.exports.getAvailableForCaptain = async (req, res) => {
 
         const maxAgeMinutes = 30;
         const createdAfter = new Date(Date.now() - maxAgeMinutes * 60 * 1000);
+        const now = new Date();
+
+        /*
+         * CENTRAL GO - distribución automática de solicitudes:
+         *
+         * HOME:
+         * - "now" se conserva con la ventana actual de 30 minutos.
+         * - "scheduled" solamente permanece en Home durante sus primeros
+         *   5 minutos desde la publicación.
+         *
+         * EXPLORAR CARGAS (?marketplace=1):
+         * - devuelve únicamente servicios "scheduled" que ya cumplieron
+         *   esos 5 minutos y siguen disponibles.
+         *
+         * No se duplica ningún viaje: es el mismo Ride, solo cambia el panel
+         * desde el cual se consulta.
+         */
+        const marketplaceMode =
+            String(req.query?.marketplace || "").trim() === "1";
+
+        const scheduledHomeMinutes = 5;
+        const scheduledHomeCutoff = new Date(
+            Date.now() - scheduledHomeMinutes * 60 * 1000
+        );
+
+        /*
+         * Un domicilio programado NO debe desaparecer apenas se cumple
+         * la hora exacta de recogida.
+         *
+         * Si el usuario no definió pickupEndAt, le damos una ventana de
+         * gracia de 6 horas desde la hora programada para que siga visible
+         * en Explorar cargas mientras continúa pendiente.
+         *
+         * Si sí existe pickupEndAt, esa hora final manda.
+         */
+        const scheduledGraceHours = 6;
+        const scheduledGraceStart = new Date(
+            Date.now() - scheduledGraceHours * 60 * 60 * 1000
+        );
+
+        const scheduledStillValidQuery = {
+            serviceTiming: "scheduled",
+            "schedule.pickupStartAt": { $ne: null },
+            $or: [
+                {
+                    "schedule.pickupEndAt": { $gte: now },
+                },
+                {
+                    "schedule.pickupEndAt": null,
+                    "schedule.pickupStartAt": { $gte: scheduledGraceStart },
+                },
+            ],
+        };
+
+        const panelVisibilityQuery = marketplaceMode
+            ? {
+                  ...scheduledStillValidQuery,
+                  createdAt: { $lte: scheduledHomeCutoff },
+              }
+            : {
+                  $or: [
+                      {
+                          serviceTiming: { $ne: "scheduled" },
+                          createdAt: { $gte: createdAfter },
+                      },
+                      {
+                          ...scheduledStillValidQuery,
+                          createdAt: { $gt: scheduledHomeCutoff },
+                      },
+                  ],
+              };
 
         const openRides = await rideModel
             .find({
@@ -1111,10 +1487,14 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                 captain: null,
                 cancelledAt: null,
                 cancelledBy: null,
-                createdAt: { $gte: createdAfter },
+                ...panelVisibilityQuery,
             })
-            .sort({ createdAt: -1 })
-            .limit(20)
+            .sort({
+                serviceTiming: -1,
+                "schedule.pickupStartAt": 1,
+                createdAt: -1,
+            })
+            .limit(50)
             .populate("user", "fullname email socketId phone")
             .populate("driverOffers.captain", "fullname email vehicle socketId");
 
@@ -1136,7 +1516,35 @@ module.exports.getAvailableForCaptain = async (req, res) => {
                 freshRide.captain ||
                 freshRide.cancelledAt ||
                 freshRide.cancelledBy ||
-                freshRide.createdAt < createdAfter
+                (
+                    freshRide.serviceTiming !== "scheduled" &&
+                    (
+                        marketplaceMode ||
+                        freshRide.createdAt < createdAfter
+                    )
+                ) ||
+                (
+                    freshRide.serviceTiming === "scheduled" &&
+                    !marketplaceMode &&
+                    freshRide.createdAt <= scheduledHomeCutoff
+                ) ||
+                (
+                    freshRide.serviceTiming === "scheduled" &&
+                    marketplaceMode &&
+                    freshRide.createdAt > scheduledHomeCutoff
+                ) ||
+                (
+                    freshRide.serviceTiming === "scheduled" &&
+                    freshRide.schedule?.pickupEndAt &&
+                    new Date(freshRide.schedule.pickupEndAt).getTime() < Date.now()
+                ) ||
+                (
+                    freshRide.serviceTiming === "scheduled" &&
+                    !freshRide.schedule?.pickupEndAt &&
+                    freshRide.schedule?.pickupStartAt &&
+                    new Date(freshRide.schedule.pickupStartAt).getTime() <
+                        scheduledGraceStart.getTime()
+                )
             ) {
                 continue;
             }
@@ -1185,6 +1593,10 @@ module.exports.getAvailableForCaptain = async (req, res) => {
         return res.status(200).json({
             rides: availableRides,
             count: availableRides.length,
+            captainId,
+            panel: marketplaceMode ? "marketplace" : "home",
+            scheduledHomeMinutes,
+            scheduledGraceHours,
             geocodingDisabled: true,
         });
     } catch (err) {
@@ -1652,6 +2064,110 @@ module.exports.userAtPickup = async (req, res) => {
     }
 };
 
+module.exports.startScheduledDispatch = async (req, res) => {
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({ errors: errors.array() });
+    }
+
+    const { rideId } = req.body;
+
+    try {
+        const ride = await rideModel
+            .findOne({
+                _id: rideId,
+                captain: req.captain._id,
+                serviceTiming: "scheduled",
+                status: "accepted",
+                cancelledAt: null,
+                cancelledBy: null,
+            })
+            .populate("user")
+            .populate("captain");
+
+        if (!ride) {
+            return res.status(404).json({
+                message:
+                    "No se encontró un domicilio programado asignado a este conductor.",
+            });
+        }
+
+        if (ride.scheduledDispatchStartedAt) {
+            return res.status(200).json({
+                message: "El domicilio ya había sido iniciado.",
+                ride,
+            });
+        }
+
+        const updatedRide = await rideModel
+            .findOneAndUpdate(
+                {
+                    _id: rideId,
+                    captain: req.captain._id,
+                    serviceTiming: "scheduled",
+                    status: "accepted",
+                    scheduledDispatchStartedAt: null,
+                    cancelledAt: null,
+                    cancelledBy: null,
+                },
+                {
+                    $set: {
+                        scheduledDispatchStartedAt: new Date(),
+                    },
+                },
+                { new: true }
+            )
+            .populate("user")
+            .populate("captain");
+
+        if (!updatedRide) {
+            return res.status(409).json({
+                message:
+                    "El estado del domicilio cambió antes de poder iniciarlo.",
+            });
+        }
+
+        const payload = {
+            rideId: updatedRide._id,
+            message: "El conductor inició el domicilio programado.",
+            ride: updatedRide,
+        };
+
+        if (updatedRide.user?.socketId) {
+            sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "scheduled-dispatch-started",
+                data: payload,
+            });
+
+            sendMessageToSocketId(updatedRide.user.socketId, {
+                event: "ride-updated",
+                data: updatedRide,
+            });
+        }
+
+        if (updatedRide.captain?.socketId) {
+            sendMessageToSocketId(updatedRide.captain.socketId, {
+                event: "ride-updated",
+                data: updatedRide,
+            });
+        }
+
+        return res.status(200).json({
+            message: "Domicilio iniciado. Ya puedes dirigirte a la recogida.",
+            ride: updatedRide,
+        });
+    } catch (err) {
+        console.error("[startScheduledDispatch] error:", err);
+
+        return res.status(500).json({
+            message:
+                err.message ||
+                "Error iniciando el domicilio programado.",
+        });
+    }
+};
+
 module.exports.startRide = async (req, res) => {
     const errors = validationResult(req);
 
@@ -1833,13 +2349,24 @@ module.exports.rateCaptain = async (req, res) => {
                 user: req.user._id,
                 status: "completed",
                 cancelledAt: null,
+                captain: { $ne: null },
             })
-            .populate("user", "fullname email socketId")
-            .populate("captain", "fullname email socketId");
+            .populate("user", "fullname email socketId rating ratingCount")
+            .populate(
+                "captain",
+                "fullname email socketId rating ratingCount profileImage vehicle"
+            );
 
         if (!ride) {
             return res.status(404).json({
-                message: "Viaje no encontrado o aún no está finalizado.",
+                message:
+                    "Domicilio no encontrado, cancelado o aún no está finalizado.",
+            });
+        }
+
+        if (String(ride.user?._id) === String(ride.captain?._id)) {
+            return res.status(400).json({
+                message: "No puedes calificarte a ti mismo.",
             });
         }
 
@@ -1857,10 +2384,17 @@ module.exports.rateCaptain = async (req, res) => {
 
         await ride.save();
 
+        const captainSummary = await recalculateCaptainRating(
+            ride.captain?._id || ride.captain
+        );
+
         const updatedRide = await rideModel
             .findById(rideId)
-            .populate("user")
-            .populate("captain");
+            .populate("user", "fullname email socketId rating ratingCount")
+            .populate(
+                "captain",
+                "fullname email socketId rating ratingCount profileImage vehicle"
+            );
 
         emitToCaptain(updatedRide.captain, {
             event: "captain-rated",
@@ -1868,12 +2402,17 @@ module.exports.rateCaptain = async (req, res) => {
                 rideId: updatedRide._id,
                 rating: safeRating,
                 comment: cleanComment(comment),
+                captainRating: captainSummary.rating,
+                captainRatingCount: captainSummary.ratingCount,
                 ride: updatedRide,
             },
         });
 
         return res.status(200).json({
             message: "Calificación enviada correctamente.",
+            rating: safeRating,
+            captainRating: captainSummary.rating,
+            captainRatingCount: captainSummary.ratingCount,
             ride: updatedRide,
         });
     } catch (err) {
@@ -1909,13 +2448,24 @@ module.exports.rateUser = async (req, res) => {
                 captain: req.captain._id,
                 status: "completed",
                 cancelledAt: null,
+                user: { $ne: null },
             })
-            .populate("user", "fullname email socketId")
-            .populate("captain", "fullname email socketId");
+            .populate("user", "fullname email socketId rating ratingCount")
+            .populate(
+                "captain",
+                "fullname email socketId rating ratingCount profileImage vehicle"
+            );
 
         if (!ride) {
             return res.status(404).json({
-                message: "Viaje no encontrado o aún no está finalizado.",
+                message:
+                    "Domicilio no encontrado, cancelado o aún no está finalizado.",
+            });
+        }
+
+        if (String(ride.user?._id) === String(ride.captain?._id)) {
+            return res.status(400).json({
+                message: "No puedes calificarte a ti mismo.",
             });
         }
 
@@ -1933,10 +2483,17 @@ module.exports.rateUser = async (req, res) => {
 
         await ride.save();
 
+        const userSummary = await recalculateUserRating(
+            ride.user?._id || ride.user
+        );
+
         const updatedRide = await rideModel
             .findById(rideId)
-            .populate("user")
-            .populate("captain");
+            .populate("user", "fullname email socketId rating ratingCount")
+            .populate(
+                "captain",
+                "fullname email socketId rating ratingCount profileImage vehicle"
+            );
 
         emitToUser(updatedRide.user, {
             event: "user-rated",
@@ -1944,12 +2501,17 @@ module.exports.rateUser = async (req, res) => {
                 rideId: updatedRide._id,
                 rating: safeRating,
                 comment: cleanComment(comment),
+                userRating: userSummary.rating,
+                userRatingCount: userSummary.ratingCount,
                 ride: updatedRide,
             },
         });
 
         return res.status(200).json({
             message: "Calificación enviada correctamente.",
+            rating: safeRating,
+            userRating: userSummary.rating,
+            userRatingCount: userSummary.ratingCount,
             ride: updatedRide,
         });
     } catch (err) {

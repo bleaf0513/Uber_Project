@@ -211,6 +211,18 @@ router.get(
     captainController.getCaptainProfile
 );
 
+router.patch(
+    "/profile-image",
+    authMiddleware.authCaptain,
+    [
+        body("profileImage")
+            .isString()
+            .notEmpty()
+            .withMessage("La imagen de perfil es obligatoria"),
+    ],
+    captainController.updateCaptainProfileImage
+);
+
 router.get(
     "/logout",
     authMiddleware.authCaptain,
